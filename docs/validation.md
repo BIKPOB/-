@@ -1,48 +1,31 @@
-# Проверка поставки — 2026-09-19
+# Проверка поставки — 2026-10-02
 
-| Проверка | Фактический результат |
+Android APK 0.2.0 успешно собран в GitHub Actions:
+https://github.com/BIKPOB/-/actions/runs/37057875626
+
+Исходный коммит: `1b30e5fb9d1301b001b479dfd9021d9b47f847c3`.
+
+| Проверка | Результат |
 |---|---|
-| Python catalog tests | **7 passed**; включая локальный HTTP-сервер, TTL и восстановление кэша |
-| Синтаксис Dart | **14 файлов**, tree-sitter-dart: 0 syntax errors |
-| Android manifest | XML parse выполнен |
-| pubspec / Compose / CI | YAML parse выполнен |
-| Python-файлы | compile() выполнен без ошибок |
-| Flutter analyzer / Flutter tests | **Не запускались**: Flutter/Dart SDK не установлены |
-| Dart-тесты в проекте | Написаны 10 тестов, результат выполнения не подтверждён |
-| APK / Windows EXE | **Не собраны** |
-| Docker build / TLS deploy | **Не запускались** |
-| VPN Gate live feed из контейнера | HTTPS-загрузка завершилась Proxy CONNECT timeout |
-| Подключение OpenVPN и внешний IP | **Не проверены** на Windows/Android |
+| Python catalog tests | 7 passed |
+| flutter analyze | No issues found |
+| Flutter tests | 10 passed |
+| Android release APK | Успешно собран, 29 179 537 байт |
+| Подпись APK | apksigner verify успешно; v2, Android Debug |
+| Android package | app.quietvpn.quiet_vpn, versionName 0.2.0, versionCode 2 |
+| SDK | min 26 (Android 8.0), target 35 |
+| Flutter native libraries | ARM32 и ARM64 присутствуют |
+| Целостность | ZIP CRC и SHA-256 проверены после скачивания |
+| Windows EXE | Не собран |
+| Подключение OpenVPN, внешний IP, DNS/IPv6 | Не проверены на устройстве |
 
-Синтаксический разбор не проверяет Dart-типы, разрешение пакетов, API плагинов,
-Gradle/NDK, Windows-драйверы или поведение OS VPN. Он не заменяет flutter analyze,
-flutter test и нативную сборку.
+SHA-256 APK:
+`4ebcd1911882d91ea9bfcfbdac8e1c34c1ed2bb6b0cfbe54d9fd762f19e1a698`
 
-Официальные страницы VPN Gate, VPNBook, VPN Jantit, Flutter и плагинов прочитаны
-через веб-поиск. Наличие страницы с каталогом не считается успешной загрузкой
-профиля из приложения или успешным VPN-подключением.
+Это тестовая поставка с debug-сертификатом, не production-подпись для магазина.
+Перед публикацией нужны постоянный ключ подписи и проверка поддержки устройств
+с 16 КБ memory pages.
 
-Загрузка Dart SDK для более глубокой локальной проверки также завершилась Proxy
-CONNECT timeout. Установленные только для синтаксической проверки Python-пакеты
-не включены в пользовательский архив.
-
-## Написанные Flutter-тесты
-
-`test/core_test.dart`: запрет скриптов/внешних файлов; inline-блоки; TLS-role и
-маршрут по умолчанию; native management state; CSV; private IP; параллелизм;
-честный статус UDP без TCP latency.
-
-`test/view_model_test.dart`: повторное подключение во время native start;
-сериализация cleanup при native error, пришедшей во время запуска.
-
-## Что нужно для подтверждения готовой сборки
-
-1. Запустить tools/bootstrap.py на установленном Flutter 3.32.8.
-2. Выполнить flutter analyze и flutter test; устранить возможные несовместимости
-   плагинов/SDK, которые не выявляются синтаксическим разбором.
-3. Собрать Android APK и Windows приложение на соответствующих toolchains.
-4. Проверить реальные TCP/UDP OpenVPN-профили, сертификаты, permission, маршруты,
-   внешний IP, DNS/IPv6, смену сети и поведение в фоне.
-
-В проект не включены фиктивные «работающие серверы». Адреса 8.8.8.8/1.1.1.1
-используются только как синтетические данные парсерных тестов, не как VPN-реле.
+На Android ещё нужно проверить реальные TCP/UDP профили, VPN permission,
+маршруты, внешний IP, DNS/IPv6, смену сети и работу в фоне.
+Успешная сборка не подтверждает доступность публичных серверов.
