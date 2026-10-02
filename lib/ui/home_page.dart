@@ -3,11 +3,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart' hide ConnectionState;
-import 'package:url_launcher/url_launcher.dart';
 import 'package:window_manager/window_manager.dart';
 import '../core/models.dart';
 import '../core/profile_policy.dart';
 import '../viewmodels/vpn_view_model.dart';
+import 'catalog_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage(this.vm, {super.key});
@@ -110,11 +110,6 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
       if (auth != null) await vm.store.saveCredentials(server.id, auth);
     } catch (error) { _error(error); }
   }
-  Future<void> _open(String address) async {
-    try {
-      if (!await launchUrl(Uri.parse(address), mode: LaunchMode.externalApplication)) throw StateError('Browser unavailable');
-    } catch (error) { _error(error); }
-  }
   @override Widget build(BuildContext context) => ListenableBuilder(listenable: vm, builder: (context, _) {
     final countries = vm.servers.map((s) => s.country).toSet().toList()..sort();
     final items = vm.filtered;
@@ -123,6 +118,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
       ConnectionState.disconnected => 'Disconnected', ConnectionState.error => 'Error',
     };
     return Scaffold(appBar: AppBar(title: const Text('Quiet VPN'), actions: [
+      IconButton(tooltip: 'База и протоколы', onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => CatalogPage(vm))), icon: const Icon(Icons.storage_outlined)),
       IconButton(tooltip: 'Обновить каталог', onPressed: vm.refreshing ? null : () => vm.refresh(force: true), icon: const Icon(Icons.refresh)),
       IconButton(tooltip: 'Импорт .ovpn', onPressed: _import, icon: const Icon(Icons.file_open_outlined)),
     ]), body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 820), child: Padding(
@@ -138,8 +134,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
           if (vm.state == ConnectionState.connecting || vm.busy) const LinearProgressIndicator(),
         ]))),
         Wrap(spacing: 8, children: [
-          TextButton(onPressed: () => _open('https://www.vpnbook.com/freevpn/openvpn'), child: const Text('VPNBook')),
-          TextButton(onPressed: () => _open('https://www.vpnjantit.com/free-openvpn'), child: const Text('VPN Jantit')),
+          TextButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => CatalogPage(vm))), icon: const Icon(Icons.storage_outlined), label: const Text('База и протоколы')),
           TextButton(onPressed: vm.selected == null ? null : _editAuth, child: const Text('Логин / пароль')),
           if (vm.selected?.source == 'Импорт') TextButton(onPressed: () async {
             try { await vm.removeSelected(); } catch (error) { _error(error); }

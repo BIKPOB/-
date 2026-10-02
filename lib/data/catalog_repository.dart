@@ -88,6 +88,12 @@ class CatalogRepository {
       return CatalogResult(result.servers, date, cached: true, rejected: result.rejected);
     } catch (_) { return null; }
   }
+  Future<int> cacheSize() async => await cacheFile.exists() ? await cacheFile.length() : 0;
+  Future<void> clearCache() async {
+    if (await cacheFile.exists()) await cacheFile.delete();
+    final temporary = File('${cacheFile.path}.tmp');
+    if (await temporary.exists()) await temporary.delete();
+  }
   void dispose() => _http?.close(force: true);
 
   static CatalogResult parseCsv(String body) {

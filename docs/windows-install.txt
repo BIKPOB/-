@@ -1,7 +1,10 @@
-Quiet VPN 0.2.0 — Windows 10/11 x64 test build
+Quiet VPN 0.3.0 — Windows 10/11 x64 test build
 
 1. Extract the entire ZIP to a folder. Keep DLL files and the data folder beside quiet_vpn.exe.
-2. Install official OpenVPN Community for Windows x64, including the Wintun driver:
+2. In the app, open "База и протоколы" and press "Скачать и установить" for OpenVPN.
+   The official MSI is downloaded to an app cache, its publisher signature is verified,
+   then Windows Installer installs the engine and driver. An Internet connection is required.
+   Alternatively, install official OpenVPN Community for Windows x64:
    https://openvpn.net/community/
    OpenVPN Connect is a different client and is not the required runtime.
    The included install-openvpn.ps1 accepts a downloaded MSI and verifies its OpenVPN signature.

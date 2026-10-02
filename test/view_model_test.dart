@@ -36,6 +36,42 @@ class ControlledEngine implements VpnEngine {
 }
 
 void main() {
+  test('clearing catalog cache preserves an active tunnel and pauses refresh', () async {
+    final engine = ControlledEngine();
+    final vm = VpnViewModel(engine, MemoryCatalog(), MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize();
+      final attempt = vm.connect(null);
+      await engine.started.future;
+      engine.release.complete(); await attempt;
+      await vm.clearCatalogCache();
+      expect(vm.servers, isEmpty);
+      expect(vm.autoRefresh, isFalse);
+      expect(vm.activeServer?.id, server.id);
+      expect(vm.canDisconnect, isTrue);
+      expect(engine.disconnects, 0);
+      await vm.refresh(force: true);
+      expect(vm.autoRefresh, isTrue);
+      expect(vm.servers, isNotEmpty);
+      await vm.disconnect();
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+  test('cache deletion is scoped to catalog and temporary cache files', () async {
+    final dir = await Directory.systemTemp.createTemp('quiet-vpn-cache-test-');
+    try {
+      final cache = File('${dir.path}/catalog.json');
+      final retained = File('${dir.path}/keep.txt');
+      await cache.writeAsString('cached');
+      await File('${cache.path}.tmp').writeAsString('partial');
+      await retained.writeAsString('retain');
+      final catalog = CatalogRepository(cache);
+      await catalog.clearCache();
+      expect(await cache.exists(), isFalse);
+      expect(await File('${cache.path}.tmp').exists(), isFalse);
+      expect(await retained.readAsString(), 'retain');
+    } finally { await dir.delete(recursive: true); }
+  });
   test('double connect is dropped while the native start is in progress', () async {
     final engine = ControlledEngine();
     final vm = VpnViewModel(engine, MemoryCatalog(), MemoryProfiles(),

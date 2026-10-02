@@ -25,6 +25,8 @@ class VpnViewModel extends ChangeNotifier {
   String? selectedId, country, message;
   VpnServer? activeServer;
   DateTime? catalogDate;
+  int cacheBytes = 0;
+  bool autoRefresh = true;
   bool cached = false, refreshing = false, busy = false, ready = false;
   bool _foreground = true, _disposed = false, _nativeNeedsStop = false, _stopping = false;
   bool _verifying = false;
@@ -49,7 +51,7 @@ class VpnViewModel extends ChangeNotifier {
     } catch (_) { message = 'Не удалось инициализировать VPN или защищённое хранилище'; state = ConnectionState.error; }
     await refresh();
     _catalogTimer = Timer.periodic(const Duration(minutes: 15), (_) {
-      if (_foreground) unawaited(refresh());
+      if (_foreground && autoRefresh) unawaited(refresh());
     });
     _notify();
   }
@@ -60,12 +62,28 @@ class VpnViewModel extends ChangeNotifier {
       final result = await catalog.load(force: force);
       if (_disposed) return;
       _public = result.servers;
+      cacheBytes = await catalog.cacheSize();
+      autoRefresh = true;
       catalogDate = result.fetchedAt; cached = result.cached;
       if (selected == null && servers.isNotEmpty) selectedId = servers.first.id;
       message = '${result.servers.length} серверов; пропущено несовместимых профилей: ${result.rejected}'
         '${cached ? '. Используется кэш' : ''}';
       _scheduleProbe(immediate: true);
     } catch (_) { message = 'Каталог недоступен. Повторите позже или импортируйте .ovpn.'; }
+    finally { refreshing = false; _notify(); }
+  }
+  Future<void> clearCatalogCache() async {
+    if (refreshing || _disposed) return;
+    refreshing = true; _notify();
+    try {
+      await catalog.clearCache();
+      _probeEpoch++; monitor.cancel(); _poll?.cancel();
+      _public = []; health = {}; cacheBytes = 0; cached = false; catalogDate = null;
+      autoRefresh = false;
+      if (selected == null) selectedId = _imports.isEmpty ? null : _imports.first.id;
+      country = null;
+      message = 'Кэш базы очищен. Нажмите «Скачать базу», чтобы загрузить её снова.';
+    } catch (_) { message = 'Не удалось очистить кэш базы'; }
     finally { refreshing = false; _notify(); }
   }
   void select(String id) { selectedId = id; _notify(); }
