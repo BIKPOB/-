@@ -1,0 +1,4 @@
+{$CATALOG_DOMAIN} {
+    encode gzip
+    reverse_proxy catalog:8080
+}
