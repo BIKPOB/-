@@ -18,8 +18,10 @@ class AndroidEngine implements VpnEngine {
       VPNStage.unknown => null,
       _ => ConnectionState.connecting,
     };
-    if (state != null) _events.add(EngineEvent(state,
-      stage == VPNStage.denied ? 'Разрешение VPN отклонено' : null));
+    if (state != null) {
+      _events.add(EngineEvent(state,
+        stage == VPNStage.denied ? 'Разрешение VPN отклонено' : null));
+    }
   }
   @override Future<void> initialize() async {
     await _native.initialize(localizedDescription: 'Quiet VPN', lastStage: _stage);

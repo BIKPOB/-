@@ -63,8 +63,10 @@ class WindowsEngine implements VpnEngine {
       _out = process.stdout.listen((_) {});
       _err = process.stderr.listen((_) {});
       unawaited(process.exitCode.then((code) {
-        if (epoch == _epoch && !_closing) _emit(EngineEvent(ConnectionState.error,
-          'OpenVPN завершился (код $code). Проверьте права, профиль и драйвер.'));
+        if (epoch == _epoch && !_closing) {
+          _emit(EngineEvent(ConnectionState.error,
+            'OpenVPN завершился (код $code). Проверьте права, профиль и драйвер.'));
+        }
       }));
       Socket? socket;
       for (var i = 0; i < 30; i++) {

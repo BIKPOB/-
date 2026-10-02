@@ -34,8 +34,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
     if (!vm.canDisconnect) await windowManager.destroy();
   }
   void _error(Object error) {
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
-      error is FormatException ? error.message : 'Операция не выполнена')));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+        error is FormatException ? error.message : 'Операция не выполнена')));
+    }
   }
   Future<void> _import() async {
     try {
