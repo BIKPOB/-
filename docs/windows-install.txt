@@ -1,0 +1,17 @@
+Quiet VPN 0.2.0 — Windows 10/11 x64 test build
+
+1. Extract the entire ZIP to a folder. Keep DLL files and the data folder beside quiet_vpn.exe.
+2. Install official OpenVPN Community for Windows x64, including the Wintun driver:
+   https://openvpn.net/community/
+   OpenVPN Connect is a different client and is not the required runtime.
+   The included install-openvpn.ps1 accepts a downloaded MSI and verifies its OpenVPN signature.
+3. Start quiet_vpn.exe and approve the administrator prompt.
+4. Wait for the VPN Gate catalog, select a server and connect.
+
+The application verifies the OpenVPN EXE publisher signature before launching it.
+The Quiet VPN EXE itself is unsigned; no production signing certificate is configured.
+The runtime and driver are separate prerequisites, not included in this ZIP.
+A real VPN connection, routing and leak protection still require device testing.
+Public servers can be unavailable. This build does not implement a full kill switch.
+
+Source: https://github.com/BIKPOB/-

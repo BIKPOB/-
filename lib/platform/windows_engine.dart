@@ -29,12 +29,26 @@ class WindowsEngine implements VpnEngine {
     if (installed.existsSync()) return installed.path;
     throw StateError('Установите OpenVPN Community 2.6+ с драйвером или поставьте runtime рядом с приложением');
   }
+  Future<void> _verifyExecutable(String executable) async {
+    final system = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    final result = await Process.run(
+      '$system/System32/WindowsPowerShell/v1.0/powershell.exe',
+      ['-NoProfile', '-NonInteractive', '-Command',
+        r"$s = Get-AuthenticodeSignature -LiteralPath $env:QUIET_VPN_RUNTIME; "
+        r"if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch '(?i)O=OpenVPN( Inc\.)?(,|$)') { exit 1 }"],
+      environment: {'QUIET_VPN_RUNTIME': executable}, runInShell: false,
+    );
+    if (result.exitCode != 0) {
+      throw StateError('OpenVPN EXE должен иметь действительную подпись OpenVPN');
+    }
+  }
   @override Future<void> initialize() async {
     _emit(const EngineEvent(ConnectionState.disconnected));
   }
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
     if (_process != null) throw StateError('Сначала отключите активный процесс');
     final executable = _executable();
+    await _verifyExecutable(executable);
     _closing = false;
     final epoch = ++_epoch;
     try {

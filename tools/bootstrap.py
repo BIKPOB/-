@@ -7,7 +7,7 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
-parser.add_argument('--platforms', default='android,windows', choices=['android', 'android,windows'])
+parser.add_argument('--platforms', default='android,windows', choices=['android', 'windows', 'android,windows'])
 args = parser.parse_args()
 flutter = shutil.which('flutter')
 if not flutter:
@@ -21,23 +21,24 @@ try:
 finally:
     for path, content in protected.items():
         path.write_bytes(content)
-template = ROOT/'platform_templates/android'
-target = ROOT/'android/app/src/main'
-shutil.copyfile(template/'AndroidManifest.xml', target/'AndroidManifest.xml')
-kotlin = target/'kotlin/app/quietvpn/quiet_vpn'
-kotlin.mkdir(parents=True, exist_ok=True)
-shutil.copyfile(template/'MainActivity.kt', kotlin/'MainActivity.kt')
-build = ROOT/'android/app/build.gradle.kts'
-text = build.read_text()
-text = text.replace('minSdk = flutter.minSdkVersion', 'minSdk = 26')
-text = text.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 35')
-text = text.replace('android {', 'android {\n    packaging { jniLibs { useLegacyPackaging = true } }', 1)
-build.write_text(text)
-root_build = ROOT/'android/build.gradle.kts'
-text = root_build.read_text()
-if 'jitpack.io' not in text:
-    text = text.replace('mavenCentral()', 'mavenCentral()\n        maven { url = uri("https://jitpack.io") }')
-root_build.write_text(text)
+if 'android' in args.platforms:
+    template = ROOT/'platform_templates/android'
+    target = ROOT/'android/app/src/main'
+    shutil.copyfile(template/'AndroidManifest.xml', target/'AndroidManifest.xml')
+    kotlin = target/'kotlin/app/quietvpn/quiet_vpn'
+    kotlin.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(template/'MainActivity.kt', kotlin/'MainActivity.kt')
+    build = ROOT/'android/app/build.gradle.kts'
+    text = build.read_text()
+    text = text.replace('minSdk = flutter.minSdkVersion', 'minSdk = 26')
+    text = text.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 35')
+    text = text.replace('android {', 'android {\n    packaging { jniLibs { useLegacyPackaging = true } }', 1)
+    build.write_text(text)
+    root_build = ROOT/'android/build.gradle.kts'
+    text = root_build.read_text()
+    if 'jitpack.io' not in text:
+        text = text.replace('mavenCentral()', 'mavenCentral()\n        maven { url = uri("https://jitpack.io") }')
+    root_build.write_text(text)
 # Windows UI needs service/driver privileges for this local-process adapter.
 manifest = ROOT/'windows/runner/runner.exe.manifest'
 if 'windows' in args.platforms:
