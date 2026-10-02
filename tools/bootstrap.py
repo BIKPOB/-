@@ -39,16 +39,12 @@ if 'android' in args.platforms:
     if 'jitpack.io' not in text:
         text = text.replace('mavenCentral()', 'mavenCentral()\n        maven { url = uri("https://jitpack.io") }')
     root_build.write_text(text)
-# Windows UI needs service/driver privileges for this local-process adapter.
-manifest = ROOT/'windows/runner/runner.exe.manifest'
+# Set the UAC level through the linker so its generated manifest agrees.
 if 'windows' in args.platforms:
-    text = manifest.read_text()
-    if 'requestedExecutionLevel' not in text:
-        text = text.replace('</assembly>', '''<trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
-  <security><requestedPrivileges><requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
-  </requestedPrivileges></security>
-</trustInfo></assembly>''')
-    manifest.write_text(text)
+    runner_cmake = ROOT/'windows/runner/CMakeLists.txt'
+    text = runner_cmake.read_text()
+    text += "\ntarget_link_options(${BINARY_NAME} PRIVATE \"/MANIFESTUAC:level='requireAdministrator' uiAccess='false'\")\n"
+    runner_cmake.write_text(text)
 default_test = ROOT/'test/widget_test.dart'
 if default_test.exists():
     default_test.unlink()
