@@ -41,7 +41,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
   }
   Future<void> _import() async {
     try {
-      final result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['ovpn'], withData: false);
+      final result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['ovpn', 'conf'], withData: false);
       if (result == null) return;
       final file = result.files.single;
       if (file.size > ProfilePolicy.maxBytes) throw const FormatException('Лимит профиля — 128 КБ');
@@ -52,7 +52,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
       if (!mounted) return;
       final region = await _region();
       if (region == null) return;
-      await vm.importProfile(utf8.decode(bytes), file.name.replaceAll('.ovpn', ''), region);
+      await vm.importProfile(utf8.decode(bytes), file.name.replaceAll(RegExp(r'\.(ovpn|conf)$'), ''), region);
+    } catch (error) { _error(error); }
+  }
+  Future<void> _pasteProfile() async {
+    final controller = TextEditingController();
+    String? text;
+    try {
+      text = await showDialog<String>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Вставить конфигурацию'),
+        content: SizedBox(width: 600, child: TextField(controller: controller, minLines: 6, maxLines: 12,
+          maxLength: ProfilePolicy.maxBytes, enableSuggestions: false, autocorrect: false,
+          decoration: const InputDecoration(hintText: 'OpenVPN, WireGuard или AmneziaWG'))),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Добавить'))]));
+    } finally { controller.dispose(); }
+    if (text == null || !mounted) return;
+    try {
+      final region = await _region();
+      if (region != null) await vm.importProfile(text, 'Мой сервер', region);
     } catch (error) { _error(error); }
   }
   Future<String?> _region() async {
@@ -120,7 +138,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
     return Scaffold(appBar: AppBar(title: const Text('Quiet VPN'), actions: [
       IconButton(tooltip: 'База и протоколы', onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => CatalogPage(vm))), icon: const Icon(Icons.storage_outlined)),
       IconButton(tooltip: 'Обновить каталог', onPressed: vm.refreshing ? null : () => vm.refresh(force: true), icon: const Icon(Icons.refresh)),
-      IconButton(tooltip: 'Импорт .ovpn', onPressed: _import, icon: const Icon(Icons.file_open_outlined)),
+      IconButton(tooltip: 'Вставить конфигурацию', onPressed: _pasteProfile, icon: const Icon(Icons.content_paste)),
+      IconButton(tooltip: 'Импорт .ovpn / .conf', onPressed: _import, icon: const Icon(Icons.file_open_outlined)),
     ]), body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 820), child: Padding(
       padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -147,7 +166,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
         const SizedBox(height: 8),
         Text('${items.length} серверов · ${vm.cached ? 'кэш' : 'каталог'} · TCP-проверки первых 10'),
         if (vm.refreshing) const LinearProgressIndicator(),
-        Expanded(child: items.isEmpty ? Center(child: Text(vm.refreshing ? 'Загрузка…' : 'Нет серверов. Обновите каталог или импортируйте .ovpn.')) : ListView.builder(
+        Expanded(child: items.isEmpty ? Center(child: Text(vm.refreshing ? 'Загрузка…' : 'Серверы не загружены. Откройте «База и протоколы» или добавьте конфигурацию .ovpn / .conf.')) : ListView.builder(
           itemCount: items.length, itemBuilder: (context, index) {
             final server = items[index];
             final result = vm.health[server.id];
@@ -158,7 +177,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
             return ListTile(selected: server.id == vm.selectedId, onTap: () => vm.select(server.id),
               leading: Radio<String>(value: server.id, groupValue: vm.selectedId, onChanged: (_) => vm.select(server.id)),
               title: Text('${server.country} · ${server.name}', maxLines: 1, overflow: TextOverflow.ellipsis),
-              subtitle: Text('${server.source} · ${server.transport.toUpperCase()} · $status'),
+              subtitle: Text('${server.protocol.toUpperCase()} · ${server.source} · ${server.transport.toUpperCase()} · $status'),
               trailing: server.id == vm.activeServer?.id ? const Icon(Icons.check_circle_outline) : null);
           })),
         const Text('Публичные серверы могут вести журналы и исчезать из каталога.', style: TextStyle(fontSize: 12)),

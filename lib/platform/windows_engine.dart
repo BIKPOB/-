@@ -46,6 +46,7 @@ class WindowsEngine implements VpnEngine {
     _emit(const EngineEvent(ConnectionState.disconnected));
   }
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    if (server.protocol != 'openvpn') throw StateError('WireGuard и AmneziaWG пока встроены только в Android');
     if (_process != null) throw StateError('Сначала отключите активный процесс');
     final executable = _executable();
     await _verifyExecutable(executable);

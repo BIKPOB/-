@@ -64,12 +64,14 @@ class _CatalogPageState extends State<CatalogPage> {
                   ]),
                 ],
               ]))),
-            const ListTile(leading: Icon(Icons.extension_outlined), title: Text('Другие протоколы'),
-              subtitle: Text('WireGuard, AmneziaWG и другие движки пока не подключены. Их поддержка появится с обновлением приложения.')),
+            ListTile(leading: const Icon(Icons.extension_outlined), title: const Text('WireGuard и AmneziaWG'),
+              subtitle: Text(Platform.isAndroid
+                ? 'Движки встроены. Добавьте .conf или вставьте конфигурацию кнопкой на главном экране. Нужны ключи от владельца сервера; VPN Gate их не предоставляет.'
+                : 'Новые движки пока доступны только в Android.')),
             const Divider(),
             Text('Регионы', style: Theme.of(context).textTheme.titleLarge),
             ...regions.map((region) => ListTile(leading: const Icon(Icons.public), title: Text(region),
-              subtitle: Text('${vm.servers.where((s) => s.country == region).length} профилей · OpenVPN'),
+              subtitle: Text('${vm.servers.where((s) => s.country == region).length} профилей'),
               trailing: const Icon(Icons.chevron_right), onTap: runtime.busy ? null : () { vm.filterCountry(region); Navigator.pop(context); })),
           ]))),
       ));

@@ -69,7 +69,7 @@ class VpnViewModel extends ChangeNotifier {
       message = '${result.servers.length} серверов; пропущено несовместимых профилей: ${result.rejected}'
         '${cached ? '. Используется кэш' : ''}';
       _scheduleProbe(immediate: true);
-    } catch (_) { message = 'Каталог недоступен. Повторите позже или импортируйте .ovpn.'; }
+    } catch (error) { message = error is FormatException ? error.message : 'Не удалось загрузить базу. Проверьте сеть и повторите загрузку.'; }
     finally { refreshing = false; _notify(); }
   }
   Future<void> clearCatalogCache() async {
@@ -121,11 +121,11 @@ class VpnViewModel extends ChangeNotifier {
     final id = 'local-${sha256.convert(utf8.encode(parsed.text)).toString().substring(0, 24)}';
     final server = VpnServer(id: id, name: name, country: region.isEmpty ? 'Мои профили' : region,
       countryCode: '--', host: parsed.host, port: parsed.port, transport: parsed.transport,
-      profile: parsed.text, source: 'Импорт');
+      profile: parsed.text, source: 'Импорт', protocol: parsed.protocol);
     final updated = [..._imports.where((s) => s.id != id), server];
     await store.save(updated);
     _imports = updated; selectedId = id; country = null;
-    message = 'Профиль импортирован'; _scheduleProbe(immediate: true); _notify();
+    message = '${parsed.protocol} профиль импортирован'; _scheduleProbe(immediate: true); _notify();
   }
   Future<void> removeSelected() async {
     final server = selected;
@@ -215,7 +215,7 @@ class VpnViewModel extends ChangeNotifier {
       })().timeout(const Duration(seconds: 8));
       if (!_disposed && epoch == _connectionEpoch && _nativeNeedsStop) {
         _connectTimeout?.cancel(); _connectTimeout = null; state = ConnectionState.connected;
-        message = 'OpenVPN подключён, HTTPS-проверка пройдена'; _notify();
+        message = '${activeServer?.protocol ?? 'VPN'} подключён, HTTPS-проверка пройдена'; _notify();
       }
     } catch (_) {
       if (epoch == _connectionEpoch && !_stopping) await _fail('Туннель поднят, но HTTPS-проверка не прошла');

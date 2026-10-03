@@ -1,5 +1,9 @@
 name: Build Android APK
-on: [push, pull_request, workflow_dispatch]
+on:
+  push:
+    paths: ['lib/**', 'test/**', 'tools/**', 'platform_templates/**', 'pubspec*', '.github/workflows/verify.yml']
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
@@ -28,6 +32,18 @@ jobs:
         working-directory: infra
       - name: Generate Android runner
         run: python tools/bootstrap.py --platforms android
+      - uses: actions/cache@v4
+        id: awg-cache
+        with:
+          path: android/app/libs/amneziawg-tunnel.aar
+          key: awg-ff15093bf3856fea0947923474870b86efb682f0
+      - name: Build pinned AmneziaWG Android tunnel
+        if: steps.awg-cache.outputs.cache-hit != 'true'
+        run: python tools/build_awg.py
+      - name: Fetch live public catalog fixture
+        run: |
+          mkdir -p build
+          curl --fail --max-time 45 https://www.vpngate.net/api/iphone/ -o build/live-catalog.csv
       - name: Analyze Dart
         run: flutter analyze
       - name: Test Flutter core
@@ -41,6 +57,14 @@ jobs:
           python tools/verify_apk.py dist/quiet-vpn-android.apk
           sha256sum dist/quiet-vpn-android.apk > dist/SHA256SUMS.txt
           git rev-parse HEAD > dist/SOURCE_COMMIT.txt
+      - name: Antivirus scan APK
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clamav
+          sudo systemctl stop clamav-freshclam || true
+          sudo freshclam
+          clamscan --version > dist/ANTIVIRUS_VERSION.txt
+          clamscan --allmatch --detect-pua=yes --alert-exceeds-max=yes --max-filesize=250M --max-scansize=700M --log=dist/ANTIVIRUS_SCAN.txt dist/quiet-vpn-android.apk
       - uses: actions/upload-artifact@v4
         with:
           name: quiet-vpn-android-apk

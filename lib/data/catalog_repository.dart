@@ -32,7 +32,7 @@ class CatalogRepository {
       final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
       _http = client;
       try {
-        final payload = await _fetch(client).timeout(const Duration(seconds: 25), onTimeout: () {
+        final payload = await _fetchWithFallback().timeout(const Duration(seconds: 25), onTimeout: () {
           client.close(force: true); throw const SocketException('Catalog timeout');
         });
         final body = payload.$1;
@@ -57,8 +57,23 @@ class CatalogRepository {
     }
   }
 
-  Future<(String, DateTime)> _fetch(HttpClient client) async {
-    final req = await client.getUrl(endpoint);
+  Future<(String, DateTime)> _fetchWithFallback() async {
+    final sources = [endpoint];
+    if (endpoint.host == 'www.vpngate.net') {
+      sources.add(Uri.parse('https://raw.githubusercontent.com/BIKPOB/-/main/catalog/vpngate.json'));
+    }
+    final errors = <String>[];
+    for (final source in sources) {
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 6);
+      try { return await _fetch(client, source).timeout(const Duration(seconds: 11)); }
+      catch (error) { errors.add('${source.host}: ${error is HttpException ? error.message : error is FormatException ? error.message : 'нет ответа сети'}'); }
+      finally { client.close(force: true); }
+    }
+    throw FormatException('Источники базы недоступны. ${errors.join('; ')}');
+  }
+
+  Future<(String, DateTime)> _fetch(HttpClient client, Uri source) async {
+    final req = await client.getUrl(source);
     req.followRedirects = false;
     final res = await req.close();
     if (res.statusCode != 200) throw HttpException('Catalog HTTP ${res.statusCode}');
@@ -68,12 +83,18 @@ class CatalogRepository {
       chunks.addAll(chunk);
     }
     final stamp = int.tryParse(res.headers.value('x-catalog-fetched-at') ?? '');
-    final fetched = stamp == null ? DateTime.now() : DateTime.fromMillisecondsSinceEpoch(stamp * 1000);
+    var fetched = stamp == null ? DateTime.now() : DateTime.fromMillisecondsSinceEpoch(stamp * 1000);
+    var body = utf8.decode(chunks);
+    if (body.trimLeft().startsWith('{')) {
+      final snapshot = jsonDecode(body) as Map<String, dynamic>;
+      fetched = DateTime.parse(snapshot['fetchedAt'] as String);
+      body = snapshot['csv'] as String;
+    }
     final age = DateTime.now().difference(fetched);
     if (age > const Duration(hours: 24) || age < const Duration(minutes: -5)) {
       throw const FormatException('Каталог просрочен или содержит неверную дату');
     }
-    return (utf8.decode(chunks), fetched);
+    return (body, fetched);
   }
 
   Future<CatalogResult?> _readCache() async {
