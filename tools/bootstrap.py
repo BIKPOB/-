@@ -31,12 +31,13 @@ if 'android' in args.platforms:
         shutil.copyfile(source, kotlin/source.name)
     build = ROOT/'android/app/build.gradle.kts'
     text = build.read_text()
-    text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36')
+    text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 37')
     text = text.replace('minSdk = flutter.minSdkVersion', 'minSdk = 26')
     text = text.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 35')
     text = text.replace('android {', 'android {\n    packaging { jniLibs { useLegacyPackaging = true } }', 1)
-    text += '\ndependencies {\n    implementation(files("libs/amneziawg-tunnel.aar"))\n    implementation("androidx.collection:collection:1.4.0")\n    implementation("androidx.annotation:annotation:1.9.1")\n}\n'
+    text += '\ndependencies {\n    implementation(files("libs/amneziawg-tunnel.aar"))\n    implementation(files("libs/openvpn-core.aar"))\n    implementation("androidx.core:core-ktx:1.13.1")\n    implementation("androidx.collection:collection:1.4.0")\n    implementation("androidx.annotation:annotation:1.9.1")\n}\n'
     text = text.replace('defaultConfig {', 'defaultConfig {\n        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }', 1)
+    text = text.replace('signingConfig = signingConfigs.getByName("debug")', 'signingConfig = signingConfigs.getByName("debug")\n            isMinifyEnabled = false\n            isShrinkResources = false')
     build.write_text(text)
     root_build = ROOT/'android/build.gradle.kts'
     text = root_build.read_text()

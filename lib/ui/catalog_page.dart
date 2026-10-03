@@ -51,7 +51,7 @@ class _CatalogPageState extends State<CatalogPage> {
               crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('OpenVPN', style: Theme.of(context).textTheme.titleLarge),
                 Text(Platform.isAndroid ? 'Движок встроен в приложение' : runtime.installed ? 'Движок установлен в Windows' : 'Нужны движок и сетевой драйвер'),
-                if (Platform.isAndroid) const Text('Текущая версия движка требует обновления по результатам проверки безопасности.'),
+                if (Platform.isAndroid) const Text('Движок собран из обновлённых исходников OpenVPN for Android.'),
                 if (Platform.isWindows) ...[
                   const Text('Официальный OpenVPN 2.7.7. Загрузка и проверка подписи выполняются здесь. Установка изменяет систему и добавляет драйвер.'),
                   if (runtime.message != null) Text(runtime.message!),

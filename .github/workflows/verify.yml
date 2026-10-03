@@ -12,7 +12,7 @@ concurrency:
 jobs:
   android:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -40,6 +40,19 @@ jobs:
       - name: Build pinned AmneziaWG Android tunnel
         if: steps.awg-cache.outputs.cache-hit != 'true'
         run: python tools/build_awg.py
+      - uses: actions/cache@v4
+        id: ovpn-cache
+        with:
+          path: |
+            android/app/libs/openvpn-core.aar
+            android/app/libs/openvpn-provenance.json
+          key: openvpn-b13ce20-v1
+      - name: Build OpenVPN from pinned source
+        if: steps.ovpn-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y swig
+          python tools/build_openvpn.py
       - name: Fetch live public catalog fixture
         run: |
           mkdir -p build
@@ -56,6 +69,8 @@ jobs:
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk dist/quiet-vpn-android.apk
           python tools/verify_apk.py dist/quiet-vpn-android.apk
+          cp android/app/libs/openvpn-provenance.json dist/
+          python tools/audit_apk.py dist/quiet-vpn-android.apk > dist/NATIVE_AUDIT.txt
           sha256sum dist/quiet-vpn-android.apk > dist/SHA256SUMS.txt
           git rev-parse HEAD > dist/SOURCE_COMMIT.txt
       - name: Antivirus scan APK
