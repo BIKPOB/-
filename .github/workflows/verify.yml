@@ -47,7 +47,7 @@ jobs:
             android/app/libs/openvpn-core.aar
             android/app/libs/openvpn-provenance.json
             android/app/src/main/assets/licenses/openvpn
-          key: openvpn-b13ce20-v2
+          key: openvpn-b13ce20-v3
       - name: Build OpenVPN from pinned source
         if: steps.ovpn-cache.outputs.cache-hit != 'true'
         run: |
@@ -59,6 +59,14 @@ jobs:
           subprocess.run([sdk, '--licenses'], input='y\n' * 200, text=True, check=True)
           PYSDK
           python tools/build_openvpn.py
+      - uses: actions/cache/save@v4
+        if: steps.ovpn-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            android/app/libs/openvpn-core.aar
+            android/app/libs/openvpn-provenance.json
+            android/app/src/main/assets/licenses/openvpn
+          key: openvpn-b13ce20-v3
       - name: Fetch live public catalog fixture
         run: |
           mkdir -p build

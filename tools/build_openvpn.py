@@ -25,6 +25,7 @@ include(":main")
 }
 ''')
 (SRC/'gradle/wrapper/gradle-wrapper.properties').write_text('distributionUrl=https\\://services.gradle.org/distributions/gradle-8.13-bin.zip\n')
+(SRC/'gradle.properties').write_text('android.useAndroidX=true\norg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8\n')
 original = (SRC/'main/build.gradle.kts').read_text()
 swig = original[original.index('var swigcmd'):original.index('dependencies {')]
 (SRC/'main/build.gradle.kts').write_text('''import org.gradle.api.file.DirectoryProperty
@@ -52,7 +53,7 @@ android {
  }
  buildTypes { getByName("release") { isMinifyEnabled = false } }
  compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
- kotlinOptions { jvmTarget = "17" }
+ kotlinOptions { jvmTarget = "17"; freeCompilerArgs += "-opt-in=kotlin.io.encoding.ExperimentalEncodingApi" }
  packaging { jniLibs { useLegacyPackaging = true } }
 }
 ''' + swig + '''
