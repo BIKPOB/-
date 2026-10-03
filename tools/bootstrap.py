@@ -43,6 +43,8 @@ if 'android' in args.platforms:
     settings = ROOT/'android/settings.gradle.kts'
     import re
     settings.write_text(re.sub(r'(id\("com.android.application"\) version )"[^"]+"', r'\1"8.13.0"', settings.read_text()))
+    wrapper = ROOT/'android/gradle/wrapper/gradle-wrapper.properties'
+    wrapper.write_text(re.sub(r'gradle-[0-9.]+-(?:all|bin)\.zip', 'gradle-8.13-all.zip', wrapper.read_text()))
     root_build = ROOT/'android/build.gradle.kts'
     text = root_build.read_text()
     if 'jitpack.io' not in text:
