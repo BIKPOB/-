@@ -32,6 +32,7 @@ if 'android' in args.platforms:
     build = ROOT/'android/app/build.gradle.kts'
     text = build.read_text()
     text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 37')
+    text = text.replace('ndkVersion = flutter.ndkVersion', 'ndkVersion = "27.0.12077973"')
     text = text.replace('minSdk = flutter.minSdkVersion', 'minSdk = 26')
     text = text.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 35')
     text = text.replace('android {', 'android {\n    packaging { jniLibs { useLegacyPackaging = true } }', 1)
@@ -39,6 +40,9 @@ if 'android' in args.platforms:
     text = text.replace('defaultConfig {', 'defaultConfig {\n        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }', 1)
     text = text.replace('signingConfig = signingConfigs.getByName("debug")', 'signingConfig = signingConfigs.getByName("debug")\n            isMinifyEnabled = false\n            isShrinkResources = false')
     build.write_text(text)
+    settings = ROOT/'android/settings.gradle.kts'
+    import re
+    settings.write_text(re.sub(r'(id\("com.android.application"\) version )"[^"]+"', r'\1"8.13.0"', settings.read_text()))
     root_build = ROOT/'android/build.gradle.kts'
     text = root_build.read_text()
     if 'jitpack.io' not in text:

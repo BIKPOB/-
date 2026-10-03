@@ -30,6 +30,14 @@ jobs:
       - name: Verify catalog service
         run: python -m unittest discover -s tests -v
         working-directory: infra
+      - name: Prepare Android SDK
+        run: |
+          python - <<'PYSDK'
+          import os, subprocess
+          sdk = os.environ['ANDROID_HOME'] + '/cmdline-tools/latest/bin/sdkmanager'
+          subprocess.run([sdk, '--licenses'], input='y\n' * 200, text=True, check=True)
+          subprocess.run([sdk, 'platforms;android-37', 'ndk;27.0.12077973'], check=True)
+          PYSDK
       - name: Generate Android runner
         run: python tools/bootstrap.py --platforms android
       - uses: actions/cache@v4
