@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quiet_vpn/core/profile_policy.dart';
 import 'package:quiet_vpn/data/catalog_repository.dart';
@@ -25,6 +26,14 @@ void main() {
     expect(() => ProfilePolicy.parse(config.replaceFirst('[Peer]', 'PostUp = malicious\n[Peer]')), throwsFormatException);
     expect(() => ProfilePolicy.parse(config.replaceFirst('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=', 'bad')), throwsFormatException);
     expect(() => ProfilePolicy.parse('$config\n[Peer]\n'), throwsFormatException);
+  });
+  test('mirror snapshot is fresh and contains compatible public profiles', () {
+    final file = File('build/catalog-mirror.json');
+    if (!file.existsSync()) return;
+    final data = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+    final date = DateTime.parse(data['fetchedAt'] as String);
+    expect(DateTime.now().difference(date), lessThan(const Duration(hours: 24)));
+    expect(CatalogRepository.parseCsv(data['csv'] as String).servers, isNotEmpty);
   });
   test('live VPN Gate fixture contains compatible servers', () {
     final file = File('build/live-catalog.csv');

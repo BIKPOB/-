@@ -44,6 +44,7 @@ jobs:
         run: |
           mkdir -p build
           curl --fail --max-time 45 https://www.vpngate.net/api/iphone/ -o build/live-catalog.csv
+          curl --fail --max-time 45 https://raw.githubusercontent.com/BIKPOB/-/main/catalog/vpngate.json -o build/catalog-mirror.json
       - name: Analyze Dart
         run: flutter analyze
       - name: Test Flutter core

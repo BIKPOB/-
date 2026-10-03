@@ -19,10 +19,10 @@ class VpnViewModel extends ChangeNotifier {
   final ServerMonitor monitor;
   List<VpnServer> _public = [], _imports = [];
   List<VpnServer> get servers => [..._imports, ..._public];
-  List<VpnServer> get filtered => servers.where((s) => country == null || s.country == country).toList();
+  List<VpnServer> get filtered => servers.where((s) => (country == null || s.country == country) && (protocolFilter == null || s.protocol == protocolFilter)).toList();
   Map<String, HealthResult> health = {};
   ConnectionState state = ConnectionState.disconnected;
-  String? selectedId, country, message;
+  String? selectedId, country, message, protocolFilter;
   VpnServer? activeServer;
   DateTime? catalogDate;
   int cacheBytes = 0;
@@ -87,6 +87,10 @@ class VpnViewModel extends ChangeNotifier {
     finally { refreshing = false; _notify(); }
   }
   void select(String id) { selectedId = id; _notify(); }
+  void filterProtocol(String? value) {
+    protocolFilter = value; country = null;
+    _probeEpoch++; monitor.cancel(); _scheduleProbe(immediate: true); _notify();
+  }
   void filterCountry(String? value) {
     country = value; _probeEpoch++; monitor.cancel();
     _scheduleProbe(immediate: true); _notify();
@@ -124,7 +128,7 @@ class VpnViewModel extends ChangeNotifier {
       profile: parsed.text, source: 'Импорт', protocol: parsed.protocol);
     final updated = [..._imports.where((s) => s.id != id), server];
     await store.save(updated);
-    _imports = updated; selectedId = id; country = null;
+    _imports = updated; selectedId = id; country = null; protocolFilter = parsed.protocol;
     message = '${parsed.protocol} профиль импортирован'; _scheduleProbe(immediate: true); _notify();
   }
   Future<void> removeSelected() async {

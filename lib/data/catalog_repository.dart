@@ -94,6 +94,7 @@ class CatalogRepository {
     if (age > const Duration(hours: 24) || age < const Duration(minutes: -5)) {
       throw const FormatException('Каталог просрочен или содержит неверную дату');
     }
+    if (!body.contains('#HostName,')) throw const FormatException('Источник вернул не базу VPN');
     return (body, fetched);
   }
 

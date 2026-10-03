@@ -160,7 +160,12 @@ class ProfilePolicy {
     final port = int.tryParse(match?.group(3) ?? '') ?? 0;
     if (host == null || !validHost(host) || port < 1 || port > 65535) throw const FormatException('Нужен Endpoint: адрес и порт');
     // Generate initial traffic so the native engine can confirm a handshake.
-    if (!peer.containsKey('persistentkeepalive')) output.add('PersistentKeepalive = 25');
+    final keepalive = int.tryParse(peer['persistentkeepalive'] ?? '0');
+    if (keepalive == null || keepalive < 0 || keepalive > 65535) throw const FormatException('Некорректный PersistentKeepalive');
+    if (keepalive == 0) {
+      output.removeWhere((line) => line.split('=').first.trim().toLowerCase() == 'persistentkeepalive');
+      output.add('PersistentKeepalive = 25');
+    }
     return ParsedProfile('${output.join('\n')}\n', host, port, 'udp', false,
       protocol: awg ? 'amneziawg' : 'wireguard');
   }

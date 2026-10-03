@@ -159,6 +159,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
             try { await vm.removeSelected(); } catch (error) { _error(error); }
           }, child: const Text('Удалить профиль')),
         ]),
+        Wrap(spacing: 6, children: [
+          ChoiceChip(label: const Text('Все'), selected: vm.protocolFilter == null, onSelected: (_) => vm.filterProtocol(null)),
+          ...['openvpn', 'wireguard', 'amneziawg'].map((protocol) => ChoiceChip(
+            label: Text({'openvpn': 'OpenVPN', 'wireguard': 'WireGuard', 'amneziawg': 'AmneziaWG'}[protocol]!),
+            selected: vm.protocolFilter == protocol, onSelected: (_) => vm.filterProtocol(protocol))),
+        ]),
         DropdownButtonFormField<String>(value: countries.contains(vm.country) ? vm.country : null,
           decoration: const InputDecoration(labelText: 'Регион'),
           items: [const DropdownMenuItem<String>(value: null, child: Text('Все регионы')),
