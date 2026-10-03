@@ -34,7 +34,7 @@ import org.gradle.api.tasks.TaskProvider
 plugins { id("com.android.library"); id("org.jetbrains.kotlin.android") }
 android {
  namespace = "de.blinkt.openvpn"
- compileSdk = 37
+ compileSdk = 36
  ndkVersion = "30.0.14904198"
  buildFeatures { aidl = true; buildConfig = true }
  defaultConfig {

@@ -36,7 +36,7 @@ jobs:
           import os, subprocess
           sdk = os.environ['ANDROID_HOME'] + '/cmdline-tools/latest/bin/sdkmanager'
           subprocess.run([sdk, '--licenses'], input='y\n' * 200, text=True, check=True)
-          subprocess.run([sdk, 'platforms;android-37', 'ndk;27.0.12077973'], check=True)
+          subprocess.run([sdk, 'platforms;android-36', 'ndk;27.0.12077973'], check=True)
           PYSDK
       - name: Generate Android runner
         run: python tools/bootstrap.py --platforms android
@@ -55,7 +55,7 @@ jobs:
             android/app/libs/openvpn-core.aar
             android/app/libs/openvpn-provenance.json
             android/app/src/main/assets/licenses/openvpn
-          key: openvpn-b13ce20-v3
+          key: openvpn-b13ce20-v4
       - name: Build OpenVPN from pinned source
         if: steps.ovpn-cache.outputs.cache-hit != 'true'
         run: |
@@ -74,7 +74,7 @@ jobs:
             android/app/libs/openvpn-core.aar
             android/app/libs/openvpn-provenance.json
             android/app/src/main/assets/licenses/openvpn
-          key: openvpn-b13ce20-v3
+          key: openvpn-b13ce20-v4
       - name: Fetch live public catalog fixture
         run: |
           mkdir -p build

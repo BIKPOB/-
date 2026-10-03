@@ -31,7 +31,7 @@ if 'android' in args.platforms:
         shutil.copyfile(source, kotlin/source.name)
     build = ROOT/'android/app/build.gradle.kts'
     text = build.read_text()
-    text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 37')
+    text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36')
     text = text.replace('ndkVersion = flutter.ndkVersion', 'ndkVersion = "27.0.12077973"')
     text = text.replace('minSdk = flutter.minSdkVersion', 'minSdk = 26')
     text = text.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 35')
