@@ -80,6 +80,8 @@ for e in list(doc):
         doc.remove(e)
 ET.register_namespace('android', a[1:-1]); ET.register_namespace('tools','http://schemas.android.com/tools')
 tree.write(manifest, encoding='utf-8', xml_declaration=True)
+skeleton_manifest = SRC/'main/src/skeleton/AndroidManifest.xml'
+skeleton_manifest.write_text(skeleton_manifest.read_text().replace('android:exported="true"', 'android:exported="false"'))
 # Android skeleton can use in-process profiles; do not persist decrypted keys.
 p = SRC/'main/src/main/java/de/blinkt/openvpn/core/ProfileManager.java'
 s = p.read_text()
@@ -97,4 +99,8 @@ out = ROOT/'android/app/libs'; out.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(SRC/'main/build/outputs/aar/main-skeleton-ovpn2-release.aar',out/'openvpn-core.aar')
 provenance = {'upstream':SHA, 'submodules':subprocess.check_output(['git','submodule','status','--recursive'],cwd=SRC,text=True)}
 (out/'openvpn-provenance.json').write_text(json.dumps(provenance, indent=2))
+licenses = ROOT/'android/app/src/main/assets/licenses/openvpn'
+licenses.mkdir(parents=True, exist_ok=True)
+shutil.copyfile(SRC/'doc/LICENSE.txt', licenses/'LICENSE.txt')
+(licenses/'SOURCE.txt').write_text('https://github.com/schwabe/ics-openvpn/tree/' + SHA + '\nEmbedding build and changes: https://github.com/BIKPOB/-/blob/main/tools/build_openvpn.py\n')
 print('Built pinned OpenVPN source', SHA)

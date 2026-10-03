@@ -46,7 +46,8 @@ jobs:
           path: |
             android/app/libs/openvpn-core.aar
             android/app/libs/openvpn-provenance.json
-          key: openvpn-b13ce20-v1
+            android/app/src/main/assets/licenses/openvpn
+          key: openvpn-b13ce20-v2
       - name: Build OpenVPN from pinned source
         if: steps.ovpn-cache.outputs.cache-hit != 'true'
         run: |
@@ -70,7 +71,7 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk dist/quiet-vpn-android.apk
           python tools/verify_apk.py dist/quiet-vpn-android.apk
           cp android/app/libs/openvpn-provenance.json dist/
-          python tools/audit_apk.py dist/quiet-vpn-android.apk > dist/NATIVE_AUDIT.txt
+          python tools/verify_native.py dist/quiet-vpn-android.apk > dist/NATIVE_AUDIT.txt
           sha256sum dist/quiet-vpn-android.apk > dist/SHA256SUMS.txt
           git rev-parse HEAD > dist/SOURCE_COMMIT.txt
       - name: Antivirus scan APK

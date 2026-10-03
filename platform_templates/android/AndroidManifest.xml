@@ -23,7 +23,7 @@
         <service android:name="de.blinkt.openvpn.core.OpenVPNService"
             android:foregroundServiceType="specialUse" tools:replace="android:foregroundServiceType">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="User initiated OpenVPN tunnel" />
+                android:value="vpn" />
         </service>
     </application>
     <queries><intent><action android:name="android.intent.action.VIEW" />
