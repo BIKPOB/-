@@ -1,0 +1,61 @@
+name: Verify 0.3.0 release artifacts
+on:
+  push:
+    paths: ['.github/workflows/release-check.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download release APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p audit/apk
+          gh run download 37062248934 -R BIKPOB/- -n quiet-vpn-android-apk -D audit/apk
+          echo 'b26d77f07ec90073aab18f3fde73b800fa1bb14f829c4298f1fd8e21bccf065a  audit/apk/quiet-vpn-android.apk' | sha256sum -c -
+      - name: Scan exact release APK
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y clamav
+          sudo systemctl stop clamav-freshclam || true
+          sudo freshclam
+          clamscan --version | tee audit/antivirus-version.txt
+          clamscan --recursive --allmatch --detect-pua=yes --alert-exceeds-max=yes --max-filesize=200M --max-scansize=500M --log=audit/apk-clamav.txt audit/apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-0.3.0-security-report
+          path: audit/*.txt
+  runtime:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - name: Verify and install official Windows runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory audit | Out-Null
+          $msi = Join-Path $env:RUNNER_TEMP 'OpenVPN-2.7.7-I001-amd64.msi'
+          Invoke-WebRequest 'https://swupdate.openvpn.net/community/releases/OpenVPN-2.7.7-I001-amd64.msi' -OutFile $msi
+          $s = Get-AuthenticodeSignature -LiteralPath $msi
+          $s | Format-List Status,StatusMessage,SignerCertificate | Out-String | Set-Content audit/msi-signature.txt
+          if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch '(?i)O=OpenVPN( Inc\.)?(,|$)') { throw 'Publisher verification failed' }
+          Get-FileHash $msi -Algorithm SHA256 | Format-List | Out-String | Set-Content audit/msi-sha256.txt
+          $p=Start-Process -FilePath "$env:SystemRoot\System32\msiexec.exe" -ArgumentList @('/i', ('"'+$msi+'"'), '/passive', '/norestart') -Wait -PassThru
+          if ($p.ExitCode -notin @(0,3010)) { throw "Installer failed: $($p.ExitCode)" }
+          $exe = "$env:ProgramFiles\OpenVPN\bin\openvpn.exe"
+          $s=Get-AuthenticodeSignature -LiteralPath $exe
+          $s | Format-List Status,StatusMessage,SignerCertificate | Out-String | Set-Content audit/exe-signature.txt
+          if ($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch '(?i)O=OpenVPN( Inc\.)?(,|$)') { throw 'Runtime publisher verification failed' }
+          & $exe --version | Tee-Object audit/runtime-version.txt
+          if ($LASTEXITCODE -ne 0) { throw 'OpenVPN did not start' }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-runtime-verification
+          path: audit/
