@@ -36,6 +36,7 @@ if 'android' in args.platforms:
     text = text.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 35')
     text = text.replace('android {', 'android {\n    packaging { jniLibs { useLegacyPackaging = true } }', 1)
     text += '\ndependencies {\n    implementation(files("libs/amneziawg-tunnel.aar"))\n    implementation("androidx.collection:collection:1.4.0")\n    implementation("androidx.annotation:annotation:1.9.1")\n}\n'
+    text = text.replace('defaultConfig {', 'defaultConfig {\n        ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }', 1)
     build.write_text(text)
     root_build = ROOT/'android/build.gradle.kts'
     text = root_build.read_text()
