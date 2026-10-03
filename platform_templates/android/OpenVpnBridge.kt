@@ -116,6 +116,7 @@ class OpenVpnBridge(private val activity: Activity) {
                 profile.mPassword = config.getValue("password")
                 val error = profile.checkProfile(context)
                 if (error != de.blinkt.openvpn.R.string.no_error_found) throw IllegalArgumentException()
+                ProfileManager.getInstance(context)
                 ProfileManager.setTemporaryProfile(context, profile)
                 VPNLaunchHelper.startOpenVpn(profile, context, "Quiet VPN", false)
                 Handler(Looper.getMainLooper()).post { result.success(null) }

@@ -78,6 +78,8 @@ jobs:
         run: flutter test
       - name: Build mobile APK
         run: flutter build apk --release --target-platform android-arm64,android-arm
+      - name: Test live profiles with Android OpenVPN parser
+        run: python tools/test_native_profile.py
       - name: Verify APK and record build metadata
         run: |
           mkdir -p dist

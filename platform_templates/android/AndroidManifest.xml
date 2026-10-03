@@ -18,10 +18,12 @@
         </activity>
         <service android:name="org.amnezia.awg.backend.GoBackend$VpnService" android:permission="android.permission.BIND_VPN_SERVICE" android:exported="false">
             <intent-filter><action android:name="android.net.VpnService" /></intent-filter>
+            <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="false" />
         </service>
         <meta-data android:name="flutterEmbedding" android:value="2" />
         <service android:name="de.blinkt.openvpn.core.OpenVPNService"
             android:foregroundServiceType="specialUse" tools:replace="android:foregroundServiceType">
+            <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="false" />
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="vpn" />
         </service>
