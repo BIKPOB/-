@@ -53,6 +53,11 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y swig
+          python - <<'PYSDK'
+          import os, subprocess
+          sdk = os.environ['ANDROID_HOME'] + '/cmdline-tools/latest/bin/sdkmanager'
+          subprocess.run([sdk, '--licenses'], input='y\n' * 200, text=True, check=True)
+          PYSDK
           python tools/build_openvpn.py
       - name: Fetch live public catalog fixture
         run: |
