@@ -95,6 +95,25 @@ print('Temporary profile upstream implementation:', block)
 block = re.sub(r'\s*saveProfile\(c, tmp\);', '', block)
 s = s[:start] + block + s[end:]
 p.write_text(s)
+# The embedding deliberately has no boot permission or persisted private profiles.
+# Upstream's persisted keepalive job otherwise throws SecurityException at startup.
+p = SRC/'main/src/main/java/de/blinkt/openvpn/core/keepVPNAlive.java'
+s = p.read_text()
+a = s.index('    public static void scheduleKeepVPNAliveJobService(')
+b = s.index('    private static JobScheduler getJobScheduler(', a)
+s = s[:a] + '''    public static void scheduleKeepVPNAliveJobService(Context c, VpnProfile vp) {
+        // Quiet VPN: process-owned sessions do not restart after reboot.
+    }
+
+''' + s[b:]
+p.write_text(s)
+p = SRC/'main/src/main/java/de/blinkt/openvpn/core/OpenVPNService.java'
+s = p.read_text()
+old = 'mCommandHandler.post(() -> managment.stopVPN(false));'
+assert old in s
+s = s.replace(old, 'if (managment != null) mCommandHandler.post(() -> managment.stopVPN(false));')
+s = s.replace('getPackageName() + ".activities.MainActivity"', 'getPackageName() + ".MainActivity"')
+p.write_text(s)
 run(['bash','gradlew',':main:assembleSkeletonOvpn2Release','--no-daemon','--max-workers=2'])
 out = ROOT/'android/app/libs'; out.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(SRC/'main/build/outputs/aar/main-skeleton-ovpn2-release.aar',out/'openvpn-core.aar')

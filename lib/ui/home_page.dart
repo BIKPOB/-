@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart' hide ConnectionState;
+import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 import '../core/models.dart';
 import '../core/profile_policy.dart';
@@ -104,6 +105,20 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
       ));
     } finally { user.dispose(); password.dispose(); }
   }
+  Future<void> _diagnostics() async {
+    try {
+      final report = await const MethodChannel('quietvpn/diagnostics').invokeMethod<String>('report') ?? 'Нет данных';
+      if (!mounted) return;
+      await showDialog<void>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Диагностика сбоя'),
+        content: SingleChildScrollView(child: SelectableText(report)),
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Закрыть')),
+          TextButton(onPressed: () async {
+            await Clipboard.setData(ClipboardData(text: report));
+            if (context.mounted) Navigator.pop(context);
+          }, child: const Text('Копировать'))]));
+    } catch (error) { _error(error); }
+  }
   Future<void> _connect() async {
     try {
       if (vm.canDisconnect) { await vm.disconnect(); return; }
@@ -157,6 +172,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
         Wrap(spacing: 8, children: [
           TextButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => CatalogPage(vm))), icon: const Icon(Icons.storage_outlined), label: const Text('База и протоколы')),
           TextButton(onPressed: vm.selected == null ? null : _editAuth, child: const Text('Логин / пароль')),
+          if (Platform.isAndroid) TextButton.icon(onPressed: _diagnostics, icon: const Icon(Icons.bug_report_outlined), label: const Text('Диагностика сбоя')),
           if (vm.selected?.source == 'Импорт') TextButton(onPressed: () async {
             try { await vm.removeSelected(); } catch (error) { _error(error); }
           }, child: const Text('Удалить профиль')),

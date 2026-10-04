@@ -8,6 +8,13 @@ class MainActivity : FlutterActivity() {
     private lateinit var wg: WgBridge
     override fun configureFlutterEngine(engine: io.flutter.embedding.engine.FlutterEngine) {
         super.configureFlutterEngine(engine)
+        io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/diagnostics")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "report") {
+                    try { result.success(CrashDiagnostics.report(applicationContext)) }
+                    catch (_: Exception) { result.error("diagnostics", "Диагностика недоступна", null) }
+                } else result.notImplemented()
+            }
         ovpn = OpenVpnBridge(this)
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/openvpn").setMethodCallHandler(ovpn::handle)
         io.flutter.plugin.common.EventChannel(engine.dartExecutor.binaryMessenger, "quietvpn/openvpn-events").setStreamHandler(object : io.flutter.plugin.common.EventChannel.StreamHandler {

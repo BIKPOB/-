@@ -55,7 +55,7 @@ jobs:
             android/app/libs/openvpn-core.aar
             android/app/libs/openvpn-provenance.json
             android/app/src/main/assets/licenses/openvpn
-          key: openvpn-b13ce20-v4
+          key: openvpn-b13ce20-v5
       - name: Build OpenVPN from pinned source
         if: steps.ovpn-cache.outputs.cache-hit != 'true'
         run: |
@@ -74,7 +74,7 @@ jobs:
             android/app/libs/openvpn-core.aar
             android/app/libs/openvpn-provenance.json
             android/app/src/main/assets/licenses/openvpn
-          key: openvpn-b13ce20-v4
+          key: openvpn-b13ce20-v5
       - name: Fetch live public catalog fixture
         run: |
           mkdir -p build

@@ -7,6 +7,7 @@ import de.blinkt.openvpn.core.GlobalPreferences
 class QuietVpnApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        CrashDiagnostics.install(this)
         GlobalPreferences.setInstance(false, false, false)
     }
 }
