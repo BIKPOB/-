@@ -6,6 +6,11 @@ on:
     workflows: ['Build Android APK', 'Windows build and security audit']
     types: [completed]
   workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Source commit with successful Android and Windows builds'
+        required: true
+        type: string
 permissions:
   contents: write
   actions: read
@@ -25,5 +30,5 @@ jobs:
       - name: Publish matching successful builds
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha || 'a459488b60e5306c56a6f54a9673f12f232c881b' }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha || inputs.source_sha || 'd3cc778fc0dcd29932e0ca0ac6397cadcc9101c9' }}
         run: python .github/scripts/publish_release.py
