@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import '../core/models.dart';
 import '../core/profile_policy.dart';
 import '../core/server_monitor.dart';
@@ -159,7 +160,9 @@ class VpnViewModel extends ChangeNotifier {
       _notify();
       await engine.connect(server, auth);
     } catch (error) {
-      await _fail(error is StateError ? error.message.toString() : 'Не удалось запустить VPN');
+      await _fail(error is StateError ? error.message.toString()
+        : error is PlatformException ? (error.message ?? 'Не удалось запустить VPN')
+        : 'Не удалось запустить VPN');
     } finally {
       busy = false;
       final failure = _pendingFailure;

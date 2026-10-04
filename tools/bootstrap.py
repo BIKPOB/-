@@ -49,6 +49,16 @@ if 'android' in args.platforms:
     text = root_build.read_text()
     if 'jitpack.io' not in text:
         text = text.replace('mavenCentral()', 'mavenCentral()\n        maven { url = uri("https://jitpack.io") }')
+    text = """subprojects {
+    afterEvaluate {
+        if (plugins.hasPlugin("com.android.library")) {
+            extensions.configure<com.android.build.gradle.LibraryExtension> {
+                compileSdk = 36
+            }
+        }
+    }
+}
+""" + text
     root_build.write_text(text)
 # Set the UAC level through the linker so its generated manifest agrees.
 if 'windows' in args.platforms:

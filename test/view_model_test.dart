@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'package:quiet_vpn/core/models.dart';
 import 'package:quiet_vpn/core/server_monitor.dart';
 import 'package:quiet_vpn/data/catalog_repository.dart';
@@ -36,6 +37,21 @@ class ControlledEngine implements VpnEngine {
 }
 
 void main() {
+  test('native permission errors retain an actionable message', () async {
+    final engine = ControlledEngine();
+    final vm = VpnViewModel(engine, MemoryCatalog(), MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize();
+      final attempt = vm.connect(null);
+      await engine.started.future;
+      engine.release.completeError(PlatformException(code: 'permission', message: 'Разрешение VPN отклонено'));
+      await attempt;
+      expect(vm.state, ConnectionState.error);
+      expect(vm.message, 'Разрешение VPN отклонено');
+      expect(engine.disconnects, 1);
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   test('clearing catalog cache preserves an active tunnel and pauses refresh', () async {
     final engine = ControlledEngine();
     final vm = VpnViewModel(engine, MemoryCatalog(), MemoryProfiles(),
