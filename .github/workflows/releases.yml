@@ -11,6 +11,11 @@ on:
         description: 'Source commit with successful Android and Windows builds'
         required: true
         type: string
+      publish_release:
+        description: 'Also publish a Release (requires repository release write access)'
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: write
   actions: read
@@ -30,5 +35,13 @@ jobs:
       - name: Publish matching successful builds
         env:
           GH_TOKEN: ${{ github.token }}
+          PUBLISH_RELEASE: ${{ inputs.publish_release && 'true' || 'false' }}
           RELEASE_SHA: ${{ github.event.workflow_run.head_sha || inputs.source_sha || 'd3cc778fc0dcd29932e0ca0ac6397cadcc9101c9' }}
         run: python .github/scripts/publish_release.py
+      - name: Export verified downloads to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: quiet-vpn-verified-downloads
+          path: release-payload/assets/
+          if-no-files-found: error
+          retention-days: 90

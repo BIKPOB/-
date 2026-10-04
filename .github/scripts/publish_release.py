@@ -74,6 +74,9 @@ notes.write_text(f'''Тестовая сборка Quiet VPN {version}, Android 
 
 [Android CI]({workflows['Build Android APK']['html_url']}) · [Windows CI]({workflows['Windows build and security audit']['html_url']})
 ''')
+if os.environ.get('PUBLISH_RELEASE', 'false') != 'true':
+    print('Verified files prepared for GitHub Actions artifacts. Release publication is disabled until write access is available.')
+    raise SystemExit(0)
 gh('release', 'create', tag, *map(str, files), '-R', REPO, '--target', SHA,
    '--title', f'Quiet VPN {version} — test build', '--notes-file', str(notes), '--prerelease', '--draft')
 gh('release', 'edit', tag, '-R', REPO, '--draft=false')
