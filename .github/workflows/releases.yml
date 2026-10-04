@@ -1,0 +1,29 @@
+name: Publish verified builds
+on:
+  push:
+    paths: ['.github/workflows/releases.yml']
+  workflow_run:
+    workflows: ['Build Android APK', 'Windows build and security audit']
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: quiet-vpn-releases
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Publish matching successful builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha || 'a459488b60e5306c56a6f54a9673f12f232c881b' }}
+        run: python .github/scripts/publish_release.py
