@@ -8,6 +8,7 @@ import '../core/models.dart';
 import '../core/profile_policy.dart';
 import '../viewmodels/vpn_view_model.dart';
 import 'catalog_page.dart';
+import 'latency_indicator.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage(this.vm, {super.key});
@@ -141,7 +142,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
       IconButton(tooltip: 'Вставить конфигурацию', onPressed: _pasteProfile, icon: const Icon(Icons.content_paste)),
       IconButton(tooltip: 'Импорт .ovpn / .conf', onPressed: _import, icon: const Icon(Icons.file_open_outlined)),
     ]), body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 820), child: Padding(
-      padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      padding: const EdgeInsets.all(16), child: CustomScrollView(slivers: [
+        SliverToBoxAdapter(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [Icon(vm.state == ConnectionState.connected ? Icons.vpn_lock : Icons.shield_outlined),
             const SizedBox(width: 12), Text(label, style: Theme.of(context).textTheme.headlineSmall)]),
@@ -172,21 +174,32 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
         const SizedBox(height: 8),
         Text('${items.length} серверов · ${vm.cached ? 'кэш' : 'каталог'} · TCP-проверки первых 10'),
         if (vm.refreshing) const LinearProgressIndicator(),
-        Expanded(child: items.isEmpty ? Center(child: Text(vm.refreshing ? 'Загрузка…' : 'Серверы не загружены. Откройте «База и протоколы» или добавьте конфигурацию .ovpn / .conf.')) : ListView.builder(
-          itemCount: items.length, itemBuilder: (context, index) {
+        ])),
+        if (items.isEmpty) SliverToBoxAdapter(child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Column(children: [
+            Text(vm.protocolFilter == 'wireguard' || vm.protocolFilter == 'amneziawg'
+              ? 'Для этого протокола нет добавленных серверов. VPN Gate предоставляет только OpenVPN. Импортируйте .conf с ключами от владельца сервера.'
+              : vm.refreshing ? 'Загрузка…' : 'Серверы не загружены. Откройте «База и протоколы» или добавьте конфигурацию.'),
+            if (vm.protocolFilter == 'wireguard' || vm.protocolFilter == 'amneziawg')
+              Wrap(spacing: 8, children: [
+                TextButton.icon(onPressed: _import, icon: const Icon(Icons.file_open_outlined), label: const Text('Импорт .conf')),
+                TextButton.icon(onPressed: _pasteProfile, icon: const Icon(Icons.content_paste), label: const Text('Вставить конфигурацию')),
+              ]),
+          ])))
+        else SliverList(delegate: SliverChildBuilderDelegate((context, index) {
             final server = items[index];
             final result = vm.health[server.id];
-            final status = switch (result?.state) {
-              Reachability.reachable => '${result!.milliseconds} мс', Reachability.unreachable => 'Нет ответа',
-              Reachability.notMeasured => 'UDP · без TCP-пробы', Reachability.paused => 'Пауза', _ => 'Не проверен',
-            };
             return ListTile(selected: server.id == vm.selectedId, onTap: () => vm.select(server.id),
               leading: Radio<String>(value: server.id, groupValue: vm.selectedId, onChanged: (_) => vm.select(server.id)),
               title: Text('${server.country} · ${server.name}', maxLines: 1, overflow: TextOverflow.ellipsis),
-              subtitle: Text('${server.protocol.toUpperCase()} · ${server.source} · ${server.transport.toUpperCase()} · $status'),
+              subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${server.protocol.toUpperCase()} · ${server.source} · ${server.transport.toUpperCase()}'),
+                LatencyIndicator(result),
+              ]),
               trailing: server.id == vm.activeServer?.id ? const Icon(Icons.check_circle_outline) : null);
-          })),
-        const Text('Публичные серверы могут вести журналы и исчезать из каталога.', style: TextStyle(fontSize: 12)),
+          }, childCount: items.length)),
+        const SliverToBoxAdapter(child: Text('Публичные серверы могут вести журналы и исчезать из каталога.', style: TextStyle(fontSize: 12))),
       ]),
     ))));
   });

@@ -49,6 +49,39 @@ public class NativeProfileTest {
  }
 }
 '''.replace('COUNT',str(len(profiles))))
+(target/'NativeStartupTest.java').write_text('''package app.quietvpn.quiet_vpn;
+import android.app.NotificationManager;
+import android.content.Context;
+import android.content.Intent;
+import org.junit.Test;
+import org.junit.runner.RunWith;
+import static org.junit.Assert.*;
+import org.robolectric.Robolectric;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
+import org.robolectric.annotation.Config;
+import de.blinkt.openvpn.core.*;
+@RunWith(RobolectricTestRunner.class)
+@Config(sdk = 34, application = QuietVpnApplication.class)
+public class NativeStartupTest {
+ @Test public void startupNotificationDoesNotCrash() throws Exception {
+  var context = RuntimeEnvironment.getApplication();
+  assertFalse(GlobalPreferences.getForceConnected());
+  var manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+  manager.createNotificationChannel(new android.app.NotificationChannel(
+    OpenVPNService.NOTIFICATION_CHANNEL_NEWSTATUS_ID, "Quiet VPN", NotificationManager.IMPORTANCE_LOW));
+  var controller = Robolectric.buildService(OpenVPNService.class).create();
+  try {
+   var method = OpenVPNService.class.getDeclaredMethod("showNotification",
+     String.class, String.class, String.class, long.class, ConnectionStatus.class, Intent.class);
+   method.setAccessible(true);
+   method.invoke(controller.get(), "Connecting", "Connecting",
+     OpenVPNService.NOTIFICATION_CHANNEL_NEWSTATUS_ID, 0L, ConnectionStatus.LEVEL_START, null);
+   assertEquals(1, manager.getActiveNotifications().length);
+  } finally { controller.destroy(); }
+ }
+}
+''')
 p = root/'android/app/build.gradle.kts'
 s = p.read_text().replace('android {', 'android {\n    testOptions { unitTests.isIncludeAndroidResources = true }', 1)
 s += '\ndependencies { testImplementation("junit:junit:4.13.2"); testImplementation("org.robolectric:robolectric:4.14.1") }\n'
