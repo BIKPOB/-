@@ -1,0 +1,42 @@
+name: Prepare verified APK download
+on:
+  push:
+    paths: ['.github/workflows/apk-download.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Download and verify completed build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 37186635652 -R BIKPOB/- -n quiet-vpn-android-apk -D payload
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, shutil
+          p=Path('payload')
+          assert (p/'SOURCE_COMMIT.txt').read_text().strip() == 'f3e20839fcdd201e629c54a9e9354b5677f6f120'
+          data=(p/'quiet-vpn-android.apk').read_bytes()
+          expected=(p/'SHA256SUMS.txt').read_text().split()[0]
+          assert hashlib.sha256(data).hexdigest() == expected
+          n=20*1024*1024
+          assert len(data) <= 2*n
+          for i in range(2):
+            out=Path(f'part-{i+1}');out.mkdir()
+            (out/f'apk.part{i+1}').write_bytes(data[i*n:(i+1)*n])
+          for f in p.iterdir():
+            if f.suffix in {'.txt','.json'}: shutil.copyfile(f,Path('part-1')/f.name)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-part-1
+          path: part-1/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-part-2
+          path: part-2/
