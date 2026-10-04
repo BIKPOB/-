@@ -20,7 +20,7 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34], application = QuietVpnApplication::class)
 class OpenVpnLifecycleTest {
     @Test fun startupDoesNotSchedulePersistedJobsWithoutBootPermission() {
-        val context = RuntimeEnvironment.getApplication<QuietVpnApplication>()
+        val context = RuntimeEnvironment.getApplication()
         assertEquals(PackageManager.PERMISSION_DENIED,
             context.packageManager.checkPermission(Manifest.permission.RECEIVE_BOOT_COMPLETED, context.packageName))
         val scheduler = context.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
