@@ -44,3 +44,14 @@ The APK includes that notice and the source/build links under
 `tools/build_openvpn.py` in this repository. All transitive source revisions
 are recorded in `openvpn-provenance.json` alongside the APK. Third-party
 components retain their respective licenses.
+
+## Startup correction in 0.5.1
+
+The embedding previously omitted GlobalPreferences initialization from the
+standalone upstream Application. OpenVPNService reads getForceConnected() when
+constructing its startup notification, which throws when the singleton is unset.
+QuietVpnApplication now initializes the preferences before any service is created.
+A Robolectric regression test constructs the actual service notification to cover
+this path; the previous parser-only test did not exercise service startup.
+This corrects an identified crash path. A device crash trace is still needed if
+the reported failure persists; a notification test is not a real tunnel test.
