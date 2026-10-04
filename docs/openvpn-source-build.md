@@ -55,3 +55,23 @@ A Robolectric regression test constructs the actual service notification to cove
 this path; the previous parser-only test did not exercise service startup.
 This corrects an identified crash path. A device crash trace is still needed if
 the reported failure persists; a notification test is not a real tunnel test.
+
+## Startup correction in 0.5.3
+
+The embedded upstream service called keepVPNAlive.scheduleKeepVPNAliveJobService
+on startup. That scheduled a persisted JobScheduler task requiring
+RECEIVE_BOOT_COMPLETED, which the embedding deliberately removed. This is another
+concrete crash path not covered by the earlier parser/notification-only tests.
+The embedding now disables that scheduling method, consistent with its in-memory
+profiles and lack of reboot recovery. It does not add a boot receiver or broaden
+permissions. The new regression checks that no jobs are scheduled and that the
+application still lacks boot permission.
+
+The upstream revoke path is now null-safe if the management thread has not yet
+started. Its notification target opens the Flutter MainActivity. Device confirmation
+is still required to attribute a user's crash to this path.
+
+Android diagnostics retain only the latest exception types and bounded stack frames
+in private app storage, excluding exception messages and VPN logs/configurations.
+The user can preview and copy the report manually; no report is uploaded automatically.
+Android 11+ process-exit reason/status metadata also helps identify native crashes.
