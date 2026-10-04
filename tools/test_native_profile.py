@@ -1,6 +1,6 @@
 """Check live VPN Gate profiles with the actual new Java parser, via Robolectric."""
 from pathlib import Path
-import base64, csv, io, subprocess
+import base64, csv, io, subprocess, shutil
 root = Path(__file__).resolve().parents[1]
 source = (root/'build/live-catalog.csv').read_text(encoding='utf-8-sig')
 rows = csv.DictReader(io.StringIO(source[source.index('#HostName,'):]))
@@ -82,6 +82,8 @@ public class NativeStartupTest {
  }
 }
 ''')
+for test in (root/'platform_templates/android_tests').glob('*.kt'):
+    shutil.copyfile(test, target/test.name)
 p = root/'android/app/build.gradle.kts'
 s = p.read_text().replace('android {', 'android {\n    testOptions { unitTests.isIncludeAndroidResources = true }', 1)
 s += '\ndependencies { testImplementation("junit:junit:4.13.2"); testImplementation("org.robolectric:robolectric:4.14.1") }\n'

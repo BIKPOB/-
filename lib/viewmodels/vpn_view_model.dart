@@ -185,7 +185,7 @@ class VpnViewModel extends ChangeNotifier {
           _verificationClient?.close(force: true); _connectionEpoch++;
         }
         state = ConnectionState.connecting;
-        _connectTimeout ??= Timer(const Duration(seconds: 50), () { unawaited(_fail('Таймаут OpenVPN')); });
+        _connectTimeout ??= Timer(const Duration(seconds: 50), () { unawaited(_fail('Таймаут VPN')); });
         _notify();
       case ConnectionState.disconnected:
         _nativeConnected = false;
@@ -203,7 +203,7 @@ class VpnViewModel extends ChangeNotifier {
         state = ConnectionState.disconnected;
         _notify();
       case ConnectionState.error:
-        unawaited(_fail(event.message ?? 'Ошибка OpenVPN'));
+        unawaited(_fail(event.message ?? 'Ошибка VPN'));
     }
   }
 

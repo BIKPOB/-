@@ -95,6 +95,10 @@ class OpenVpnBridge(private val activity: Activity) {
             result.error("vpn", "Не удалось подготовить OpenVPN. Проверьте настройки другого VPN.", null)
         }
     }
+    fun detach() {
+        pending?.error("cancelled", "Запрос разрешения прерван. Повторите подключение.", null)
+        pending = null; args = null
+    }
     fun permissionResult(code: Int) {
         if (pending == null) return
         if (code == Activity.RESULT_OK) launch()
@@ -118,8 +122,12 @@ class OpenVpnBridge(private val activity: Activity) {
                 if (error != de.blinkt.openvpn.R.string.no_error_found) throw IllegalArgumentException()
                 ProfileManager.getInstance(context)
                 ProfileManager.setTemporaryProfile(context, profile)
+                NativeUtils.getNativeAPI() // Fail on this guarded worker if JNI cannot load.
                 VPNLaunchHelper.startOpenVpn(profile, context, "Quiet VPN", false)
                 Handler(Looper.getMainLooper()).post { result.success(null) }
+            } catch (_: LinkageError) {
+                OpenVpnSession.emit("error")
+                Handler(Looper.getMainLooper()).post { result.error("library", "VPN-библиотека несовместима с устройством", null) }
             } catch (_: Exception) {
                 OpenVpnSession.emit("error")
                 Handler(Looper.getMainLooper()).post { result.error("profile", "OpenVPN не смог запустить профиль", null) }

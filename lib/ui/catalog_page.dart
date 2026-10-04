@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/material.dart';
 import '../platform/runtime_manager.dart';
 import '../viewmodels/vpn_view_model.dart';
@@ -12,6 +13,13 @@ class _CatalogPageState extends State<CatalogPage> {
   late final runtime = RuntimeManager(Directory('${widget.vm.catalog.cacheFile.parent.path}/runtime-cache'));
   @override void initState() { super.initState(); runtime.refresh(); }
   @override void dispose() { runtime.dispose(); super.dispose(); }
+  Future<void> _source(String url) async {
+    try {
+      if (!await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication)) throw StateError('open');
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось открыть сайт источника')));
+    }
+  }
   String _size(int bytes) => bytes < 1024 * 1024 ? '${(bytes / 1024).toStringAsFixed(0)} КБ' : '${(bytes / 1024 / 1024).toStringAsFixed(1)} МБ';
   Future<void> _clear() async {
     final accepted = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
@@ -68,6 +76,14 @@ class _CatalogPageState extends State<CatalogPage> {
               subtitle: Text(Platform.isAndroid
                 ? 'Движки встроены. Добавьте .conf или вставьте конфигурацию кнопкой на главном экране. Нужны ключи от владельца сервера; VPN Gate их не предоставляет.'
                 : 'Новые движки пока доступны только в Android.')),
+            if (Platform.isAndroid) ...[
+              const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: Text(
+                'Готовая конфигурация выдаётся владельцем сервера. Для WireGuard можно получить .conf в личном кабинете Proton VPN; для AmneziaWG — экспортировать .conf своего сервера. Автоматической выдачи ключей в Quiet VPN нет.')),
+              Wrap(spacing: 8, children: [
+                TextButton(onPressed: () => _source('https://protonvpn.com/support/wireguard-configurations'), child: const Text('Получить WireGuard .conf')),
+                TextButton(onPressed: () => _source('https://docs.amnezia.org/documentation/instructions/use-amneziawg-app/'), child: const Text('Получить AmneziaWG .conf')),
+              ]),
+            ],
             const Divider(),
             Text('Регионы', style: Theme.of(context).textTheme.titleLarge),
             ...regions.map((region) => ListTile(leading: const Icon(Icons.public), title: Text(region),

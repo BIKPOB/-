@@ -13,6 +13,13 @@ AllowedIPs = 0.0.0.0/0, ::/0
 Endpoint = example.com:51820
 ''';
 void main() {
+  test('new AmneziaWG fields are retained and invalid header keys are rejected', () {
+    final updated = config.replaceFirst('[Peer]', 'HeaderProtectionKey = AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\nContentPaddingAddition = 8\n[Peer]');
+    final parsed = ProfilePolicy.parse(updated);
+    expect(parsed.protocol, 'amneziawg');
+    expect(parsed.text, contains('ContentPaddingAddition = 8'));
+    expect(() => ProfilePolicy.parse(config.replaceFirst('[Peer]', 'HeaderProtectionKey = invalid\n[Peer]')), throwsFormatException);
+  });
   test('WireGuard config is detected and given an initial keepalive', () {
     final parsed = ProfilePolicy.parse(config);
     expect(parsed.protocol, 'wireguard'); expect(parsed.port, 51820);

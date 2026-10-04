@@ -21,6 +21,13 @@ class MainActivity : FlutterActivity() {
             override fun onCancel(args: Any?) { WgSession.sink = null }
         })
     }
+    override fun cleanUpFlutterEngine(engine: io.flutter.embedding.engine.FlutterEngine) {
+        if (::wg.isInitialized) wg.detach()
+        if (::ovpn.isInitialized) ovpn.detach()
+        WgSession.sink = null
+        OpenVpnSession.sink = null
+        super.cleanUpFlutterEngine(engine)
+    }
     @Deprecated("Required by the OpenVPN plugin permission contract")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (requestCode == 41) wg.permissionResult(resultCode)

@@ -110,7 +110,9 @@ class ProfilePolicy {
     final fields = <String, Map<String, String>>{};
     String? section;
     const standardInterface = {'privatekey', 'address', 'dns', 'mtu', 'listenport'};
-    const special = {'jc', 'jmin', 'jmax', 's1', 's2', 's3', 's4', 'h1', 'h2', 'h3', 'h4', 'i1', 'i2', 'i3', 'i4', 'i5'};
+    const special = {'jc', 'jmin', 'jmax', 's1', 's2', 's3', 's4', 'h1', 'h2', 'h3', 'h4', 'i1', 'i2', 'i3', 'i4', 'i5', 'headerprotectionkey', 'contentpaddingaddition',
+      'rekeyaftertime', 'rekeytimeout', 'rejectaftertime', 'keepalivetimeout',
+      'maxhandshakeattempts', 'randomtrailers', 'disablecookies'};
     const peerKeys = {'publickey', 'presharedkey', 'endpoint', 'allowedips', 'persistentkeepalive'};
     var awg = false;
     final output = <String>[];
@@ -118,6 +120,9 @@ class ProfilePolicy {
       final line = raw.split('#').first.trim();
       if (line.isEmpty) continue;
       if (line == '[Interface]' || line == '[Peer]') {
+        if (line == '[Peer]' && !fields.containsKey('[Interface]')) {
+          throw const FormatException('Секция Interface должна быть перед Peer');
+        }
         section = line;
         if (fields.containsKey(section)) throw const FormatException('Поддерживается один Interface и один Peer');
         fields[section] = {}; output.add(line); continue;
@@ -147,7 +152,8 @@ class ProfilePolicy {
       return ip != null && bits != null && bits >= 0 && bits <= (ip.type == InternetAddressType.IPv4 ? 32 : 128);
     }
     if (!keyValid(own['privatekey']) || !keyValid(peer['publickey']) ||
-        (peer.containsKey('presharedkey') && !keyValid(peer['presharedkey']))) {
+        (peer.containsKey('presharedkey') && !keyValid(peer['presharedkey'])) ||
+        (own.containsKey('headerprotectionkey') && !keyValid(own['headerprotectionkey']))) {
       throw const FormatException('Нужны действительные 32-байтовые ключи WireGuard');
     }
     if (own['address'] == null || !own['address']!.split(',').every(cidr) ||

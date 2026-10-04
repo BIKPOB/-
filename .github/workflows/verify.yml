@@ -44,7 +44,7 @@ jobs:
         id: awg-cache
         with:
           path: android/app/libs/amneziawg-tunnel.aar
-          key: awg-ff15093bf3856fea0947923474870b86efb682f0
+          key: awg-ff15093bf3856fea0947923474870b86efb682f0-fgs-v2
       - name: Build pinned AmneziaWG Android tunnel
         if: steps.awg-cache.outputs.cache-hit != 'true'
         run: python tools/build_awg.py
