@@ -5,12 +5,14 @@
 Android-адаптер, Windows-адаптер, опциональный собственный сервер каталога,
 Docker/Caddy, тесты и CI.
 
-**Статус: тестовая версия 0.3.0 для Android и Windows x64 собрана.**
-Встроены управление базой/кэшем и установка официального OpenVPN для Windows.
-Прошли анализ, 12 Flutter-тестов и ClamAV. Реальное подключение ещё не проверено.
-**Android-модуль содержит устаревший OpenSSL: для повседневного использования
-APK пока не рекомендуется.** См. [отчёт безопасности](docs/security-audit.md).
-Поддерживается только OpenVPN; остальные протоколы ещё не реализованы.
+**Статус: тестовая версия 0.5.0 для Android и Windows x64 собрана.**
+Android OpenVPN собирается из закреплённых исходников с OpenSSL 4.0.3;
+старый модуль с OpenSSL 1.1.1l удалён. На Android встроены OpenVPN,
+WireGuard и AmneziaWG; на Windows реализован OpenVPN.
+Прошли анализ, 20 Flutter-тестов, нативный разбор трёх реальных OpenVPN-профилей
+и ClamAV (0 обнаружений). Windows OSV: 70 Pub-пакетов, 0 предупреждений.
+Реальное подключение на устройстве и утечки ещё не проверены; APK имеет тестовую
+подпись. См. [отчёт безопасности](docs/security-audit.md).
 
 ## Что работает по архитектуре и реализовано в коде
 
@@ -23,7 +25,8 @@ APK пока не рекомендуется.** См. [отчёт безопас
 - TCP latency только для TCP-профилей. Для UDP отображается отсутствие TCP-пробы.
 - При сворачивании UI список перестаёт опрашиваться; нативный VPN продолжает работу.
   Это экономит батарею и не выдаёт Dart Timer за надёжный Android background service.
-- Android подключает встроенный движок через openvpn_flutter/ics-openvpn;
+- Android подключает собранный из исходников ics-openvpn через собственные
+  MethodChannel/EventChannel;
   устанавливать отдельный OpenVPN Connect на Android не требуется.
 - Windows управляет настоящим OpenVPN-процессом через защищённый паролем management
   socket на loopback. Его события определяют состояние; stdout не используется
@@ -41,20 +44,23 @@ APK пока не рекомендуется.** См. [отчёт безопас
 ## Быстрый старт
 
 Проверяемая в CI конфигурация: Flutter **3.32.8**, Dart из Flutter, Python 3.12,
-JDK 17, Android SDK 35. Для Windows — Windows 10/11 x64, Visual Studio с Desktop
+JDK 17, Android SDK 36 (compile SDK), SWIG, NDK 30 для OpenVPN.
+Подробности: [сборка OpenVPN](docs/openvpn-source-build.md). Для Windows — Windows 10/11 x64, Visual Studio с Desktop
 development with C++ и Windows SDK. Flutter Windows собирается на Windows.
 
 ```sh
-python tools/bootstrap.py
+python tools/bootstrap.py --platforms android
+python tools/build_awg.py
+python tools/build_openvpn.py
 flutter analyze
 flutter test
-flutter build apk --debug
+flutter build apk --release --target-platform android-arm64,android-arm
 ```
 
 На Windows:
 
 ```powershell
-python tools/bootstrap.py
+python tools/bootstrap.py --platforms windows
 flutter build windows --release
 ```
 
@@ -67,7 +73,7 @@ manifest/MainActivity. Это позволяет не включать непо�
 Команда `flutter run -d windows` подходит для разработки. Для управления OpenVPN
 нужны повышенные права. Release runner manifest запрашивает Administrator.
 Цель Android — API 35, минимум API 26. Публикация в магазинах и release signing
-не настроены. Нативные зависимости плагина, target SDK и поддержка устройств с
+не настроены. Нативные зависимости, target SDK и поддержка устройств с
 16 КБ memory pages должны быть проверены перед публикацией.
 
 ## Windows: VPN-движок
@@ -175,8 +181,9 @@ python catalog_service.py --host 127.0.0.1 --port 8080
 
 ## Лицензии
 
-Авторский код предоставлен под GPL-3.0-or-later (см. LICENSE.md). Используемый
-openvpn_flutter опубликован под GPL-3.0 и включает интеграцию с ics-openvpn.
+Авторский код предоставлен под GPL-3.0-or-later (см. LICENSE.md).
+Лицензии и закреплённые исходники ics-openvpn описаны в
+[документе сборки](docs/openvpn-source-build.md); notices включены в APK.
 Движки и прочие зависимости сохраняют собственные лицензии. Архив содержит исходники
 интеграции, а не сторонние VPN-бинарники. При распространении сборки приложите
 необходимые license notices и соответствующие исходники зависимостей.

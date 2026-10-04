@@ -8,6 +8,8 @@ an in-process MethodChannel/EventChannel adapter and an AAR built from
 Reproduction: run `python tools/bootstrap.py --platforms android`, then
 `python tools/build_awg.py` and `python tools/build_openvpn.py`, followed by
 `flutter build apk --release --target-platform android-arm64,android-arm`.
+Build tooling: Java 17, compile SDK 36 (target 35, min 26), OpenVPN NDK
+30.0.14904198, AGP/Gradle 8.13. The Flutter application uses NDK 27.0.12077973.
 The GitHub Android workflow prepares Java, SDK licenses and SWIG and records
 source revisions and native-library version markers with the artifact.
 
