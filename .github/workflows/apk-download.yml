@@ -9,19 +9,19 @@ permissions:
 jobs:
   package:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - name: Download and verify completed build
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run watch 37189726061 -R BIKPOB/- --exit-status
-          gh run download 37189726061 -R BIKPOB/- -n quiet-vpn-android-apk -D payload
+          gh run watch 37203887702 -R BIKPOB/- --exit-status
+          gh run download 37203887702 -R BIKPOB/- -n quiet-vpn-android-apk -D payload
           python - <<'PY'
           from pathlib import Path
           import hashlib, shutil
           p=Path('payload')
-          assert (p/'SOURCE_COMMIT.txt').read_text().strip() == '7ef263b99d83256e35ef5c2f63a50204e8e12c64'
+          assert (p/'SOURCE_COMMIT.txt').read_text().strip() == '1655f9a4685bd3307284aa5e18df000a14b76d23'
           data=(p/'quiet-vpn-android.apk').read_bytes()
           expected=(p/'SHA256SUMS.txt').read_text().split()[0]
           assert hashlib.sha256(data).hexdigest() == expected
