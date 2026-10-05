@@ -14,7 +14,15 @@ import java.io.StringReader
 import java.util.concurrent.Executors
 
 /** Process-owned session; Activity recreation must not recreate or lose the tunnel. */
-object OpenVpnSession : VpnStatus.StateListener {
+object OpenVpnSession : VpnStatus.StateListener, VpnStatus.ByteCountListener {
+    @Volatile private var counters: Map<String, Long>? = null
+    var detail = "Запуск OpenVPN"
+        private set
+    override fun updateByteCount(received: Long, sent: Long, diffIn: Long, diffOut: Long) {
+        counters = mapOf("received" to received, "sent" to sent)
+    }
+    fun traffic(): Map<String, Long>? = if (state == "connected") counters else null
+
     private val main = Handler(Looper.getMainLooper())
     val worker = Executors.newSingleThreadExecutor()
     var state = "disconnected"
@@ -41,6 +49,7 @@ object OpenVpnSession : VpnStatus.StateListener {
             nm.createNotificationChannel(NotificationChannel(id, "Quiet VPN", NotificationManager.IMPORTANCE_LOW))
         }
         VpnStatus.addStateListener(this)
+        VpnStatus.addByteCountListener(this)
         check(app.bindService(Intent(app, OpenVPNService::class.java).setAction(OpenVPNService.START_SERVICE), binding, Context.BIND_AUTO_CREATE))
         initialized = true
     }
@@ -54,7 +63,21 @@ object OpenVpnSession : VpnStatus.StateListener {
             ConnectionStatus.LEVEL_WAITING_FOR_USER_INPUT -> "error"
             else -> if (raw == "NOPROCESS") "disconnected" else "connecting"
         }
-        emit(next)
+        val safeDetail = when (raw) {
+            "RESOLVE" -> "Разрешение адреса сервера"
+            "TCP_CONNECT" -> "Установка TCP-соединения"
+            "WAIT" -> "Ожидание ответа сервера"
+            "AUTH" -> "TLS и авторизация"
+            "GET_CONFIG" -> "Получение настроек туннеля"
+            "ASSIGN_IP", "ADD_ROUTES" -> "Настройка адреса и маршрутов"
+            "RECONNECTING" -> "Повторное подключение"
+            else -> "OpenVPN: $next"
+        }
+        main.post {
+            detail = if (level == ConnectionStatus.LEVEL_AUTH_FAILED) "Сервер отклонил авторизацию" else safeDetail
+            state = next
+            sink?.success(mapOf("state" to next, "detail" to detail))
+        }
     }
     fun stop(result: MethodChannel.Result, attempt: Int = 0) {
         val current = service
@@ -78,6 +101,7 @@ class OpenVpnBridge(private val activity: Activity) {
             OpenVpnSession.initialize(activity)
             when (call.method) {
                 "stage" -> result.success(OpenVpnSession.state)
+                "traffic" -> result.success(OpenVpnSession.traffic())
                 "stop" -> OpenVpnSession.stop(result)
                 "start" -> {
                     if (pending != null) { result.error("busy", "VPN permission pending", null); return }

@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import 'package:permission_handler/permission_handler.dart';
 import '../core/models.dart';
+import '../core/traffic.dart';
 import 'vpn_engine.dart';
 
 class OpenVpnAndroidEngine implements VpnEngine {
@@ -10,12 +11,14 @@ class OpenVpnAndroidEngine implements VpnEngine {
   StreamSubscription<dynamic>? _subscription;
   @override Stream<EngineEvent> get events => _events.stream;
   void _stage(dynamic stage) {
-    _events.add(EngineEvent(switch (stage) {
+    final detail = stage is Map ? stage['detail'] as String? : null;
+    final value = stage is Map ? stage['state'] : stage;
+    _events.add(EngineEvent(switch (value) {
       'connected' => ConnectionState.connected,
       'connecting' => ConnectionState.connecting,
       'error' => ConnectionState.error,
       _ => ConnectionState.disconnected,
-    }));
+    }, detail));
   }
   @override Future<void> initialize() async {
     _subscription = const EventChannel('quietvpn/openvpn-events').receiveBroadcastStream().listen(_stage,
@@ -42,7 +45,13 @@ class OpenVpnAndroidEngine implements VpnEngine {
 }
 
 
-class AndroidEngine implements VpnEngine {
+class AndroidEngine implements VpnEngine, TrafficSource {
+  @override Future<TrafficCounters?> readTraffic() async {
+    final channel = _active == 'openvpn' ? const MethodChannel('quietvpn/openvpn') : _channel;
+    final data = await channel.invokeMapMethod<String, dynamic>('traffic');
+    if (data == null) return null;
+    return TrafficCounters(data['received'] as int, data['sent'] as int);
+  }
   final _openvpn = OpenVpnAndroidEngine();
   static const _channel = MethodChannel('quietvpn/wg');
   static const _nativeEvents = EventChannel('quietvpn/wg-events');

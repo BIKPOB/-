@@ -17,6 +17,7 @@ import java.util.concurrent.Executors
 interface WgDriver {
     fun start(config: Config, handshake: () -> Unit)
     fun stop()
+    fun traffic(): Map<String, Long>? = null
 }
 
 class NativeWgDriver(context: Context, disconnected: () -> Unit) : WgDriver {
@@ -30,6 +31,10 @@ class NativeWgDriver(context: Context, disconnected: () -> Unit) : WgDriver {
     override fun start(config: Config, handshake: () -> Unit) {
         backend.setStatusCallback { connected -> if (connected) handshake() }
         backend.setState(tunnel, Tunnel.State.UP, config)
+    }
+    override fun traffic(): Map<String, Long> {
+        val stats = backend.getStatistics(tunnel)
+        return mapOf("received" to stats.totalRx(), "sent" to stats.totalTx())
     }
     override fun stop() {
         backend.setStatusCallback(null)
@@ -104,6 +109,14 @@ class WgController(private val context: Context,
             }
         }
     }
+    fun traffic(result: MethodChannel.Result) {
+        if (state != "connected" || stopping) { result.success(null); return }
+        val token = generation
+        worker.execute {
+            val value = try { driver?.traffic() } catch (_: Exception) { null } catch (_: LinkageError) { null }
+            main.post { result.success(if (generation == token && !stopping) value else null) }
+        }
+    }
     fun closeForTest() { worker.shutdownNow() }
 }
 
@@ -124,6 +137,7 @@ class WgBridge(private val activity: Activity) {
         try {
             when (call.method) {
                 "stage" -> result.success(WgSession.state)
+                "traffic" -> WgSession.get(activity).traffic(result)
                 "stop" -> WgSession.get(activity).stop(result)
                 "start" -> {
                     if (pending != null) { result.error("BUSY", "Ожидается разрешение VPN", null); return }

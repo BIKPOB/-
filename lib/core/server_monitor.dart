@@ -49,3 +49,16 @@ class ServerMonitor {
     _sockets.clear();
   }
 }
+
+/// Bounded round-robin queue; UDP entries never consume a TCP probe slot.
+class ProbeQueue {
+  int _cursor = 0;
+  List<VpnServer> next(List<VpnServer> servers) {
+    final tcp = servers.where((s) => s.transport == 'tcp').toList();
+    if (tcp.isEmpty) return [];
+    final batch = List.generate(tcp.length < 10 ? tcp.length : 10,
+      (i) => tcp[(_cursor + i) % tcp.length]);
+    _cursor = (_cursor + batch.length) % tcp.length;
+    return batch;
+  }
+}

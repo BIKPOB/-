@@ -3,12 +3,15 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import '../core/models.dart';
+import '../core/traffic.dart';
 import '../core/management_protocol.dart';
 import 'vpn_engine.dart';
 
 /// Controls one owned foreground OpenVPN process, never arbitrary system tunnels.
 /// Uses the official management protocol instead of guessing status from logs.
-class WindowsEngine implements VpnEngine {
+class WindowsEngine implements VpnEngine, TrafficSource {
+  TrafficCounters? _traffic;
+  @override Future<TrafficCounters?> readTraffic() async => _traffic;
   WindowsEngine(this.supportDirectory);
   final Directory supportDirectory;
   final _events = StreamController<EngineEvent>.broadcast();
@@ -50,6 +53,7 @@ class WindowsEngine implements VpnEngine {
     if (_process != null) throw StateError('Сначала отключите активный процесс');
     final executable = _executable();
     await _verifyExecutable(executable);
+    _traffic = null;
     _closing = false;
     final epoch = ++_epoch;
     try {
@@ -96,7 +100,7 @@ class WindowsEngine implements VpnEngine {
         if (epoch != _epoch || _closing) return;
         if (line.contains('SUCCESS: password is correct')) {
           authenticated = true;
-          channel.write('state on\nhold off\nhold release\n');
+          channel.write('state on\nbytecount 1\nhold off\nhold release\n');
         }
         if (!authenticated) return;
         if (line.startsWith(">PASSWORD:Need 'Auth'")) {
@@ -109,6 +113,13 @@ class WindowsEngine implements VpnEngine {
           } catch (_) { _emit(const EngineEvent(ConnectionState.error, 'Некорректные учётные данные')); }
         } else if (line.startsWith('>PASSWORD:Need')) {
           _emit(const EngineEvent(ConnectionState.error, 'Зашифрованный private key пока не поддерживается'));
+        }
+        if (line.startsWith('>BYTECOUNT:')) {
+          final values = line.substring(11).split(',');
+          if (values.length == 2) {
+            final received = int.tryParse(values[0]), sent = int.tryParse(values[1]);
+            if (received != null && sent != null && received >= 0 && sent >= 0) _traffic = TrafficCounters(received, sent);
+          }
         }
         final event = parseManagementState(line);
         if (event != null) _emit(event);
@@ -133,6 +144,7 @@ class WindowsEngine implements VpnEngine {
   }
 
   @override Future<void> disconnect() async {
+    _traffic = null;
     _closing = true;
     final process = _process;
     if (process != null) {

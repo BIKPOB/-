@@ -6,6 +6,7 @@ import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 import '../core/models.dart';
+import '../core/traffic.dart';
 import '../core/profile_policy.dart';
 import '../viewmodels/vpn_view_model.dart';
 import 'catalog_page.dart';
@@ -162,6 +163,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
         Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [Icon(vm.state == ConnectionState.connected ? Icons.vpn_lock : Icons.shield_outlined),
             const SizedBox(width: 12), Text(label, style: Theme.of(context).textTheme.headlineSmall)]),
+          Text('↓ ${formatTrafficRate(vm.traffic.download)}   ↑ ${formatTrafficRate(vm.traffic.upload)}', semanticsLabel: 'Скорость загрузки ${formatTrafficRate(vm.traffic.download)}, выгрузки ${formatTrafficRate(vm.traffic.upload)}'),
           if (vm.activeServer != null) Text('${vm.activeServer!.country} · ${vm.activeServer!.name}'),
           if (vm.message != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(vm.message!)),
           const SizedBox(height: 12),
@@ -188,7 +190,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
           items: [const DropdownMenuItem<String>(value: null, child: Text('Все регионы')),
             ...countries.map((c) => DropdownMenuItem(value: c, child: Text(c)))], onChanged: vm.filterCountry),
         const SizedBox(height: 8),
-        Text('${items.length} серверов · ${vm.cached ? 'кэш' : 'каталог'} · TCP-проверки первых 10'),
+        Text('${items.length} серверов · ${vm.cached ? 'кэш' : 'каталог'} · TCP-проверки по очереди, по 10'),
         if (vm.refreshing) const LinearProgressIndicator(),
         ])),
         if (items.isEmpty) SliverToBoxAdapter(child: Padding(

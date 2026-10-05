@@ -11,7 +11,7 @@ EngineEvent? parseManagementState(String line) {
     'CONNECTED' => fields[2] == 'SUCCESS' ? const EngineEvent(ConnectionState.connected) : null,
     'EXITING' => const EngineEvent(ConnectionState.disconnected),
     'CONNECTING' || 'WAIT' || 'AUTH' || 'GET_CONFIG' || 'ASSIGN_IP' ||
-      'ADD_ROUTES' || 'RECONNECTING' || 'RESOLVE' || 'TCP_CONNECT' => const EngineEvent(ConnectionState.connecting),
+      'ADD_ROUTES' || 'RECONNECTING' || 'RESOLVE' || 'TCP_CONNECT' => EngineEvent(ConnectionState.connecting, 'OpenVPN: ${fields[1]}'),
     _ => null,
   };
 }

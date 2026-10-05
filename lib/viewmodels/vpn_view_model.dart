@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../core/models.dart';
+import '../core/traffic.dart';
 import '../core/profile_policy.dart';
 import '../core/server_monitor.dart';
 import '../data/catalog_repository.dart';
@@ -35,7 +36,26 @@ class VpnViewModel extends ChangeNotifier {
   String? _pendingFailure;
   bool get canDisconnect => _nativeNeedsStop;
   int _connectionEpoch = 0, _probeEpoch = 0;
-  Timer? _poll, _connectTimeout, _catalogTimer;
+  Timer? _poll, _connectTimeout, _catalogTimer, _trafficTimer;
+  final traffic = TrafficMeter();
+  final _clock = Stopwatch()..start();
+  final _probeQueue = ProbeQueue();
+  String? connectionStage;
+  void _scheduleTraffic() {
+    _trafficTimer?.cancel();
+    final source = engine is TrafficSource ? engine as TrafficSource : null;
+    if (_disposed || !_foreground || state != ConnectionState.connected || source == null) {
+      traffic.reset(); return;
+    }
+    final epoch = _connectionEpoch;
+    _trafficTimer = Timer(const Duration(seconds: 1), () async {
+      TrafficCounters? counters;
+      try { counters = await source.readTraffic().timeout(const Duration(seconds: 2)); } catch (_) { }
+      if (_disposed || !_foreground || epoch != _connectionEpoch || state != ConnectionState.connected) return;
+      if (counters == null) { traffic.reset(); } else { traffic.sample(counters, _clock.elapsed); }
+      _notify(); _scheduleTraffic();
+    });
+  }
   StreamSubscription<EngineEvent>? _subscription;
   HttpClient? _verificationClient;
   VpnServer? get selected {
@@ -98,6 +118,7 @@ class VpnViewModel extends ChangeNotifier {
   }
   void setForeground(bool visible) {
     _foreground = visible;
+    _scheduleTraffic();
     _probeEpoch++; monitor.cancel(); _poll?.cancel();
     if (visible) {
       unawaited(engine.reconcile().catchError((Object _) { message = 'Не удалось сверить состояние VPN'; _notify(); }));
@@ -114,11 +135,15 @@ class VpnViewModel extends ChangeNotifier {
     if (!_foreground || _disposed) return;
     _poll = Timer(Duration(milliseconds: immediate ? 0 : 30000 + Random().nextInt(3000)), () async {
       final epoch = _probeEpoch;
-      final candidates = filtered.take(10).toList();
+      final visible = filtered;
+      for (final server in visible.where((s) => s.transport != 'tcp')) {
+        health[server.id] = const HealthResult(Reachability.notMeasured);
+      }
+      final candidates = _probeQueue.next(visible);
       final results = await monitor.sample(candidates);
       if (_disposed) return;
       if (epoch == _probeEpoch && _foreground) { health = {...health, ...results}; _notify(); }
-      _scheduleProbe();
+      if (epoch == _probeEpoch) _scheduleProbe();
     });
   }
   Future<void> importProfile(String text, String name, String region) async {
@@ -150,11 +175,12 @@ class VpnViewModel extends ChangeNotifier {
       if (credentials != null) await store.saveCredentials(server.id, credentials);
       _nativeNeedsStop = true; activeServer = server;
       state = ConnectionState.connecting;
+      traffic.reset(); connectionStage = 'Запуск VPN';
       _connectionEpoch++;
       _connectTimeout?.cancel();
       _connectTimeout = Timer(const Duration(seconds: 50), () {
         if (state == ConnectionState.connecting) {
-          unawaited(_fail('Таймаут подключения. Попробуйте другой сервер.'));
+          unawaited(_fail('Таймаут: ${connectionStage ?? 'нет ответа'}. Попробуйте другой сервер или транспорт.'));
         }
       });
       _notify();
@@ -180,6 +206,8 @@ class VpnViewModel extends ChangeNotifier {
         if (!_verifying && state != ConnectionState.connected) unawaited(_verifyInternet());
       case ConnectionState.connecting:
         _nativeConnected = false;
+        connectionStage = event.message ?? connectionStage;
+        message = connectionStage; traffic.reset(); _trafficTimer?.cancel();
         _nativeNeedsStop = true;
         if (state == ConnectionState.connected || _verifying) {
           _verificationClient?.close(force: true); _connectionEpoch++;
@@ -222,10 +250,14 @@ class VpnViewModel extends ChangeNotifier {
       })().timeout(const Duration(seconds: 8));
       if (!_disposed && epoch == _connectionEpoch && _nativeNeedsStop) {
         _connectTimeout?.cancel(); _connectTimeout = null; state = ConnectionState.connected;
-        message = '${activeServer?.protocol ?? 'VPN'} подключён, HTTPS-проверка пройдена'; _notify();
+        message = '${activeServer?.protocol ?? 'VPN'} подключён, HTTPS-проверка пройдена'; _scheduleTraffic(); _notify();
       }
     } catch (_) {
-      if (epoch == _connectionEpoch && !_stopping) await _fail('Туннель поднят, но HTTPS-проверка не прошла');
+      if (!_disposed && epoch == _connectionEpoch && !_stopping && _nativeConnected && _nativeNeedsStop) {
+        _connectTimeout?.cancel(); _connectTimeout = null; state = ConnectionState.connected;
+        message = 'Туннель подключён. Доступ в интернет не подтверждён: HTTPS-проверка не прошла.';
+        _scheduleTraffic(); _notify();
+      }
     } finally {
       client.close(force: true);
       if (identical(_verificationClient, client)) _verificationClient = null;
@@ -239,6 +271,7 @@ class VpnViewModel extends ChangeNotifier {
   Future<void> _fail(String reason) async {
     if (_stopping || _disposed) return;
     if (busy) { _pendingFailure = reason; return; }
+    traffic.reset(); _trafficTimer?.cancel();
     _stopping = true; _nativeConnected = false; _connectionEpoch++; _connectTimeout?.cancel(); _connectTimeout = null;
     _verificationClient?.close(force: true);
     try {
@@ -250,6 +283,7 @@ class VpnViewModel extends ChangeNotifier {
   }
   Future<void> disconnect() async {
     if (busy || _stopping) return;
+    traffic.reset(); _trafficTimer?.cancel();
     busy = true; _stopping = true; _nativeConnected = false; _connectionEpoch++;
     _connectTimeout?.cancel(); _connectTimeout = null; _verificationClient?.close(force: true); _notify();
     try {
@@ -259,7 +293,7 @@ class VpnViewModel extends ChangeNotifier {
     finally { busy = false; _stopping = false; _notify(); }
   }
   @override void dispose() {
-    _disposed = true; _poll?.cancel(); _catalogTimer?.cancel(); _connectTimeout?.cancel();
+    _disposed = true; _trafficTimer?.cancel(); _poll?.cancel(); _catalogTimer?.cancel(); _connectTimeout?.cancel();
     _verificationClient?.close(force: true); monitor.cancel(); catalog.dispose();
     unawaited(_subscription?.cancel());
     super.dispose();
