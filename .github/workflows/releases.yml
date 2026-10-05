@@ -1,7 +1,5 @@
 name: Publish verified builds
 on:
-  push:
-    paths: ['.github/workflows/releases.yml']
   workflow_run:
     workflows: ['Build Android APK', 'Windows build and security audit']
     types: [completed]
@@ -24,7 +22,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    if: github.event_name != 'workflow_run' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
@@ -36,7 +34,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PUBLISH_RELEASE: ${{ inputs.publish_release && 'true' || 'false' }}
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha || inputs.source_sha || 'd3cc778fc0dcd29932e0ca0ac6397cadcc9101c9' }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha || inputs.source_sha }}
         run: python .github/scripts/publish_release.py
       - name: Export verified downloads to GitHub
         uses: actions/upload-artifact@v4
