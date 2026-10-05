@@ -15,13 +15,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run watch 37203887702 -R BIKPOB/- --exit-status
-          gh run download 37203887702 -R BIKPOB/- -n quiet-vpn-android-apk -D payload
+          gh run watch 37319370342 -R BIKPOB/- --exit-status
+          gh run download 37319370342 -R BIKPOB/- -n quiet-vpn-android-apk -D payload
           python - <<'PY'
           from pathlib import Path
           import hashlib, shutil
           p=Path('payload')
-          assert (p/'SOURCE_COMMIT.txt').read_text().strip() == '1655f9a4685bd3307284aa5e18df000a14b76d23'
+          assert (p/'SOURCE_COMMIT.txt').read_text().strip() == '83bceb7402683e4152102eaec63961e44c265b95'
           data=(p/'quiet-vpn-android.apk').read_bytes()
           expected=(p/'SHA256SUMS.txt').read_text().split()[0]
           assert hashlib.sha256(data).hexdigest() == expected
