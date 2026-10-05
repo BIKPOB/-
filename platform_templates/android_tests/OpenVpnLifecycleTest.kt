@@ -33,6 +33,16 @@ class OpenVpnLifecycleTest {
         val service = Robolectric.buildService(OpenVPNService::class.java).create()
         try { service.get().onRevoke() } finally { service.destroy() }
     }
+    @Test fun tunnelCountersAreUnavailableAfterDisconnect() {
+        OpenVpnSession.emit("connected")
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        OpenVpnSession.updateByteCount(4096L, 2048L, 0L, 0L)
+        assertEquals(4096L, OpenVpnSession.traffic()?.get("received"))
+        assertEquals(2048L, OpenVpnSession.traffic()?.get("sent"))
+        OpenVpnSession.emit("disconnected")
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertNull(OpenVpnSession.traffic())
+    }
     @Test fun diagnosticsExcludeExceptionMessagesAndSecretValues() {
         val secret = "PRIVATE_KEY_TEST_SENTINEL"
         val report = CrashDiagnostics.sanitized(IllegalStateException(secret, SecurityException(secret)))

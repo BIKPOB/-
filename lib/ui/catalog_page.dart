@@ -15,7 +15,7 @@ class _CatalogPageState extends State<CatalogPage> {
   @override void dispose() { runtime.dispose(); super.dispose(); }
   Future<void> _source(String url) async {
     try {
-      if (!await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication)) throw StateError('open');
+      if (!await launchUrl(Uri.parse(url), mode: Platform.isAndroid ? LaunchMode.inAppBrowserView : LaunchMode.externalApplication)) throw StateError('open');
     } catch (_) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось открыть сайт источника')));
     }
@@ -77,6 +77,14 @@ class _CatalogPageState extends State<CatalogPage> {
                 ? 'Движки встроены. Добавьте .conf или вставьте конфигурацию кнопкой на главном экране. Нужны ключи от владельца сервера; VPN Gate их не предоставляет.'
                 : 'Новые движки пока доступны только в Android.')),
             if (Platform.isAndroid) ...[
+              Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('WireGuard · VPNBook', style: Theme.of(context).textTheme.titleLarge),
+                  const Text('Генератор бесплатных индивидуальных конфигураций: США, Канада, Великобритания, Германия, Франция. Откройте сайт, выберите регион и скачайте .conf. Затем импортируйте файл на главном экране.'),
+                  const Text('Срок действия и доступность определяет VPNBook. После истечения нужен новый профиль. Выдача и обновление пока выполняются вручную; это сторонний VPN-провайдер.'),
+                  FilledButton.icon(onPressed: () => _source('https://www.vpnbook.com/freevpn/wireguard-vpn'),
+                    icon: const Icon(Icons.public), label: const Text('Открыть генератор WireGuard')),
+                ]))),
               const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: Text(
                 'Готовая конфигурация выдаётся владельцем сервера. Для WireGuard можно получить .conf в личном кабинете Proton VPN; для AmneziaWG — экспортировать .conf своего сервера. Автоматической выдачи ключей в Quiet VPN нет.')),
               Wrap(spacing: 8, children: [
