@@ -37,8 +37,10 @@ class _CatalogPageState extends State<CatalogPage> {
       await widget.vm.importProfile(text, label, 'Мои профили');
       if (mounted) Navigator.pop(context);
     } catch (error) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
-        error is FormatException ? error.message : 'Не удалось получить конфигурацию. Повторите выдачу файла на сайте.')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+          error is FormatException ? error.message : 'Не удалось получить конфигурацию. Повторите выдачу файла на сайте.')));
+      }
     }
   }
   String _size(int bytes) => bytes < 1024 * 1024 ? '${(bytes / 1024).toStringAsFixed(0)} КБ' : '${(bytes / 1024 / 1024).toStringAsFixed(1)} МБ';

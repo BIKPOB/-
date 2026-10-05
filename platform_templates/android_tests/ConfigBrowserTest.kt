@@ -5,8 +5,20 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34])
+@Config(sdk = [26, 34], application = QuietVpnApplication::class)
 class ConfigBrowserTest {
+    @Test fun browserCanOpenAndCloseWithoutNativeVpnOrStoragePermissions() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val intent = android.content.Intent(context, ConfigBrowserActivity::class.java).putExtra("source", "vpnbook")
+        val controller = org.robolectric.Robolectric.buildActivity(ConfigBrowserActivity::class.java, intent).create().start().resume()
+        try { assertFalse(controller.get().isFinishing) }
+        finally { controller.pause().stop().destroy() }
+    }
+    @Test fun unknownSourceClosesCleanly() {
+        val controller = org.robolectric.Robolectric.buildActivity(ConfigBrowserActivity::class.java).create()
+        try { assertTrue(controller.get().isFinishing) } finally { controller.destroy() }
+    }
+
     @Test fun onlyExplicitHttpsOriginsCanDownloadProfiles() {
         assertTrue(ConfigBrowserPolicy.allowed("vpnbook", "https://www.vpnbook.com/freevpn/wireguard-vpn"))
         assertFalse(ConfigBrowserPolicy.allowed("vpnbook", "http://www.vpnbook.com/file.conf"))
