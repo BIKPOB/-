@@ -197,10 +197,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
           padding: const EdgeInsets.symmetric(vertical: 24),
           child: Column(children: [
             Text(vm.protocolFilter == 'wireguard' || vm.protocolFilter == 'amneziawg'
-              ? 'Для этого протокола нет добавленных серверов. VPN Gate предоставляет только OpenVPN. Импортируйте .conf с ключами от владельца сервера.'
+              ? 'Для этого протокола нет добавленных серверов. VPN Gate предоставляет только OpenVPN. Получите .conf в разделе «База и протоколы» или импортируйте свой.'
               : vm.refreshing ? 'Загрузка…' : 'Серверы не загружены. Откройте «База и протоколы» или добавьте конфигурацию.'),
             if (vm.protocolFilter == 'wireguard' || vm.protocolFilter == 'amneziawg')
               Wrap(spacing: 8, children: [
+                TextButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => CatalogPage(vm))), icon: const Icon(Icons.download), label: const Text('Получить сервер')),
                 TextButton.icon(onPressed: _import, icon: const Icon(Icons.file_open_outlined), label: const Text('Импорт .conf')),
                 TextButton.icon(onPressed: _pasteProfile, icon: const Icon(Icons.content_paste), label: const Text('Вставить конфигурацию')),
               ]),

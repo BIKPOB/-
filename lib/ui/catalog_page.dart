@@ -2,6 +2,8 @@ import 'dart:io';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/material.dart';
 import '../platform/runtime_manager.dart';
+import '../platform/config_browser.dart';
+import '../core/profile_policy.dart';
 import '../viewmodels/vpn_view_model.dart';
 
 class CatalogPage extends StatefulWidget {
@@ -18,6 +20,25 @@ class _CatalogPageState extends State<CatalogPage> {
       if (!await launchUrl(Uri.parse(url), mode: Platform.isAndroid ? LaunchMode.inAppBrowserView : LaunchMode.externalApplication)) throw StateError('open');
     } catch (_) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось открыть сайт источника')));
+    }
+  }
+  Future<void> _receive(String source, String label) async {
+    try {
+      final text = await ConfigBrowser.open(source);
+      if (text == null || !mounted) return;
+      final parsed = ProfilePolicy.parse(text);
+      if (!{'wireguard', 'amneziawg'}.contains(parsed.protocol)) throw const FormatException('Нужен .conf WireGuard или AmneziaWG');
+      final accepted = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Добавить скачанный сервер?'),
+        content: Text('$label\n${parsed.protocol.toUpperCase()} · ${parsed.host}:${parsed.port}\nКонфигурация будет сохранена в защищённом хранилище.'),
+        actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Добавить'))]));
+      if (accepted != true || !mounted) return;
+      await widget.vm.importProfile(text, label, 'Мои профили');
+      if (mounted) Navigator.pop(context);
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+        error is FormatException ? error.message : 'Не удалось получить конфигурацию. Повторите выдачу файла на сайте.')));
     }
   }
   String _size(int bytes) => bytes < 1024 * 1024 ? '${(bytes / 1024).toStringAsFixed(0)} КБ' : '${(bytes / 1024 / 1024).toStringAsFixed(1)} МБ';
@@ -74,23 +95,25 @@ class _CatalogPageState extends State<CatalogPage> {
               ]))),
             ListTile(leading: const Icon(Icons.extension_outlined), title: const Text('WireGuard и AmneziaWG'),
               subtitle: Text(Platform.isAndroid
-                ? 'Движки встроены. Добавьте .conf или вставьте конфигурацию кнопкой на главном экране. Нужны ключи от владельца сервера; VPN Gate их не предоставляет.'
+                ? 'Движки встроены. Получите .conf через встроенный браузер ниже либо импортируйте свой. VPN Gate предоставляет только OpenVPN.'
                 : 'Новые движки пока доступны только в Android.')),
             if (Platform.isAndroid) ...[
               Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('WireGuard · VPNBook', style: Theme.of(context).textTheme.titleLarge),
-                  const Text('Генератор бесплатных индивидуальных конфигураций: США, Канада, Великобритания, Германия, Франция. Откройте сайт, выберите регион и скачайте .conf. Затем импортируйте файл на главном экране.'),
-                  const Text('Срок действия и доступность определяет VPNBook. После истечения нужен новый профиль. Выдача и обновление пока выполняются вручную; это сторонний VPN-провайдер.'),
-                  FilledButton.icon(onPressed: () => _source('https://www.vpnbook.com/freevpn/wireguard-vpn'),
-                    icon: const Icon(Icons.public), label: const Text('Открыть генератор WireGuard')),
+                  Text('Получить конфигурацию внутри приложения', style: Theme.of(context).textTheme.titleLarge),
+                  const Text('Выберите источник и регион, затем нажмите скачивание .conf на сайте. Quiet VPN получит файл и предложит добавить сервер. Поиск файла в «Загрузках» не нужен.'),
+                  const Text('Сайты загружаются онлайн. Браузер использует обновляемый Android System WebView. В его окне есть обновление страницы и очистка данных входа.'),
+                  const SizedBox(height: 8),
+                  ListTile(title: const Text('WireGuard · VPNBook'), subtitle: const Text('Бесплатная выдача. Срок действия ограничен провайдером; после истечения получите новый файл.'),
+                    trailing: const Icon(Icons.download), onTap: () => _receive('vpnbook', 'VPNBook')),
+                  ListTile(title: const Text('WireGuard · Proton'), subtitle: const Text('Нужен аккаунт Proton. Откройте Downloads → WireGuard и выдайте конфигурацию.'),
+                    trailing: const Icon(Icons.download), onTap: () => _receive('proton', 'Proton')),
+                  ListTile(title: const Text('AmneziaWG · кабинет Amnezia'), subtitle: const Text('Нужен ключ Premium или пробного доступа. Раздел Configuration files → регион → скачать .conf. Это не бесплатная база Amnezia Free.'),
+                    trailing: const Icon(Icons.download), onTap: () => _receive('amnezia', 'Amnezia')),
+                  TextButton(onPressed: () => _receive('amnezia-mirror', 'Amnezia'), child: const Text('Официальное зеркало кабинета Amnezia')),
+                  const Text('Quiet VPN не выдаёт ключи доступа и не продлевает их автоматически. Источник может потребовать вход или проверку человека. Полученный профиль можно удалить на главном экране.'),
+                  TextButton(onPressed: () => _source('https://docs.amnezia.org/documentation/instructions/connect-amfree/'), child: const Text('Как получить Amnezia Free')),
                 ]))),
-              const Padding(padding: EdgeInsets.symmetric(horizontal: 16), child: Text(
-                'Готовая конфигурация выдаётся владельцем сервера. Для WireGuard можно получить .conf в личном кабинете Proton VPN; для AmneziaWG — экспортировать .conf своего сервера. Автоматической выдачи ключей в Quiet VPN нет.')),
-              Wrap(spacing: 8, children: [
-                TextButton(onPressed: () => _source('https://protonvpn.com/support/wireguard-configurations'), child: const Text('Получить WireGuard .conf')),
-                TextButton(onPressed: () => _source('https://docs.amnezia.org/documentation/instructions/use-amneziawg-app/'), child: const Text('Получить AmneziaWG .conf')),
-              ]),
             ],
             const Divider(),
             Text('Регионы', style: Theme.of(context).textTheme.titleLarge),

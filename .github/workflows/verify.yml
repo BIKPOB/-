@@ -27,6 +27,8 @@ jobs:
           flutter-version: '3.32.8'
           channel: stable
           cache: true
+      - name: Test browser configuration capture
+        run: node tools/test_browser_capture.js
       - name: Verify catalog service
         run: python -m unittest discover -s tests -v
         working-directory: infra
