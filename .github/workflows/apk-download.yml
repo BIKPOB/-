@@ -1,32 +1,52 @@
 name: Prepare verified APK download
 on:
-  push:
-    paths: ['.github/workflows/apk-download.yml']
+  workflow_run:
+    workflows: ['Build Android APK']
+    types: [completed]
   workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Successful Android build run ID'
+        required: true
+        type: string
+      source_sha:
+        description: 'Exact source commit for that build'
+        required: true
+        type: string
 permissions:
   contents: read
   actions: read
 jobs:
   package:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - name: Download and verify completed build
         env:
           GH_TOKEN: ${{ github.token }}
+          ANDROID_RUN: ${{ github.event.workflow_run.id || inputs.run_id }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || inputs.source_sha }}
         run: |
-          gh run watch 37319370342 -R BIKPOB/- --exit-status
-          gh run download 37319370342 -R BIKPOB/- -n quiet-vpn-android-apk -D payload
+          gh run view "$ANDROID_RUN" -R BIKPOB/- --json headSha,conclusion > run.json
+          python - <<'PY'
+          import json, os, re
+          run=json.load(open('run.json'))
+          assert re.fullmatch('[0-9a-f]{40}', os.environ['SOURCE_SHA'])
+          assert run['headSha'] == os.environ['SOURCE_SHA'] and run['conclusion'] == 'success'
+          PY
+          gh run download "$ANDROID_RUN" -R BIKPOB/- -n quiet-vpn-android-apk -D payload
           python - <<'PY'
           from pathlib import Path
-          import hashlib, shutil
+          import hashlib, shutil, os, re
           p=Path('payload')
-          assert (p/'SOURCE_COMMIT.txt').read_text().strip() == '83bceb7402683e4152102eaec63961e44c265b95'
+          assert (p/'SOURCE_COMMIT.txt').read_text().strip() == os.environ['SOURCE_SHA']
+          assert re.search(r'Infected files:\s*0\s*$', (p/'ANTIVIRUS_SCAN.txt').read_text(), re.M)
           data=(p/'quiet-vpn-android.apk').read_bytes()
           expected=(p/'SHA256SUMS.txt').read_text().split()[0]
           assert hashlib.sha256(data).hexdigest() == expected
           n=20*1024*1024
-          assert len(data) <= 2*n
+          assert 0 < len(data) <= 2*n
           for i in range(2):
             out=Path(f'part-{i+1}');out.mkdir()
             (out/f'apk.part{i+1}').write_bytes(data[i*n:(i+1)*n])
