@@ -201,6 +201,7 @@ class VpnViewModel extends ChangeNotifier {
     if (_disposed || _stopping) return;
     switch (event.state) {
       case ConnectionState.connected:
+        _connectTimeout?.cancel(); _connectTimeout = null;
         _nativeConnected = true;
         _nativeNeedsStop = true;
         if (!_verifying && state != ConnectionState.connected) unawaited(_verifyInternet());
