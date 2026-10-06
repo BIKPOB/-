@@ -190,7 +190,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
           items: [const DropdownMenuItem<String>(value: null, child: Text('Все регионы')),
             ...countries.map((c) => DropdownMenuItem(value: c, child: Text(c)))], onChanged: vm.filterCountry),
         const SizedBox(height: 8),
-        Text('${items.length} серверов · ${vm.cached ? 'кэш' : 'каталог'} · TCP-проверки по очереди, по 10'),
+        Text('${items.length} серверов · ${vm.cached ? 'кэш' : 'каталог'} · пинг всех серверов одновременно'),
+        const Text('ICMP — ответ узла; TCP — задержка соединения. Пинг не подтверждает работу VPN. При активном VPN измерение может идти через туннель.'),
         if (vm.refreshing) const LinearProgressIndicator(),
         ])),
         if (items.isEmpty) SliverToBoxAdapter(child: Padding(

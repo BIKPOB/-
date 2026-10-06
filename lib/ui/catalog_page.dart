@@ -108,8 +108,6 @@ class _CatalogPageState extends State<CatalogPage> {
                   const SizedBox(height: 8),
                   ListTile(title: const Text('WireGuard · VPNBook'), subtitle: const Text('Бесплатная выдача. Срок действия ограничен провайдером; после истечения получите новый файл.'),
                     trailing: const Icon(Icons.download), onTap: () => _receive('vpnbook', 'VPNBook')),
-                  ListTile(title: const Text('WireGuard · Proton'), subtitle: const Text('Нужен аккаунт Proton. Откройте Downloads → WireGuard и выдайте конфигурацию.'),
-                    trailing: const Icon(Icons.download), onTap: () => _receive('proton', 'Proton')),
                   ListTile(title: const Text('AmneziaWG · кабинет Amnezia'), subtitle: const Text('Нужен ключ Premium или пробного доступа. Раздел Configuration files → регион → скачать .conf. Это не бесплатная база Amnezia Free.'),
                     trailing: const Icon(Icons.download), onTap: () => _receive('amnezia', 'Amnezia')),
                   TextButton(onPressed: () => _receive('amnezia-mirror', 'Amnezia'), child: const Text('Официальное зеркало кабинета Amnezia')),

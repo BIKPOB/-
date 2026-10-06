@@ -1,7 +1,7 @@
 name: quiet_vpn
 description: Flutter MVVM VPN client with a live public catalog and OpenVPN adapters.
 publish_to: none
-version: 0.6.0+14
+version: 0.6.1+15
 environment:
   sdk: '>=3.8.0 <4.0.0'
 dependencies:

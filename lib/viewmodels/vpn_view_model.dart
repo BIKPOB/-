@@ -39,7 +39,6 @@ class VpnViewModel extends ChangeNotifier {
   Timer? _poll, _connectTimeout, _catalogTimer, _trafficTimer;
   final traffic = TrafficMeter();
   final _clock = Stopwatch()..start();
-  final _probeQueue = ProbeQueue();
   String? connectionStage;
   void _scheduleTraffic() {
     _trafficTimer?.cancel();
@@ -135,12 +134,11 @@ class VpnViewModel extends ChangeNotifier {
     if (!_foreground || _disposed) return;
     _poll = Timer(Duration(milliseconds: immediate ? 0 : 30000 + Random().nextInt(3000)), () async {
       final epoch = _probeEpoch;
-      final visible = filtered;
-      for (final server in visible.where((s) => s.transport != 'tcp')) {
-        health[server.id] = const HealthResult(Reachability.notMeasured);
-      }
-      final candidates = _probeQueue.next(visible);
-      final results = await monitor.sample(candidates);
+      final results = await monitor.sample(servers, onResult: (id, result) {
+        if (!_disposed && epoch == _probeEpoch && _foreground) {
+          health[id] = result; _notify();
+        }
+      });
       if (_disposed) return;
       if (epoch == _probeEpoch && _foreground) { health = {...health, ...results}; _notify(); }
       if (epoch == _probeEpoch) _scheduleProbe();

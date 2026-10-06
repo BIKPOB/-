@@ -24,7 +24,8 @@ class VpnServer {
 }
 
 class HealthResult {
-  const HealthResult(this.state, [this.milliseconds]);
+  const HealthResult(this.state, [this.milliseconds, this.method = '']);
+  final String method;
   final Reachability state;
   final int? milliseconds;
 }

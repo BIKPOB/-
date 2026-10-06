@@ -12,9 +12,9 @@ class LatencyIndicator extends StatelessWidget {
     final color = measured
       ? ms <= 100 ? Colors.green : ms <= 250 ? Colors.yellow : Colors.red
       : Colors.grey;
-    final label = measured ? '$ms мс' : switch (result?.state) {
-      Reachability.unreachable => 'Нет ответа',
-      Reachability.notMeasured => 'UDP · без TCP-пробы',
+    final label = measured ? '${result!.method.isEmpty ? '' : '${result!.method} · '}$ms мс' : switch (result?.state) {
+      Reachability.unreachable => 'Нет ответа ICMP/TCP',
+      Reachability.notMeasured => 'Пинг недоступен',
       Reachability.paused => 'Пауза',
       _ => 'Не проверен',
     };

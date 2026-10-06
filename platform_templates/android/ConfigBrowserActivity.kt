@@ -23,7 +23,6 @@ object ConfigBrowserPolicy {
     const val LIMIT = 131072
     val sources = mapOf(
         "vpnbook" to "https://www.vpnbook.com/freevpn/wireguard-vpn",
-        "proton" to "https://account.protonvpn.com/downloads",
         "amnezia" to "https://cp.amnezia.org/en",
         "amnezia-mirror" to "https://storage.googleapis.com/amnezia/cp?m-path=/en"
     )
@@ -33,7 +32,6 @@ object ConfigBrowserPolicy {
         if (uri.scheme != "https" || uri.userInfo != null || uri.port !in listOf(-1, 443)) return false
         return when (source) {
             "vpnbook" -> uri.host in setOf("www.vpnbook.com", "vpnbook.com")
-            "proton" -> uri.host in setOf("account.protonvpn.com", "account.proton.me", "protonvpn.com")
             "amnezia" -> uri.host == "cp.amnezia.org"
             "amnezia-mirror" -> uri.host == "storage.googleapis.com" && (uri.path == "/amnezia/cp" || uri.path?.startsWith("/amnezia/cp/") == true)
             else -> false
