@@ -31,6 +31,7 @@ void main() {
     expect(result.servers.where((s) => s.protocol == 'vless'), isNotEmpty);
     expect(result.servers.where((s) => s.protocol == 'shadowsocks'), isNotEmpty);
     // Counts only: never log credentials from a subscription.
+    // ignore: avoid_print
     print('Bundled compatible: VLESS=${result.servers.where((s) => s.protocol == 'vless').length}, SS=${result.servers.where((s) => s.protocol == 'shadowsocks').length}');
   });
 }
