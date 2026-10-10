@@ -58,8 +58,7 @@ class AndroidEngine implements VpnEngine, TrafficSource {
     final epoch = _epoch;
     _emit(ConnectionState.connecting, 'Туннель Xray запущен · проверка ответа через сервер');
     try {
-      final delay = await _xray.invokeMethod<int>('getConnectedServerDelay',
-        {'url':'https://www.gstatic.com/generate_204'}).timeout(const Duration(seconds: 20));
+      final delay = await _stage.invokeMethod<int>('probe').timeout(const Duration(seconds: 20));
       if (_stopping || epoch != _epoch || _disposed) return;
       if (delay == null || delay < 0) {
         _emit(ConnectionState.error, 'Xray запущен, но запрос через сервер не прошёл. Проверьте ключ, сервер и сеть.');
@@ -84,6 +83,7 @@ class AndroidEngine implements VpnEngine, TrafficSource {
   }
   @override Future<void> disconnect() async {
     _stopping = true; _starting = false; _epoch++; _verified = false;
+    await _stage.invokeMethod<void>('cancelProbe');
     try {
       if (_active == 'wireguard') { await _wg.invokeMethod<void>('stop'); }
       else {

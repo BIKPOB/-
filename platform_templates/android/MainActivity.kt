@@ -6,6 +6,7 @@ import io.flutter.embedding.android.FlutterActivity
 class MainActivity : FlutterActivity() {
     private var browserResult: io.flutter.plugin.common.MethodChannel.Result? = null
     private lateinit var wg: WgBridge
+    private val probeWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     override fun configureFlutterEngine(engine: io.flutter.embedding.engine.FlutterEngine) {
         super.configureFlutterEngine(engine)
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/diagnostics")
@@ -30,7 +31,13 @@ class MainActivity : FlutterActivity() {
                 if (call.method == "stage") {
                     val state = dev.amirzr.flutter_v2ray_client.v2ray.V2rayController.getConnectionState().name
                     result.success(state.removePrefix("V2RAY_"))
-                } else result.notImplemented()
+                } else if (call.method == "probe") {
+                    probeWorker.execute {
+                        val delay = ProxyProbe.measure()
+                        runOnUiThread { result.success(delay) }
+                    }
+                } else if (call.method == "cancelProbe") { ProxyProbe.cancel(); result.success(null) }
+                else result.notImplemented()
             }
         wg = WgBridge(this)
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/wg").setMethodCallHandler(wg::handle)
@@ -43,6 +50,7 @@ class MainActivity : FlutterActivity() {
         browserResult?.error("cancelled", "Окно приложения пересоздано. Откройте источник повторно.", null); browserResult = null
         if (::wg.isInitialized) wg.detach()
         WgSession.sink = null
+        ProxyProbe.cancel(); probeWorker.shutdownNow()
         super.cleanUpFlutterEngine(engine)
     }
     @Deprecated("Activity permission result contract")
