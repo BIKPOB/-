@@ -25,9 +25,9 @@ object ConfigBrowserPolicy {
     fun allowed(source: String, value: String?): Boolean {
         if (value == null) return false
         val uri = Uri.parse(value)
-        if (uri.scheme != "https" || uri.userInfo != null || uri.port !in listOf(-1, 443)) return false
+        if (uri.scheme != "https" || uri.userInfo != null || (uri.port != -1 && uri.port !in 1..65535)) return false
         return when (source) {
-            "vpnbook" -> uri.host in setOf("www.vpnbook.com", "vpnbook.com")
+            "vpnbook" -> uri.port in listOf(-1, 443) && uri.host in setOf("www.vpnbook.com", "vpnbook.com")
             "custom" -> !uri.host.isNullOrEmpty()
             else -> false
         }

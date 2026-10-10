@@ -90,7 +90,7 @@ class AndroidEngine implements VpnEngine, TrafficSource {
         await _xray.invokeMethod<void>('stopV2Ray');
         for (var i = 0; i < 40; i++) {
           final stage = await _stage.invokeMethod<String>('stage');
-          if (stage == 'DISCONNECTED') { _xrayState = stage; break; }
+          if (stage == 'DISCONNECTED') { _xrayState = 'DISCONNECTED'; break; }
           if (i == 39) throw StateError('Отключение Xray не подтверждено');
           await Future<void>.delayed(const Duration(milliseconds: 250));
         }
@@ -104,7 +104,7 @@ class AndroidEngine implements VpnEngine, TrafficSource {
     if (wg == 'connected' || wg == 'connecting') { _active = 'wireguard'; _wgEvent(wg); return; }
     _xrayState = await _stage.invokeMethod<String>('stage') ?? 'DISCONNECTED';
     if (_xrayState != 'DISCONNECTED') { _active = 'vless'; _proxyEvent(); }
-    else if (!_stopping && !_starting) _emit(ConnectionState.disconnected);
+    else if (!_stopping && !_starting) { _emit(ConnectionState.disconnected); }
   }
   @override Future<TrafficCounters?> readTraffic() async {
     if (_active != 'wireguard') return _verified ? _counters : null;

@@ -106,7 +106,7 @@ class _AddServerPageState extends State<AddServerPage> {
     }catch(e){if(mounted)setState(()=>error=e is FormatException?e.message:'Проверьте поля конфигурации');}
   }
   Widget choice(String label, String value, List<String> values, void Function(String) update) => Padding(
-    padding:const EdgeInsets.only(bottom:12),child:DropdownButtonFormField<String>(value:value,
+    padding:const EdgeInsets.only(bottom:12),child:DropdownButtonFormField<String>(value:value,isExpanded:true,
       decoration:InputDecoration(labelText:label,border:const OutlineInputBorder()),
       items:values.map((s)=>DropdownMenuItem(value:s,child:Text(s))).toList(),onChanged:(s){if(s!=null)setState(()=>update(s));}));
   @override Widget build(BuildContext context) => DefaultTabController(length:3,child:Scaffold(

@@ -61,14 +61,14 @@ class ProxyProfile {
       throw const FormatException('Vision требует TCP и TLS/REALITY');
     }
     final stream = <String, dynamic>{'network': network, 'security': security};
-    if (security == 'tls') stream['tlsSettings'] = {
+    if (security == 'tls') { stream['tlsSettings'] = {
       'serverName': q['sni'] ?? host, 'fingerprint': q['fp'] ?? 'chrome',
       if (q['alpn'] != null) 'alpn': q['alpn']!.split(','),
-    };
+    }; }
     if (security == 'reality') {
       final key = q['pbk'] ?? '', sid = q['sid'] ?? '';
       if (base64Url.decode(base64Url.normalize(key)).length != 32 || (q['sni'] ?? '').isEmpty ||
-          !RegExp(r'^(?:[0-9a-fA-F]{2}){0,8}$').hasMatch(sid)) throw const FormatException('Для REALITY нужны SNI, корректный public key и short ID');
+          !RegExp(r'^(?:[0-9a-fA-F]{2}){0,8}$').hasMatch(sid)) { throw const FormatException('Для REALITY нужны SNI, корректный public key и short ID'); }
       stream['realitySettings'] = {'serverName': q['sni'], 'fingerprint': q['fp'] ?? 'chrome',
         'publicKey': key, 'shortId': sid, 'spiderX': q['spx'] ?? '/'};
     }
