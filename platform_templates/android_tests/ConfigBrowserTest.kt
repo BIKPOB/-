@@ -27,9 +27,11 @@ class ConfigBrowserTest {
         assertFalse(ConfigBrowserPolicy.allowed("vpnbook", "https://www.vpnbook.com:444/file.conf"))
         assertFalse(ConfigBrowserPolicy.allowed("vpnbook", "file:///data/user/0/private"))
         assertFalse(ConfigBrowserPolicy.allowed("vpnbook", "https://cp.amnezia.org/en"))
-        assertTrue(ConfigBrowserPolicy.allowed("amnezia-mirror", "https://storage.googleapis.com/amnezia/cp?m-path=/en"))
-        assertFalse(ConfigBrowserPolicy.allowed("amnezia-mirror", "https://storage.googleapis.com/other/file.conf"))
-        assertFalse(ConfigBrowserPolicy.allowed("amnezia-mirror", "https://storage.googleapis.com/amnezia/cp-untrusted"))
+        assertTrue(ConfigBrowserPolicy.allowed("custom", "https://provider.example/account"))
+        assertFalse(ConfigBrowserPolicy.allowed("custom", "http://provider.example/account"))
+        assertFalse(ConfigBrowserPolicy.allowed("custom", "file:///data/local/profile"))
+        assertFalse(ConfigBrowserPolicy.allowed("proton", "https://account.protonvpn.com"))
+
     }
     @Test fun rejectsHtmlAndOversizedPayloadBeforeFlutterChannel() {
         assertFalse(ConfigBrowserPolicy.config("<html>not a profile</html>"))

@@ -10,6 +10,9 @@ with zipfile.ZipFile(apk) as archive:
     assert archive.testzip() is None
     names = archive.namelist()
     assert 'AndroidManifest.xml' in names and 'classes.dex' in names
+    assert not any('openvpn' in name.lower() or 'ovpn' in name.lower() for name in names)
+    assert any('libv2jni.so' in name for name in names), 'Missing Xray native engine'
+    assert any('libwg-go.so' in name for name in names), 'Missing WireGuard native engine'
     assert 'lib/arm64-v8a/libflutter.so' in names
     assert 'lib/armeabi-v7a/libflutter.so' in names
 sdk = Path(os.environ.get('ANDROID_HOME') or os.environ['ANDROID_SDK_ROOT'])

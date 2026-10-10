@@ -1,20 +1,22 @@
 name: quiet_vpn
-description: Flutter MVVM VPN client with a live public catalog and OpenVPN adapters.
+description: Android VPN client for WireGuard, VLESS and Shadowsocks.
 publish_to: none
-version: 0.6.1+15
+version: 0.7.0+16
 environment:
   sdk: '>=3.8.0 <4.0.0'
 dependencies:
   flutter:
     sdk: flutter
-  csv: 6.0.0
+  flutter_v2ray_client:
+    git:
+      url: https://github.com/amir-zr/flutter_v2ray_client.git
+      ref: c296aad34eeed7d65119a310c79fc64ebf58251b
   crypto: 3.0.6
   file_picker: 10.1.9
   flutter_secure_storage: 9.2.4
   path_provider: 2.1.5
   url_launcher: 6.3.1
   permission_handler: 12.0.0+1
-  window_manager: 0.4.3
 dev_dependencies:
   flutter_test:
     sdk: flutter

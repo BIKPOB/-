@@ -1,101 +1,119 @@
-import 'package:flutter/services.dart';
 import 'dart:async';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../core/models.dart';
+import '../core/proxy_profile.dart';
 import '../core/traffic.dart';
 import 'vpn_engine.dart';
 
-class OpenVpnAndroidEngine implements VpnEngine {
+class AndroidEngine implements VpnEngine, TrafficSource {
+  static const _wg = MethodChannel('quietvpn/wg');
+  static const _xray = MethodChannel('flutter_v2ray_client');
+  static const _stage = MethodChannel('quietvpn/xray-state');
   final _events = StreamController<EngineEvent>.broadcast();
-  static const _channel = MethodChannel('quietvpn/openvpn');
-  StreamSubscription<dynamic>? _subscription;
+  final _subscriptions = <StreamSubscription<dynamic>>[];
+  String _active = 'wireguard', _xrayState = 'DISCONNECTED';
+  TrafficCounters? _counters;
+  bool _stopping = false, _checking = false, _verified = false, _disposed = false, _starting = false;
+  int _epoch = 0;
   @override Stream<EngineEvent> get events => _events.stream;
-  void _stage(dynamic stage) {
-    final detail = stage is Map ? stage['detail'] as String? : null;
-    final value = stage is Map ? stage['state'] : stage;
-    _events.add(EngineEvent(switch (value) {
-      'connected' => ConnectionState.connected,
-      'connecting' => ConnectionState.connecting,
-      'error' => ConnectionState.error,
-      _ => ConnectionState.disconnected,
-    }, detail));
-  }
+  void _emit(ConnectionState state, [String? detail]) { if (!_disposed) _events.add(EngineEvent(state, detail)); }
   @override Future<void> initialize() async {
-    _subscription = const EventChannel('quietvpn/openvpn-events').receiveBroadcastStream().listen(_stage,
-      onError: (_) => _events.add(const EngineEvent(ConnectionState.error, 'Ошибка OpenVPN')));
+    _subscriptions.add(const EventChannel('quietvpn/wg-events').receiveBroadcastStream().listen((s) {
+      if (_active == 'wireguard' && !_stopping) _wgEvent(s);
+    }, onError: (_) => _emit(ConnectionState.error, 'Ошибка WireGuard')));
+    _subscriptions.add(const EventChannel('flutter_v2ray_client/status').receiveBroadcastStream().listen((dynamic data) {
+      if (data is! List || data.length < 6) return;
+      _xrayState = data[5].toString();
+      _counters = TrafficCounters(int.tryParse(data[4].toString()) ?? 0, int.tryParse(data[3].toString()) ?? 0);
+      if (_active == 'wireguard' && !_starting && _xrayState == 'CONNECTED') _active = 'vless';
+      if (_active != 'wireguard' && !_stopping) _proxyEvent();
+    }, onError: (_) => _emit(ConnectionState.error, 'Ошибка Xray')));
+    await _xray.invokeMethod<void>('initializeV2Ray', {'notificationIconResourceType':'mipmap',
+      'notificationIconResourceName':'ic_launcher', 'providerBundleIdentifier':'', 'groupIdentifier':''});
     await reconcile();
   }
-  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
-    await Permission.notification.request();
-    await _channel.invokeMethod<void>('start', {'profile': server.profile,
-      'name': '${server.country} • ${server.name}',
-      'username': credentials?.username, 'password': credentials?.password});
-  }
-  @override Future<void> disconnect() async {
-    await _channel.invokeMethod<void>('stop');
-    for (var i = 0; i < 30; i++) {
-      final stage = await _channel.invokeMethod<String>('stage');
-      if (stage == 'disconnected') { _stage(stage); return; }
-      await Future<void>.delayed(const Duration(milliseconds: 250));
-    }
-    throw StateError('Система ещё не подтвердила отключение');
-  }
-  @override Future<void> reconcile() async => _stage(await _channel.invokeMethod<String>('stage'));
-  @override Future<void> dispose() async { await _subscription?.cancel(); await _events.close(); }
-}
-
-
-class AndroidEngine implements VpnEngine, TrafficSource {
-  @override Future<TrafficCounters?> readTraffic() async {
-    final channel = _active == 'openvpn' ? const MethodChannel('quietvpn/openvpn') : _channel;
-    final data = await channel.invokeMapMethod<String, dynamic>('traffic');
-    if (data == null) return null;
-    return TrafficCounters(data['received'] as int, data['sent'] as int);
-  }
-  final _openvpn = OpenVpnAndroidEngine();
-  static const _channel = MethodChannel('quietvpn/wg');
-  static const _nativeEvents = EventChannel('quietvpn/wg-events');
-  final _events = StreamController<EngineEvent>.broadcast();
-  StreamSubscription<EngineEvent>? _ovpnSubscription;
-  StreamSubscription<dynamic>? _wgSubscription;
-  String _active = 'openvpn';
-  @override Stream<EngineEvent> get events => _events.stream;
   void _wgEvent(dynamic stage) {
-    if (_active == 'openvpn') return;
-    final state = switch (stage) {
-      'connected' => ConnectionState.connected,
-      'connecting' => ConnectionState.connecting,
-      'error' => ConnectionState.error,
-      _ => ConnectionState.disconnected,
-    };
-    _events.add(EngineEvent(state));
+    if (_starting && stage == 'disconnected') return;
+    if (stage != 'connecting') _starting = false;
+    _emit(switch (stage) {
+    'connected' => ConnectionState.connected, 'connecting' => ConnectionState.connecting,
+    'error' => ConnectionState.error, _ => ConnectionState.disconnected,
+  });
   }
-  @override Future<void> initialize() async {
-    _ovpnSubscription = _openvpn.events.listen((event) { if (_active == 'openvpn') _events.add(event); });
-    _wgSubscription = _nativeEvents.receiveBroadcastStream().listen(_wgEvent,
-      onError: (_) { if (_active != 'openvpn') _events.add(const EngineEvent(ConnectionState.error, 'Ошибка VPN-движка')); });
-    final stage = await _channel.invokeMethod<String>('stage');
-    if (stage == 'connecting' || stage == 'connected') _active = 'amneziawg';
-    await _openvpn.initialize();
-    if (_active != 'openvpn') _wgEvent(stage);
+  void _proxyEvent() {
+    if (_xrayState == 'CONNECTED') {
+      _starting = false;
+      if (_verified) return;
+      if (!_checking) unawaited(_verifyProxy());
+    } else if (_xrayState == 'CONNECTING') {
+      _emit(ConnectionState.connecting, 'Запуск Xray');
+    } else if (_xrayState == 'DISCONNECTED' && !_starting) {
+      _epoch++; _verified = false;
+      _emit(ConnectionState.disconnected);
+    }
+  }
+  Future<void> _verifyProxy() async {
+    _checking = true;
+    final epoch = _epoch;
+    _emit(ConnectionState.connecting, 'Туннель Xray запущен · проверка ответа через сервер');
+    try {
+      final delay = await _xray.invokeMethod<int>('getConnectedServerDelay',
+        {'url':'https://www.gstatic.com/generate_204'}).timeout(const Duration(seconds: 20));
+      if (_stopping || epoch != _epoch || _disposed) return;
+      if (delay == null || delay < 0) {
+        _emit(ConnectionState.error, 'Xray запущен, но запрос через сервер не прошёл. Проверьте ключ, сервер и сеть.');
+      } else { _verified = true; _emit(ConnectionState.connected, 'Ответ через сервер: $delay мс'); }
+    } catch (_) {
+      if (!_stopping && epoch == _epoch) _emit(ConnectionState.error, 'Таймаут проверки Xray через сервер');
+    } finally { _checking = false; }
   }
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
-    _active = server.protocol;
-    if (_active == 'openvpn') { await _openvpn.connect(server, credentials); return; }
-    if (!{'wireguard', 'amneziawg'}.contains(_active)) throw StateError('Неподдерживаемый протокол');
+    _epoch++; _verified = false; _counters = null; _active = server.protocol; _starting = true;
     await Permission.notification.request();
-    await _channel.invokeMethod<void>('start', {'profile': server.profile});
+    if (_active == 'wireguard') {
+      await _wg.invokeMethod<void>('start', {'profile':server.profile}); return;
+    }
+    if (!{'vless','shadowsocks'}.contains(_active)) throw StateError('Протокол не поддерживается');
+    final config = ProxyProfile.parse(server.profile).configuration;
+    if (await _xray.invokeMethod<bool>('requestPermission') != true) throw StateError('Разрешение VPN отклонено');
+    _xrayState = 'CONNECTING';
+    _emit(ConnectionState.connecting, 'Запуск ${server.protocol.toUpperCase()}');
+    await _xray.invokeMethod<void>('startV2Ray', {'remark':'Quiet VPN', 'config':config,
+      'blocked_apps':null, 'bypass_subnets':null, 'proxy_only':false, 'notificationDisconnectButtonName':'Отключить'});
   }
   @override Future<void> disconnect() async {
-    if (_active == 'openvpn') { await _openvpn.disconnect(); }
-    else { await _channel.invokeMethod<void>('stop'); }
+    _stopping = true; _starting = false; _epoch++; _verified = false;
+    try {
+      if (_active == 'wireguard') { await _wg.invokeMethod<void>('stop'); }
+      else {
+        await _xray.invokeMethod<void>('stopV2Ray');
+        for (var i = 0; i < 40; i++) {
+          final stage = await _stage.invokeMethod<String>('stage');
+          if (stage == 'DISCONNECTED') { _xrayState = stage; break; }
+          if (i == 39) throw StateError('Отключение Xray не подтверждено');
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+        }
+      }
+      _counters = null; _emit(ConnectionState.disconnected);
+    } finally { _stopping = false; }
   }
   @override Future<void> reconcile() async {
-    if (_active == 'openvpn') { await _openvpn.reconcile(); }
-    else { _wgEvent(await _channel.invokeMethod<String>('stage')); }
+    if (_starting) return;
+    final wg = await _wg.invokeMethod<String>('stage');
+    if (wg == 'connected' || wg == 'connecting') { _active = 'wireguard'; _wgEvent(wg); return; }
+    _xrayState = await _stage.invokeMethod<String>('stage') ?? 'DISCONNECTED';
+    if (_xrayState != 'DISCONNECTED') { _active = 'vless'; _proxyEvent(); }
+    else if (!_stopping && !_starting) _emit(ConnectionState.disconnected);
+  }
+  @override Future<TrafficCounters?> readTraffic() async {
+    if (_active != 'wireguard') return _verified ? _counters : null;
+    final data = await _wg.invokeMapMethod<String, dynamic>('traffic');
+    return data == null ? null : TrafficCounters(data['received'] as int, data['sent'] as int);
   }
   @override Future<void> dispose() async {
-    await _ovpnSubscription?.cancel(); await _wgSubscription?.cancel();
-    await _openvpn.dispose(); await _events.close();
+    _disposed = true; _epoch++;
+    for (final subscription in _subscriptions) { await subscription.cancel(); }
+    await _events.close();
   }
 }

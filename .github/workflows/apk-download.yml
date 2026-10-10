@@ -46,8 +46,8 @@ jobs:
           expected=(p/'SHA256SUMS.txt').read_text().split()[0]
           assert hashlib.sha256(data).hexdigest() == expected
           n=20*1024*1024
-          assert 0 < len(data) <= 2*n
-          for i in range(2):
+          assert 0 < len(data) <= 4*n
+          for i in range(4):
             out=Path(f'part-{i+1}');out.mkdir()
             (out/f'apk.part{i+1}').write_bytes(data[i*n:(i+1)*n])
           for f in p.iterdir():
@@ -61,3 +61,11 @@ jobs:
         with:
           name: apk-part-2
           path: part-2/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-part-3
+          path: part-3/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk-part-4
+          path: part-4/

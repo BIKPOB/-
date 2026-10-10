@@ -9,34 +9,29 @@ import '../core/models.dart';
 import '../core/traffic.dart';
 import '../core/profile_policy.dart';
 import '../core/server_monitor.dart';
-import '../data/catalog_repository.dart';
 import '../data/profile_store.dart';
 import '../platform/vpn_engine.dart';
 
 class VpnViewModel extends ChangeNotifier {
-  VpnViewModel(this.engine, this.catalog, this.store, this.monitor);
+  VpnViewModel(this.engine, this.store, this.monitor);
   final VpnEngine engine;
-  final CatalogRepository catalog;
   final ProfileStore store;
   final ServerMonitor monitor;
-  List<VpnServer> _public = [], _imports = [];
-  List<VpnServer> get servers => [..._imports, ..._public];
+  List<VpnServer> _imports = [];
+  List<VpnServer> get servers => _imports;
   List<VpnServer> get filtered => servers.where((s) => (country == null || s.country == country) && (protocolFilter == null || s.protocol == protocolFilter)).toList();
   Map<String, HealthResult> health = {};
   ConnectionState state = ConnectionState.disconnected;
   String? selectedId, country, message, protocolFilter;
   VpnServer? activeServer;
-  DateTime? catalogDate;
-  int cacheBytes = 0;
-  bool autoRefresh = true;
-  bool cached = false, refreshing = false, busy = false, ready = false;
+  bool busy = false, ready = false;
   bool _foreground = true, _disposed = false, _nativeNeedsStop = false, _stopping = false;
   bool _verifying = false;
   bool _nativeConnected = false;
   String? _pendingFailure;
   bool get canDisconnect => _nativeNeedsStop;
   int _connectionEpoch = 0, _probeEpoch = 0;
-  Timer? _poll, _connectTimeout, _catalogTimer, _trafficTimer;
+  Timer? _poll, _connectTimeout, _trafficTimer;
   final traffic = TrafficMeter();
   final _clock = Stopwatch()..start();
   String? connectionStage;
@@ -69,42 +64,12 @@ class VpnViewModel extends ChangeNotifier {
       _imports = await store.load();
       await engine.initialize(); ready = true;
     } catch (_) { message = 'Не удалось инициализировать VPN или защищённое хранилище'; state = ConnectionState.error; }
-    await refresh();
-    _catalogTimer = Timer.periodic(const Duration(minutes: 15), (_) {
-      if (_foreground && autoRefresh) unawaited(refresh());
-    });
-    _notify();
+    if (servers.isNotEmpty) selectedId = servers.first.id;
+    _scheduleProbe(immediate: true); _notify();
   }
-  Future<void> refresh({bool force = false}) async {
-    if (refreshing || _disposed) return;
-    refreshing = true; _notify();
-    try {
-      final result = await catalog.load(force: force);
-      if (_disposed) return;
-      _public = result.servers;
-      cacheBytes = await catalog.cacheSize();
-      autoRefresh = true;
-      catalogDate = result.fetchedAt; cached = result.cached;
-      if (selected == null && servers.isNotEmpty) selectedId = servers.first.id;
-      message = '${result.servers.length} серверов; пропущено несовместимых профилей: ${result.rejected}'
-        '${cached ? '. Используется кэш' : ''}';
-      _scheduleProbe(immediate: true);
-    } catch (error) { message = error is FormatException ? error.message : 'Не удалось загрузить базу. Проверьте сеть и повторите загрузку.'; }
-    finally { refreshing = false; _notify(); }
-  }
-  Future<void> clearCatalogCache() async {
-    if (refreshing || _disposed) return;
-    refreshing = true; _notify();
-    try {
-      await catalog.clearCache();
-      _probeEpoch++; monitor.cancel(); _poll?.cancel();
-      _public = []; health = {}; cacheBytes = 0; cached = false; catalogDate = null;
-      autoRefresh = false;
-      if (selected == null) selectedId = _imports.isEmpty ? null : _imports.first.id;
-      country = null;
-      message = 'Кэш базы очищен. Нажмите «Скачать базу», чтобы загрузить её снова.';
-    } catch (_) { message = 'Не удалось очистить кэш базы'; }
-    finally { refreshing = false; _notify(); }
+  void refreshLatency() {
+    _probeEpoch++; monitor.cancel();
+    _scheduleProbe(immediate: true);
   }
   void select(String id) { selectedId = id; _notify(); }
   void filterProtocol(String? value) {
@@ -202,7 +167,10 @@ class VpnViewModel extends ChangeNotifier {
         _connectTimeout?.cancel(); _connectTimeout = null;
         _nativeConnected = true;
         _nativeNeedsStop = true;
-        if (!_verifying && state != ConnectionState.connected) unawaited(_verifyInternet());
+        if (activeServer?.protocol == 'vless' || activeServer?.protocol == 'shadowsocks') {
+          state = ConnectionState.connected; message = event.message ?? 'Xray: ответ через сервер получен';
+          _scheduleTraffic(); _notify();
+        } else if (!_verifying && state != ConnectionState.connected) { unawaited(_verifyInternet()); }
       case ConnectionState.connecting:
         _nativeConnected = false;
         connectionStage = event.message ?? connectionStage;
@@ -292,8 +260,8 @@ class VpnViewModel extends ChangeNotifier {
     finally { busy = false; _stopping = false; _notify(); }
   }
   @override void dispose() {
-    _disposed = true; _trafficTimer?.cancel(); _poll?.cancel(); _catalogTimer?.cancel(); _connectTimeout?.cancel();
-    _verificationClient?.close(force: true); monitor.cancel(); catalog.dispose();
+    _disposed = true; _trafficTimer?.cancel(); _poll?.cancel(); _connectTimeout?.cancel();
+    _verificationClient?.close(force: true); monitor.cancel();
     unawaited(_subscription?.cancel());
     super.dispose();
   }

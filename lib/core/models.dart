@@ -5,7 +5,7 @@ class VpnServer {
   const VpnServer({required this.id, required this.name, required this.country,
     required this.countryCode, required this.host, required this.port,
     required this.transport, required this.profile, required this.source,
-    this.score = 0, this.protocol = 'openvpn'});
+    this.score = 0, this.protocol = 'wireguard'});
   final String id, name, country, countryCode, host, transport, profile, source, protocol;
   final int port, score;
   Map<String, dynamic> toJson() => {

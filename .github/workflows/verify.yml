@@ -29,9 +29,6 @@ jobs:
           cache: true
       - name: Test browser configuration capture
         run: node tools/test_browser_capture.js
-      - name: Verify catalog service
-        run: python -m unittest discover -s tests -v
-        working-directory: infra
       - name: Prepare Android SDK
         run: |
           python - <<'PYSDK'
@@ -50,53 +47,20 @@ jobs:
       - name: Build pinned AmneziaWG Android tunnel
         if: steps.awg-cache.outputs.cache-hit != 'true'
         run: python tools/build_awg.py
-      - uses: actions/cache@v4
-        id: ovpn-cache
-        with:
-          path: |
-            android/app/libs/openvpn-core.aar
-            android/app/libs/openvpn-provenance.json
-            android/app/src/main/assets/licenses/openvpn
-          key: openvpn-b13ce20-v5
-      - name: Build OpenVPN from pinned source
-        if: steps.ovpn-cache.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y swig
-          python - <<'PYSDK'
-          import os, subprocess
-          sdk = os.environ['ANDROID_HOME'] + '/cmdline-tools/latest/bin/sdkmanager'
-          subprocess.run([sdk, '--licenses'], input='y\n' * 200, text=True, check=True)
-          PYSDK
-          python tools/build_openvpn.py
-      - uses: actions/cache/save@v4
-        if: steps.ovpn-cache.outputs.cache-hit != 'true'
-        with:
-          path: |
-            android/app/libs/openvpn-core.aar
-            android/app/libs/openvpn-provenance.json
-            android/app/src/main/assets/licenses/openvpn
-          key: openvpn-b13ce20-v5
-      - name: Fetch live public catalog fixture
-        run: |
-          mkdir -p build
-          curl --fail --max-time 45 https://www.vpngate.net/api/iphone/ -o build/live-catalog.csv
-          curl --fail --max-time 45 https://raw.githubusercontent.com/BIKPOB/-/main/catalog/vpngate.json -o build/catalog-mirror.json
       - name: Analyze Dart
         run: flutter analyze
       - name: Test Flutter core
         run: flutter test
       - name: Build mobile APK
         run: flutter build apk --release --target-platform android-arm64,android-arm
-      - name: Test live profiles with Android OpenVPN parser
-        run: python tools/test_native_profile.py
+      - name: Test native WireGuard and browser integration
+        run: python tools/test_native.py
       - name: Verify APK and record build metadata
         run: |
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk dist/quiet-vpn-android.apk
           python tools/verify_apk.py dist/quiet-vpn-android.apk
-          cp android/app/libs/openvpn-provenance.json dist/
-          python tools/verify_native.py dist/quiet-vpn-android.apk > dist/NATIVE_AUDIT.txt
+          cp pubspec.lock dist/DEPENDENCIES.lock
           sha256sum dist/quiet-vpn-android.apk > dist/SHA256SUMS.txt
           git rev-parse HEAD > dist/SOURCE_COMMIT.txt
       - name: Antivirus scan APK
