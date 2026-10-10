@@ -35,7 +35,8 @@ object CrashDiagnostics {
         return text.toString().take(16000)
     }
     fun report(context: Context): String {
-        val text = StringBuilder("Quiet VPN 0.6.0\nAndroid ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}\n${Build.MANUFACTURER} ${Build.MODEL}\nABI: ${Build.SUPPORTED_ABIS.joinToString()}\n")
+        val version = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?"
+        val text = StringBuilder("Quiet VPN $version\nAndroid ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}\n${Build.MANUFACTURER} ${Build.MODEL}\nABI: ${Build.SUPPORTED_ABIS.joinToString()}\n")
         text.append(context.getSharedPreferences("diagnostics", Context.MODE_PRIVATE)
             .getString("last", "Перехваченных Java/Kotlin-сбоев нет.")).append('\n')
         if (Build.VERSION.SDK_INT >= 30) {

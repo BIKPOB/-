@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import '../core/profile_policy.dart';
+import 'public_catalog_page.dart';
 import '../platform/config_browser.dart';
 import '../viewmodels/vpn_view_model.dart';
 
@@ -13,7 +14,9 @@ class CatalogPage extends StatelessWidget {
   final VpnViewModel vm;
   @override Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Добавить сервер')),
     body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 820), child: ListView(padding: const EdgeInsets.all(16), children: [
-      Text('Выберите протокол', style: Theme.of(context).textTheme.headlineSmall),
+      FilledButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => PublicCatalogPage(vm))), icon: const Icon(Icons.public), label: const Text('Публичные серверы VLESS / Shadowsocks')),
+      const SizedBox(height: 16),
+      Text('Добавить свой сервер', style: Theme.of(context).textTheme.headlineSmall),
       const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Сайт открывается прямо в приложении: можно войти, выбрать регион и получить конфигурацию. Для подключения нужны действующие данные от владельца сервера.')),
       for (final entry in protocols.entries) Card(child: Padding(padding: const EdgeInsets.all(8), child: ListTile(
         leading: Icon(entry.key == 'wireguard' ? Icons.shield_outlined : entry.key == 'vless' ? Icons.lock_outline : Icons.cloud_outlined),
@@ -119,9 +122,9 @@ class _AddServerPageState extends State<AddServerPage> {
           const Text('Откройте сайт, выполните вход и выберите сервер. Нажмите ссылку подключения, скачайте .conf или используйте «Импорт со страницы» в окне браузера.'),
           const SizedBox(height:16),
           if(widget.protocol=='wireguard')FilledButton.icon(onPressed:()=>browse(vpnbook:true),icon:const Icon(Icons.language),label:const Text('Открыть VPNBook · выдача WireGuard')),
-          const SizedBox(height:16),field('url','Сайт вашего провайдера',hint:'https://…'),
+          const SizedBox(height:16),field('url','Сайт выдачи VPN-конфигураций (необязательно)',hint:'https://…'),
           FilledButton.icon(onPressed:browse,icon:const Icon(Icons.open_in_browser),label:const Text('Открыть интерактивный браузер')),
-          const SizedBox(height:12),const Text('Браузер использует Android System WebView: доступны вход, кнопки сайта, выбор региона, назад и обновление. Для VLESS/Shadowsocks универсальной встроенной бесплатной базы пока нет.'),
+          const SizedBox(height:12),const Text('Браузер использует Android System WebView: доступны вход, кнопки сайта, выбор региона, назад и обновление. Готовые VLESS/Shadowsocks доступны в разделе «Публичные серверы» на предыдущем экране.'),
         ]),
         ListView(padding:const EdgeInsets.all(16),children:[
           field('key',widget.protocol=='wireguard'?'Текст .conf':'Ссылка подключения',lines:7,hint:widget.protocol=='wireguard'?'[Interface]…':widget.protocol=='vless'?'vless://…':'ss://…'),

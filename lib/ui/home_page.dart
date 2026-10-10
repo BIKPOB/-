@@ -52,8 +52,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('Пинг всех адресов проверяется одновременно. ICMP — ответ узла, TCP — ответ порта; это не подтверждение работы VPN.')),
       if (items.isEmpty) Card(child: Padding(padding: const EdgeInsets.all(24), child: Column(children: [
         const Icon(Icons.vpn_key_outlined, size: 48), const SizedBox(height: 12),
-        const Text('Подключите свой сервер', style: TextStyle(fontSize: 20)),
-        const Text('Откройте сайт выдачи конфигурации внутри приложения, вставьте ключ или заполните параметры.'),
+        const Text('Выберите сервер', style: TextStyle(fontSize: 20)),
+        const Text('Откройте публичную базу VLESS/Shadowsocks или импортируйте собственный ключ.'),
         const SizedBox(height: 12), FilledButton(onPressed: _add, child: const Text('Выбрать протокол')),
       ]))),
       for (final server in items) Card(child: ListTile(selected: vm.selectedId == server.id, onTap: () => vm.select(server.id),
