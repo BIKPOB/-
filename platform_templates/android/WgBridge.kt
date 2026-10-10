@@ -55,7 +55,29 @@ class WgController(private val context: Context,
     var sink: EventChannel.EventSink? = null
     var state = "disconnected"
         private set
-    private fun emit(value: String) { state = value; sink?.success(value) }
+    private val notification = TrafficNotification(context)
+    private val speedTick = object : Runnable {
+        override fun run() {
+            if (state != "connected" || stopping) return
+            val token = generation
+            worker.execute {
+                val counters = try { driver?.traffic() } catch (_: Exception) { null } catch (_: LinkageError) { null }
+                main.post {
+                    if (token == generation && state == "connected" && !stopping) {
+                        notification.update(counters)
+                        main.postDelayed(this, 1000)
+                    }
+                }
+            }
+        }
+    }
+    private fun emit(value: String) {
+        state = value
+        main.removeCallbacks(speedTick)
+        notification.reset()
+        if (value == "connected") main.post(speedTick)
+        sink?.success(value)
+    }
     fun connect(profile: String, result: MethodChannel.Result) {
         if (needsStop || stopping || state == "connecting") {
             result.error("BUSY", "Сначала отключите VPN", null); return
@@ -117,7 +139,7 @@ class WgController(private val context: Context,
             main.post { result.success(if (generation == token && !stopping) value else null) }
         }
     }
-    fun closeForTest() { worker.shutdownNow() }
+    fun closeForTest() { main.removeCallbacks(speedTick); worker.shutdownNow() }
 }
 
 object WgSession {

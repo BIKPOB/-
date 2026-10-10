@@ -70,4 +70,6 @@ default_test = ROOT/'test/widget_test.dart'
 if default_test.exists():
     default_test.unlink()
 subprocess.run([flutter, 'pub', 'get'], cwd=ROOT, check=True)
+if 'android' in args.platforms:
+    subprocess.run(['python3', str(ROOT/'tools/patch_xray_notification.py')], check=True)
 print('Platform runners created. Run flutter analyze && flutter test.')
