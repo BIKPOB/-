@@ -58,10 +58,12 @@ class AndroidEngine implements VpnEngine, TrafficSource {
     final epoch = _epoch;
     _emit(ConnectionState.connecting, 'Туннель Xray запущен · проверка ответа через сервер');
     try {
-      final delay = await _stage.invokeMethod<int>('probe').timeout(const Duration(seconds: 20));
+      final probe = await _stage.invokeMapMethod<String, dynamic>('probe').timeout(const Duration(seconds: 20));
+      final delay = (probe?['delay'] as num?)?.toInt();
+      final detail = probe?['detail'] as String? ?? 'Нет результата проверки';
       if (_stopping || epoch != _epoch || _disposed) return;
       if (delay == null || delay < 0) {
-        _emit(ConnectionState.error, 'Xray запущен, но запрос через сервер не прошёл. Проверьте ключ, сервер и сеть.');
+        _emit(ConnectionState.error, 'Запрос через Xray не прошёл: $detail');
       } else { _verified = true; _emit(ConnectionState.connected, 'Ответ через сервер: $delay мс'); }
     } catch (_) {
       if (!_stopping && epoch == _epoch) _emit(ConnectionState.error, 'Таймаут проверки Xray через сервер');
@@ -83,8 +85,8 @@ class AndroidEngine implements VpnEngine, TrafficSource {
   }
   @override Future<void> disconnect() async {
     _stopping = true; _starting = false; _epoch++; _verified = false;
-    await _stage.invokeMethod<void>('cancelProbe');
     try {
+      await _stage.invokeMethod<void>('cancelProbe');
       if (_active == 'wireguard') { await _wg.invokeMethod<void>('stop'); }
       else {
         await _xray.invokeMethod<void>('stopV2Ray');

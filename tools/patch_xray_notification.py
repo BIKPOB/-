@@ -10,6 +10,8 @@ base = Path(unquote(uri.path)) if uri.scheme == 'file' else (config.parent / unq
 p = base / 'android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/core/V2rayCoreManager.java'
 s = p.read_text()
 if '// Quiet VPN speed notification' in s:
+    s = s.replace('                        v2rayServicesListener = null;', '                        // Retain listener for stopCore acknowledgement.')
+    p.write_text(s)
     print('Xray notification patch already applied')
     raise SystemExit(0)
 def replace(old, new):
@@ -54,5 +56,9 @@ replace('''            context.startForeground(NOTIFICATION_ID, notificationBuil
 replace('.addAction(0, v2rayConfig.NOTIFICATION_DISCONNECT_BUTTON_NAME, notificationContentPendingIntent)',
         '.addAction(0, v2rayConfig.NOTIFICATION_DISCONNECT_BUTTON_NAME, pendingIntent)')
 replace('NotificationManager.IMPORTANCE_DEFAULT);', 'NotificationManager.IMPORTANCE_LOW);')
+# shutdown() runs inside stopLoop(): keep the service reference until stopCore
+# has closed the interface and emitted its DISCONNECTED acknowledgement.
+replace('                        v2rayServicesListener = null;',
+        '                        // Retain listener for stopCore acknowledgement.')
 p.write_text(s)
 print('Patched pinned Xray speed notification')
