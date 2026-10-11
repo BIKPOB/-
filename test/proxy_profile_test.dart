@@ -5,6 +5,21 @@ import 'package:quiet_vpn/core/proxy_profile.dart';
 import 'package:quiet_vpn/data/profile_store.dart';
 const uuid = '12345678-1234-1234-1234-123456789abc';
 void main() {
+  test('WireGuard share links preserve keys, endpoint, address and MTU', () {
+    final key = base64.encode(List.filled(32, 1));
+    final link = 'wireguard://${Uri.encodeComponent(key)}@vpn.example.org:443?'
+      'publickey=${Uri.encodeComponent(key)}&address=10.0.0.2%2F32&reserved=0%2C0%2C0&mtu=1280';
+    final profile = ProfilePolicy.parse(link);
+    expect(profile.protocol, 'wireguard');
+    expect(profile.transport, 'udp');
+    expect(profile.text, contains('PrivateKey = $key'));
+    expect(profile.text, contains('Endpoint = vpn.example.org:443'));
+    expect(profile.text, contains('Address = 10.0.0.2/32'));
+    expect(profile.text, contains('MTU = 1280'));
+    expect(() => ProfilePolicy.parse(link.replaceFirst('reserved=0%2C0%2C0', 'reserved=1%2C2%2C3')), throwsFormatException);
+    expect(() => ProfilePolicy.parse('$link&unknown=value'), throwsFormatException);
+    expect(() => ProfilePolicy.parse('$link&dns=1.1.1.1%0AMTU%3D1200'), throwsFormatException);
+  });
   test('VLESS REALITY preserves server transport and credentials', () {
     final key=base64Url.encode(List.filled(32,1)).replaceAll('=','');
     final p=ProxyProfile.parse('vless://$uuid@example.com:443?security=reality&type=tcp&sni=example.net&pbk=$key&sid=ab12&flow=xtls-rprx-vision');

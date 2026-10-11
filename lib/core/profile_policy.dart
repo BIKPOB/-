@@ -9,12 +9,42 @@ class ProfilePolicy {
     if (utf8.encode(text).length > maxBytes || text.contains('\u0000')) {
       throw const FormatException('Профиль слишком большой или повреждён');
     }
+    if (text.startsWith('wireguard://')) return _wireGuardLink(text);
     if (text.startsWith('vless://') || text.startsWith('ss://')) {
       final proxy = ProxyProfile.parse(text);
       return ParsedProfile(proxy.uri, proxy.host, proxy.port, 'tcp', false, protocol: proxy.protocol);
     }
     if (RegExp(r'^\s*\[Interface\]\s*$', multiLine: true).hasMatch(text)) return _wireGuard(text);
     throw const FormatException('Нужен WireGuard .conf, ссылка vless:// или ss://. OpenVPN удалён.');
+  }
+
+  static ParsedProfile _wireGuardLink(String text) {
+    final body = text.substring('wireguard://'.length).split('#').first;
+    final split = body.indexOf('@');
+    if (split < 1) throw const FormatException('Нужны ключ и адрес WireGuard');
+    final privateKey = Uri.decodeComponent(body.substring(0, split));
+    final uri = Uri.parse('wireguard://${body.substring(split + 1)}');
+    final q = uri.queryParameters;
+    const allowed = {'address', 'publickey', 'presharedkey', 'reserved', 'mtu', 'keepalive', 'dns'};
+    if (q.keys.any((key) => !allowed.contains(key)) || uri.queryParametersAll.values.any((v) => v.length != 1)) {
+      throw const FormatException('Неподдерживаемые параметры WireGuard');
+    }
+    if (q.containsKey('reserved') && q['reserved'] != '0,0,0') {
+      throw const FormatException('Этот профиль требует расширения reserved, которого нет в нативном движке');
+    }
+    if (uri.userInfo.isNotEmpty || uri.path.isNotEmpty && uri.path != '/' || !uri.hasPort) {
+      throw const FormatException('Некорректный адрес WireGuard');
+    }
+    final mtu = int.tryParse(q['mtu'] ?? '1280');
+    if (mtu == null || mtu < 576 || mtu > 9000) throw const FormatException('Некорректный MTU');
+    final host = uri.host.replaceAll(RegExp(r'^\[|\]$'), '');
+    final endpoint = host.contains(':') ? '[$host]:${uri.port}' : '$host:${uri.port}';
+    final values = [privateKey, ...q.values];
+    if (values.any((v) => v.contains('\n') || v.contains('\r'))) throw const FormatException('Некорректные поля WireGuard');
+    return _wireGuard('[Interface]\nPrivateKey = $privateKey\nAddress = ${q['address'] ?? ''}\n'
+      'DNS = ${q['dns'] ?? '1.1.1.1'}\nMTU = $mtu\n[Peer]\nPublicKey = ${q['publickey'] ?? ''}\n'
+      '${q['presharedkey'] == null || q['presharedkey']!.isEmpty ? '' : 'PresharedKey = ${q['presharedkey']}\n'}'
+      'Endpoint = $endpoint\nAllowedIPs = 0.0.0.0/0, ::/0\nPersistentKeepalive = ${q['keepalive'] ?? '25'}\n');
   }
 
   static ParsedProfile _wireGuard(String text) {

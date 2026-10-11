@@ -6,10 +6,11 @@ import '../core/models.dart';
 import '../core/profile_policy.dart';
 
 class PublicCatalogResult {
-  const PublicCatalogResult(this.servers, this.bundled, this.skipped);
+  const PublicCatalogResult(this.servers, this.bundled, this.skipped, {this.status = ''});
   final List<VpnServer> servers;
   final bool bundled;
   final int skipped;
+  final String status;
 }
 
 class PublicCatalog {
@@ -18,7 +19,7 @@ class PublicCatalog {
   static const urls = [
     'https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/v2ray-base64.txt',
   ];
-  static PublicCatalogResult parse(String text, {bool bundled = false}) {
+  static PublicCatalogResult parse(String text, {bool bundled = false, String sourceName = source}) {
     if (utf8.encode(text).length > maxBytes) throw const FormatException('Каталог слишком большой');
     text = text.trim();
     if (!text.contains('://')) {
@@ -30,8 +31,9 @@ class PublicCatalog {
     var skipped = 0;
     for (final line in const LineSplitter().convert(text)) {
       final value = line.trim();
-      if (!value.startsWith('vless://') && !value.startsWith('ss://')) continue;
+      if (!value.startsWith('vless://') && !value.startsWith('ss://') && !value.startsWith('wireguard://')) continue;
       try {
+        if (Uri.decodeFull(value).toLowerCase().contains('proton')) { skipped++; continue; }
         // Ignore advertising fragments when identifying duplicate profiles.
         final parsed = ProfilePolicy.parse(value.split('#').first);
         if (!publicHost(parsed.host)) { skipped++; continue; }
@@ -40,9 +42,9 @@ class PublicCatalog {
         final count = counts[parsed.protocol] ?? 0;
         if (count >= 100) continue;
         counts[parsed.protocol] = count + 1;
-        servers.add(VpnServer(id: 'public-$id', name: '${parsed.protocol == 'vless' ? 'VLESS' : 'Shadowsocks'} · ${parsed.host}',
+        servers.add(VpnServer(id: 'public-$id', name: '${parsed.protocol == 'wireguard' ? 'WireGuard' : parsed.protocol == 'vless' ? 'VLESS' : 'Shadowsocks'} · ${parsed.host}:${parsed.port} · ${id.substring(0, 4)}',
           country: 'Публичный сервер', countryCode: '--', host: parsed.host, port: parsed.port,
-          transport: parsed.transport, profile: parsed.text, source: source, protocol: parsed.protocol));
+          transport: parsed.transport, profile: parsed.text, source: sourceName, protocol: parsed.protocol));
       } on FormatException { skipped++; }
     }
     if (servers.isEmpty) throw const FormatException('В источнике нет совместимых серверов');
@@ -65,7 +67,17 @@ class PublicCatalog {
   }
 
   Future<PublicCatalogResult> load() async {
-    for (final url in urls) {
+    final parts = await Future.wait([
+      _loadSource(urls.first, 'assets/public-proxies.txt', source, '10.10.2026'),
+      _loadSource('https://raw.githubusercontent.com/NiREvil/vless/refs/heads/main/sub/v2rayng-wg.txt',
+        'assets/public-wireguard.txt', 'NiREvil/vless', '11.10.2026'),
+    ]);
+    return PublicCatalogResult(parts.expand((p) => p.servers).toList(), parts.any((p) => p.bundled),
+      parts.fold(0, (n, p) => n + p.skipped), status: parts.map((p) => p.status).join('\n'));
+  }
+  Future<PublicCatalogResult> _loadSource(String url, String asset, String name, String date) async {
+    {
+
       final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
       try {
         return await (() async {
@@ -78,12 +90,18 @@ class PublicCatalog {
             if (bytes.length + chunk.length > maxBytes) throw const FormatException('Каталог слишком большой');
             bytes.addAll(chunk);
           }
-          return parse(utf8.decode(bytes));
+          final parsed = parse(utf8.decode(bytes), sourceName: name);
+          return PublicCatalogResult(parsed.servers, false, parsed.skipped, status: '$name: обновлено');
         })().timeout(const Duration(seconds: 12));
       } catch (_) {
         // A failed refresh must not remove the bundled fallback.
       } finally { client.close(force: true); }
     }
-    return parse(await rootBundle.loadString('assets/public-proxies.txt'), bundled: true);
+    try {
+      final parsed = parse(await rootBundle.loadString(asset), bundled: true, sourceName: name);
+      return PublicCatalogResult(parsed.servers, true, parsed.skipped, status: '$name: резервная база $date');
+    } catch (_) {
+      return PublicCatalogResult([], true, 0, status: '$name: нет совместимых конфигураций');
+    }
   }
 }

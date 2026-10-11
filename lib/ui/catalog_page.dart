@@ -14,7 +14,7 @@ class CatalogPage extends StatelessWidget {
   final VpnViewModel vm;
   @override Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Добавить сервер')),
     body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 820), child: ListView(padding: const EdgeInsets.all(16), children: [
-      FilledButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => PublicCatalogPage(vm))), icon: const Icon(Icons.public), label: const Text('Публичные серверы VLESS / Shadowsocks')),
+      FilledButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => PublicCatalogPage(vm))), icon: const Icon(Icons.public), label: const Text('Публичные серверы · все протоколы')),
       const SizedBox(height: 16),
       Text('Добавить свой сервер', style: Theme.of(context).textTheme.headlineSmall),
       const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Text('Сайт открывается прямо в приложении: можно войти, выбрать регион и получить конфигурацию. Для подключения нужны действующие данные от владельца сервера.')),
@@ -124,7 +124,7 @@ class _AddServerPageState extends State<AddServerPage> {
           if(widget.protocol=='wireguard')FilledButton.icon(onPressed:()=>browse(vpnbook:true),icon:const Icon(Icons.language),label:const Text('Открыть VPNBook · выдача WireGuard')),
           const SizedBox(height:16),field('url','Сайт выдачи VPN-конфигураций (необязательно)',hint:'https://…'),
           FilledButton.icon(onPressed:browse,icon:const Icon(Icons.open_in_browser),label:const Text('Открыть интерактивный браузер')),
-          const SizedBox(height:12),const Text('Браузер использует Android System WebView: доступны вход, кнопки сайта, выбор региона, назад и обновление. Готовые VLESS/Shadowsocks доступны в разделе «Публичные серверы» на предыдущем экране.'),
+          const SizedBox(height:12),const Text('Браузер использует Android System WebView: доступны вход, кнопки сайта, выбор региона, назад и обновление. Готовые WireGuard/VLESS/Shadowsocks доступны в разделе «Публичные серверы» на предыдущем экране.'),
         ]),
         ListView(padding:const EdgeInsets.all(16),children:[
           field('key',widget.protocol=='wireguard'?'Текст .conf':'Ссылка подключения',lines:7,hint:widget.protocol=='wireguard'?'[Interface]…':widget.protocol=='vless'?'vless://…':'ss://…'),

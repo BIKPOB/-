@@ -4,6 +4,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:quiet_vpn/data/public_catalog.dart';
 const uuid = '12345678-1234-1234-1234-123456789abc';
 void main() {
+  test('bundled WireGuard subscription yields native profiles', () {
+    final result = PublicCatalog.parse(File('assets/public-wireguard.txt').readAsStringSync(), sourceName: 'NiREvil/vless');
+    expect(result.servers, isNotEmpty);
+    expect(result.servers.every((s) => s.protocol == 'wireguard' && s.transport == 'udp' && s.profile.startsWith('[Interface]')), true);
+    expect(result.servers.every((s) => s.source == 'NiREvil/vless'), true);
+    // ignore: avoid_print
+    print('Compatible WireGuard profiles: ${result.servers.length}');
+  });
   test('public subscription isolates invalid entries, deduplicates labels, supports base64', () {
     const lines = 'vless://$uuid@example.com:443#one\nvless://$uuid@example.com:443#two\n'
       'vless://broken@example.com:443\nss://aes-256-gcm:secret@example.org:443\n'

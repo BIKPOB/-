@@ -53,7 +53,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       if (items.isEmpty) Card(child: Padding(padding: const EdgeInsets.all(24), child: Column(children: [
         const Icon(Icons.vpn_key_outlined, size: 48), const SizedBox(height: 12),
         const Text('Выберите сервер', style: TextStyle(fontSize: 20)),
-        const Text('Откройте публичную базу VLESS/Shadowsocks или импортируйте собственный ключ.'),
+        const Text('Откройте публичную базу WireGuard/VLESS/Shadowsocks или импортируйте собственный ключ.'),
         const SizedBox(height: 12), FilledButton(onPressed: _add, child: const Text('Выбрать протокол')),
       ]))),
       for (final server in items) Card(child: ListTile(selected: vm.selectedId == server.id, onTap: () => vm.select(server.id),

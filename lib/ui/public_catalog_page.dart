@@ -42,7 +42,7 @@ class _PublicCatalogPageState extends State<PublicCatalogPage> {
     if (adding) return;
     setState(() { adding = true; error = null; });
     try {
-      await widget.vm.importProfile(server.profile, server.name, 'Публичный · ${PublicCatalog.source}');
+      await widget.vm.importProfile(server.profile, server.name, 'Публичный · ${server.source}');
       if (mounted) Navigator.popUntil(context, (route) => route.isFirst);
     } catch (_) {
       if (mounted) setState(() => error = 'Не удалось сохранить сервер');
@@ -58,10 +58,11 @@ class _PublicCatalogPageState extends State<PublicCatalogPage> {
         const Text('Выберите сервер → «Добавить» → «Подключить» на главном экране. Ссылка провайдера не нужна.'),
         const SizedBox(height: 8),
         const Text('Общедоступные серверы сторонних владельцев: доступность и скорость могут меняться. Пинг не подтверждает работу VPN.'),
-        if (result != null) Text(result!.bundled ? 'Резервная база от 10.10.2026: источник обновления недоступен.' : 'База обновлена при открытии · ${PublicCatalog.source}'),
+        if (result != null) Text(result!.status),
         if (result != null) Text('Совместимых: ${result!.servers.length}. Неподдерживаемых или некорректных: ${result!.skipped}.'),
         if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
         Wrap(spacing: 8, children: [
+          ChoiceChip(label: const Text('WireGuard'), selected: protocol == 'wireguard', onSelected: (_) => setState(() => protocol = 'wireguard')),
           ChoiceChip(label: const Text('VLESS'), selected: protocol == 'vless', onSelected: (_) => setState(() => protocol = 'vless')),
           ChoiceChip(label: const Text('Shadowsocks'), selected: protocol == 'shadowsocks', onSelected: (_) => setState(() => protocol = 'shadowsocks')),
           TextButton(onPressed: loading || probing || result == null ? null : probe, child: Text(probing ? 'Проверка…' : 'Проверить пинг всех')),
@@ -71,7 +72,7 @@ class _PublicCatalogPageState extends State<PublicCatalogPage> {
         itemCount: items.length, itemBuilder: (context, index) {
           final server = items[index];
           return ListTile(title: Text(server.name), subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Порт ${server.port}'), LatencyIndicator(health[server.id]),
+            Text(server.source), LatencyIndicator(health[server.id]),
           ]), trailing: TextButton(onPressed: adding ? null : () => add(server), child: const Text('Добавить')));
         })),
     ]));
