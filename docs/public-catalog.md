@@ -17,3 +17,25 @@
 Поддерживаются ссылки wireguard:// с private key, publickey, address, optional presharedkey, mtu, keepalive, dns. reserved разрешён только 0,0,0: профили, требующие нестандартных ненулевых байтов, не преобразуются с потерей параметров. Ключи/CIDR/Endpoint дополнительно проверяет существующий строгий парсер .conf. Ссылки с маркировкой Proton исключаются. Это сторонние публичные конфигурации с непроверенным сроком действия и доступностью, не автоматически выданные каждому пользователю ключи VPNBook. Общие ключи могут мешать одновременным подключениям.
 
 Профили VPNBook индивидуальны и ограничены по сроку; в эту базу они не копируются. Браузер для загрузки каталога не используется. Смена способа импорта сама по себе не исправляет сетевые тайм-ауты.
+
+
+## 0.7.5: Xray connection diagnostics
+
+The SOCKS success reply is local acceptance, not confirmation that an outbound
+VLESS/Shadowsocks connection completed. Stage text now says this explicitly.
+Each verified HTTPS probe has a 20-second wall deadline (18-second read timeout),
+with two endpoints and a 45-second channel deadline. The proxy startup watchdog
+is 75 seconds, avoiding cancellation before both probes finish. TLS certificate
+verification remains enabled. A failed pair still disconnects; unverified tunnels
+are not advertised as working.
+
+Xray INFO logs (outbound failures use this level) go to a private, non-backed-up per-session file; access logs
+remain disabled. The file is reset for each connection and checked once per
+second, truncating above 256 KiB during the session. Reports read at most the
+last 64 KiB and export only fixed error categories, never raw log text, addresses,
+keys, UUIDs, passwords, or request paths. Unknown errors are explicitly marked
+as unclassified. Native tests cover nested transport errors and secret exclusion.
+
+This corrects the premature health-check deadline and the diagnostic blind spot.
+It does not prove a public server works in the user's network or establish that
+a timeout was caused by filtering, stale credentials, or a specific transport.

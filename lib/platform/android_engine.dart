@@ -56,9 +56,9 @@ class AndroidEngine implements VpnEngine, TrafficSource {
   Future<void> _verifyProxy() async {
     _checking = true;
     final epoch = _epoch;
-    _emit(ConnectionState.connecting, 'Туннель Xray запущен · проверка ответа через сервер');
+    _emit(ConnectionState.connecting, 'Xray запущен локально · проверка удалённого соединения (до 40 с)');
     try {
-      final probe = await _stage.invokeMapMethod<String, dynamic>('probe').timeout(const Duration(seconds: 20));
+      final probe = await _stage.invokeMapMethod<String, dynamic>('probe').timeout(const Duration(seconds: 45));
       final delay = (probe?['delay'] as num?)?.toInt();
       final detail = probe?['detail'] as String? ?? 'Нет результата проверки';
       if (_stopping || epoch != _epoch || _disposed) return;
@@ -76,7 +76,8 @@ class AndroidEngine implements VpnEngine, TrafficSource {
       await _wg.invokeMethod<void>('start', {'profile':server.profile}); return;
     }
     if (!{'vless','shadowsocks'}.contains(_active)) throw StateError('Протокол не поддерживается');
-    final config = ProxyProfile.parse(server.profile).configuration;
+    final logPath = await _stage.invokeMethod<String>('prepareDiagnostics');
+    final config = ProxyProfile.parse(server.profile).configurationWithDiagnostics(errorLogPath: logPath);
     if (await _xray.invokeMethod<bool>('requestPermission') != true) throw StateError('Разрешение VPN отклонено');
     _xrayState = 'CONNECTING';
     _emit(ConnectionState.connecting, 'Запуск ${server.protocol.toUpperCase()}');

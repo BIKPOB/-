@@ -31,6 +31,12 @@ void main() {
     expect(config['log']['loglevel'],'none');
     expect(config['inbounds'][0]['listen'],'127.0.0.1');
   });
+  test('session diagnostics enables transport diagnostics without access logging', () {
+    final p = ProxyProfile.parse('vless://$uuid@example.com:443');
+    final config = jsonDecode(p.configurationWithDiagnostics(errorLogPath: '/private/xray.log')) as Map;
+    expect(config['log'], {'loglevel': 'info', 'error': '/private/xray.log', 'access': 'none'});
+    expect(config['outbounds'], jsonDecode(p.configuration)['outbounds']);
+  });
   test('Shadowsocks SIP002, plaintext and legacy links normalize identically', () {
     final auth=base64Url.encode(utf8.encode('aes-256-gcm:secret')).replaceAll('=','');
     final legacy=base64Url.encode(utf8.encode('aes-256-gcm:secret@example.com:443')).replaceAll('=','');

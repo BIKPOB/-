@@ -47,6 +47,7 @@ object CrashDiagnostics {
                     }
             } catch (_: Exception) { text.append("История завершений недоступна.\n") }
         }
+        text.append(XrayDiagnostics.report(context)).append('\n')
         return text.toString()
     }
 }

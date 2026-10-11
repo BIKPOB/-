@@ -141,7 +141,7 @@ class VpnViewModel extends ChangeNotifier {
       traffic.reset(); connectionStage = 'Запуск VPN';
       _connectionEpoch++;
       _connectTimeout?.cancel();
-      _connectTimeout = Timer(const Duration(seconds: 50), () {
+      _connectTimeout = Timer(Duration(seconds: activeServer?.protocol == 'wireguard' ? 50 : 75), () {
         if (state == ConnectionState.connecting) {
           unawaited(_fail('Таймаут: ${connectionStage ?? 'нет ответа'}. Попробуйте другой сервер или транспорт.'));
         }
@@ -180,7 +180,7 @@ class VpnViewModel extends ChangeNotifier {
           _verificationClient?.close(force: true); _connectionEpoch++;
         }
         state = ConnectionState.connecting;
-        _connectTimeout ??= Timer(const Duration(seconds: 50), () { unawaited(_fail('Таймаут VPN')); });
+        _connectTimeout ??= Timer(Duration(seconds: activeServer?.protocol == 'wireguard' ? 50 : 75), () { unawaited(_fail('Таймаут VPN')); });
         _notify();
       case ConnectionState.disconnected:
         _nativeConnected = false;

@@ -83,8 +83,10 @@ class ProxyProfile {
       'settings': {'vnext': [{'address': host, 'port': u.port, 'users': [
         {'id': u.userInfo, 'encryption': 'none', 'flow': flow}]}]}, 'streamSettings': stream});
   }
-  String get configuration => jsonEncode({
-    'log': {'loglevel': 'none'},
+  String get configuration => configurationWithDiagnostics();
+  String configurationWithDiagnostics({String? errorLogPath}) => jsonEncode({
+    'log': {'loglevel': errorLogPath == null ? 'none' : 'info',
+      if (errorLogPath != null) 'error': errorLogPath, 'access': 'none'},
     'inbounds': [{'tag': 'local', 'listen': '127.0.0.1', 'port': 10807, 'protocol': 'socks', 'settings': {'udp': true}}],
     'outbounds': [outbound],
     'dns': {'servers': ['1.1.1.1', '9.9.9.9']},

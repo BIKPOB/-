@@ -40,18 +40,18 @@ object ProxyProbe {
             val socket = Socket()
             pending = socket
             if (token != generation) { socket.close(); break }
-            val deadline = timer.schedule({ try { socket.close() } catch (_: Exception) { } }, 8, TimeUnit.SECONDS)
+            val deadline = timer.schedule({ try { socket.close() } catch (_: Exception) { } }, 20, TimeUnit.SECONDS)
             var stage = "локальный SOCKS"
             try {
-                socket.soTimeout = 5000
+                socket.soTimeout = 18000
                 socket.connect(InetSocketAddress("127.0.0.1", 10807), 1500)
-                stage = "ответ SOCKS через сервер"
+                stage = "локальное согласование SOCKS"
                 socksConnect(socket, host)
-                stage = "TLS через сервер"
+                stage = "ожидание HTTPS через Xray (удалённое соединение ещё не подтверждено)"
                 val tls = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(socket, host, 443, true) as SSLSocket
                 tls.use {
                     it.sslParameters = it.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
-                    it.soTimeout = 5000
+                    it.soTimeout = 18000
                     it.startHandshake()
                     stage = "HTTPS-ответ"
                     it.outputStream.write("GET /generate_204 HTTP/1.1\r\nHost: $host\r\nConnection: close\r\n\r\n".toByteArray(Charsets.US_ASCII))
@@ -67,7 +67,7 @@ object ProxyProbe {
                 }
                 return mapOf("delay" to android.os.SystemClock.elapsedRealtime() - start, "detail" to host)
             } catch (e: Exception) {
-                failures.add("$host: $stage (${e.javaClass.simpleName})")
+                failures.add("$host: $stage (${e.javaClass.simpleName}, ${android.os.SystemClock.elapsedRealtime() - start} мс)")
             } finally {
                 deadline.cancel(false)
                 try { socket.close() } catch (_: Exception) { }

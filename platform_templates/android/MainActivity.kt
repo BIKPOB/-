@@ -31,12 +31,15 @@ class MainActivity : FlutterActivity() {
                 if (call.method == "stage") {
                     val state = dev.amirzr.flutter_v2ray_client.v2ray.V2rayController.getConnectionState().name
                     result.success(state.removePrefix("V2RAY_"))
+                } else if (call.method == "prepareDiagnostics") {
+                    result.success(XrayDiagnostics.prepare(applicationContext))
                 } else if (call.method == "probe") {
                     probeWorker.execute {
-                        val delay = ProxyProbe.measure()
+                        val delay = ProxyProbe.measure().toMutableMap()
+                        delay["detail"] = "${delay["detail"]}\n${XrayDiagnostics.report(applicationContext)}"
                         runOnUiThread { result.success(delay) }
                     }
-                } else if (call.method == "cancelProbe") { ProxyProbe.cancel(); result.success(null) }
+                } else if (call.method == "cancelProbe") { ProxyProbe.cancel(); XrayDiagnostics.stop(); result.success(null) }
                 else result.notImplemented()
             }
         wg = WgBridge(this)
