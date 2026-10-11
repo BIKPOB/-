@@ -34,6 +34,12 @@ class ControlledEngine implements VpnEngine {
   @override Future<void> dispose() => controller.close();
 }
 
+class SlowFirstEngine extends ControlledEngine {
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++;
+    controller.add(EngineEvent(ConnectionState.connected, 'VPN transfer test', connects > 1));
+  }
+}
 class AutoEngine extends ControlledEngine {
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
     connects++;
@@ -57,6 +63,22 @@ void main() {
       expect(vm.connectionVerified, true);
       expect(vm.state, ConnectionState.connected);
       expect(vm.autoSelecting, false);
+      await vm.disconnect();
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+  test('auto selection skips a connected server whose transfer quality is insufficient', () async {
+    final engine = SlowFirstEngine();
+    final other = VpnServer.fromJson({...server.toJson(), 'id': 'fast', 'host': '9.9.9.9',
+      'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.9')});
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () async => PublicCatalogResult([other], false, 0), networkReader: () async => 'wifi',
+      autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize(); await vm.autoConnect();
+      expect(engine.connects, 2);
+      expect(engine.disconnects, 1);
+      expect(vm.connectionVerified, true);
       await vm.disconnect();
     } finally { vm.dispose(); await engine.dispose(); }
   });
