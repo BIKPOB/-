@@ -73,7 +73,7 @@ class ServerMonitor {
     }
   }
   Future<HealthResult> _tcp(VpnServer server, int generation) async {
-    if (server.transport != 'tcp') return const HealthResult(Reachability.notMeasured, null, 'ICMP без ответа · UDP не измерен');
+    if (server.transport != 'tcp') return const HealthResult(Reachability.notMeasured, null, 'ICMP: нет ответа');
     final watch = Stopwatch()..start();
     try {
       final socket = await Socket.connect(server.host, server.port, timeout: const Duration(milliseconds: 1500));
