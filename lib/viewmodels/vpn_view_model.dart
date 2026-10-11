@@ -10,10 +10,18 @@ import '../core/traffic.dart';
 import '../core/profile_policy.dart';
 import '../core/server_monitor.dart';
 import '../data/profile_store.dart';
+import '../data/public_catalog.dart';
+import '../core/adaptive_selector.dart';
 import '../platform/vpn_engine.dart';
 
 class VpnViewModel extends ChangeNotifier {
-  VpnViewModel(this.engine, this.store, this.monitor);
+  VpnViewModel(this.engine, this.store, this.monitor, {
+    Future<PublicCatalogResult> Function()? catalogLoader,
+    Future<String> Function()? networkReader, ServerMonitor? autoMonitor,
+  }) : _catalogLoader = catalogLoader ?? PublicCatalog().load,
+       _networkReader = networkReader, _autoMonitor = autoMonitor ?? ServerMonitor();
+  final Future<PublicCatalogResult> Function() _catalogLoader;
+  final Future<String> Function()? _networkReader;
   final VpnEngine engine;
   final ProfileStore store;
   final ServerMonitor monitor;
@@ -25,6 +33,90 @@ class VpnViewModel extends ChangeNotifier {
   String? selectedId, country, message, protocolFilter;
   VpnServer? activeServer;
   bool busy = false, ready = false;
+  bool autoSelecting = false, connectionVerified = false;
+  String? autoStatus;
+  int _autoEpoch = 0;
+  AdaptiveSelector _selector = AdaptiveSelector();
+  final ServerMonitor _autoMonitor;
+  static const _networkChannel = MethodChannel('quietvpn/catalog-cache');
+  Future<String> _network() async {
+    if (_networkReader != null) return _networkReader();
+    try { return await _networkChannel.invokeMethod<String>('network') ?? 'other'; }
+    catch (_) { return 'other'; }
+  }
+  Future<void> cancelAutoSelection() async {
+    _autoEpoch++; _autoMonitor.cancel(); autoStatus = 'Подбор остановлен'; _notify();
+    if (!busy && _nativeNeedsStop) await disconnect();
+  }
+  Future<void> autoConnect() async {
+    if (!ready || busy || autoSelecting || _nativeNeedsStop || _stopping) return;
+    autoSelecting = true; final token = ++_autoEpoch;
+    autoStatus = 'Локальная нейросеть: обновление базы'; _notify();
+    _poll?.cancel(); _probeEpoch++; monitor.cancel();
+    bool cancelled() => token != _autoEpoch || _disposed;
+    try {
+      final network = await _network();
+      if (cancelled()) return;
+      if (network == 'offline') { autoStatus = 'Нет доступной сети'; return; }
+      final catalog = await _catalogLoader();
+      if (cancelled()) return;
+      final pool = [..._imports, ...catalog.servers];
+      // A small diverse shortlist avoids launching hundreds of ping processes.
+      final candidates = <VpnServer>[];
+      final hosts = <String>{};
+      for (final protocol in ['wireguard', 'vless', 'shadowsocks']) {
+        final group = pool.where((s) => s.protocol == protocol).toList()
+          ..sort((a, b) => _selector.score(b, network, null).compareTo(_selector.score(a, network, null)));
+        var count = 0;
+        for (final server in group) {
+          if (count >= 8) break;
+          if (hosts.add('$protocol|${server.host}')) { candidates.add(server); count++; }
+        }
+      }
+      autoStatus = 'Сеть: $network · оценка ${candidates.length} адресов · опыт: ${_selector.samples}'; _notify();
+      final latency = await _autoMonitor.sample(candidates);
+      if (cancelled()) return;
+      candidates.sort((a, b) => _selector.score(b, network, latency[b.id]?.milliseconds)
+        .compareTo(_selector.score(a, network, latency[a.id]?.milliseconds)));
+      // Include the best candidate of every available protocol before repeats.
+      final ordered = <VpnServer>[];
+      final protocols = <String>{};
+      for (final s in candidates) { if (protocols.add(s.protocol)) ordered.add(s); }
+      ordered.addAll(candidates.where((s) => !ordered.contains(s)));
+      var attempt = 0;
+      for (final server in ordered.take(6)) {
+        if (cancelled()) return;
+        if (await _network() != network) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
+        if (cancelled()) return;
+        attempt++;
+        autoStatus = 'ИИ-подбор: попытка $attempt/6 · ${server.protocol} · проверка HTTPS'; _notify();
+        await importProfile(server.profile, server.name, 'ИИ-подбор · ${server.source}');
+        if (cancelled()) return;
+        await connect(null);
+        final deadline = DateTime.now().add(const Duration(seconds: 80));
+        while (!cancelled() && (state == ConnectionState.connecting || _stopping) && DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+        }
+        if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
+        final sameNetwork = await _network() == network;
+        if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
+        final success = state == ConnectionState.connected && connectionVerified;
+        if (sameNetwork) {
+          _selector.observe(server, network, latency[server.id]?.milliseconds, success: success);
+          try { await store.saveSelector(_selector.encode()); } catch (_) { }
+        }
+        if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
+        if (success && sameNetwork) { autoStatus = 'ИИ выбрал соединение с подтверждённым HTTPS · опыт: ${_selector.samples}'; return; }
+        final failure = message;
+        if (_nativeNeedsStop) await disconnect();
+        message = failure;
+        if (_nativeNeedsStop) { autoStatus = 'Подбор остановлен: отключение не подтверждено'; return; }
+        if (!sameNetwork) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
+      }
+      autoStatus = 'Проверено $attempt вариантов: рабочий HTTPS не найден. Причина последней ошибки — в диагностике.';
+    } catch (_) { autoStatus = 'Подбор не завершён. Проверьте сеть и диагностику.'; }
+    finally { autoSelecting = false; if (!_disposed) { _scheduleProbe(); _notify(); } }
+  }
   bool _foreground = true, _disposed = false, _nativeNeedsStop = false, _stopping = false;
   bool _verifying = false;
   bool _nativeConnected = false;
@@ -62,6 +154,7 @@ class VpnViewModel extends ChangeNotifier {
     _subscription = engine.events.listen(_onEvent);
     try {
       _imports = await store.load();
+      try { _selector = AdaptiveSelector.decode(await store.loadSelector()); } catch (_) { }
       await engine.initialize(); ready = true;
     } catch (_) { message = 'Не удалось инициализировать VPN или защищённое хранилище'; state = ConnectionState.error; }
     if (servers.isNotEmpty) selectedId = servers.first.id;
@@ -71,7 +164,7 @@ class VpnViewModel extends ChangeNotifier {
     _probeEpoch++; monitor.cancel();
     _scheduleProbe(immediate: true);
   }
-  void select(String id) { selectedId = id; _notify(); }
+  void select(String id) { if (autoSelecting) return; selectedId = id; _notify(); }
   void filterProtocol(String? value) {
     protocolFilter = value; country = null;
     _probeEpoch++; monitor.cancel(); _scheduleProbe(immediate: true); _notify();
@@ -82,6 +175,7 @@ class VpnViewModel extends ChangeNotifier {
   }
   void setForeground(bool visible) {
     _foreground = visible;
+    if (!visible && autoSelecting) unawaited(cancelAutoSelection());
     _scheduleTraffic();
     _probeEpoch++; monitor.cancel(); _poll?.cancel();
     if (visible) {
@@ -96,7 +190,7 @@ class VpnViewModel extends ChangeNotifier {
   }
   void _scheduleProbe({bool immediate = false}) {
     _poll?.cancel();
-    if (!_foreground || _disposed) return;
+    if (!_foreground || _disposed || autoSelecting) return;
     _poll = Timer(Duration(milliseconds: immediate ? 0 : 30000 + Random().nextInt(3000)), () async {
       final epoch = _probeEpoch;
       final results = await monitor.sample(servers, onResult: (id, result) {
@@ -122,7 +216,7 @@ class VpnViewModel extends ChangeNotifier {
   }
   Future<void> removeSelected() async {
     final server = selected;
-    if (server == null || server.source != 'Импорт' || activeServer?.id == server.id) return;
+    if (autoSelecting || server == null || server.source != 'Импорт' || activeServer?.id == server.id) return;
     final updated = _imports.where((s) => s.id != server.id).toList();
     await store.save(updated); await store.removeCredentials(server.id);
     _imports = updated; selectedId = servers.isEmpty ? null : servers.first.id; _notify();
@@ -138,6 +232,7 @@ class VpnViewModel extends ChangeNotifier {
       if (credentials != null) await store.saveCredentials(server.id, credentials);
       _nativeNeedsStop = true; activeServer = server;
       state = ConnectionState.connecting;
+      connectionVerified = false;
       traffic.reset(); connectionStage = 'Запуск VPN';
       _connectionEpoch++;
       _connectTimeout?.cancel();
@@ -168,6 +263,7 @@ class VpnViewModel extends ChangeNotifier {
         _nativeConnected = true;
         _nativeNeedsStop = true;
         if (activeServer?.protocol == 'vless' || activeServer?.protocol == 'shadowsocks') {
+          connectionVerified = true;
           state = ConnectionState.connected; message = event.message ?? 'Xray: ответ через сервер получен';
           _scheduleTraffic(); _notify();
         } else if (!_verifying && state != ConnectionState.connected) { unawaited(_verifyInternet()); }
@@ -217,6 +313,7 @@ class VpnViewModel extends ChangeNotifier {
       })().timeout(const Duration(seconds: 8));
       if (!_disposed && epoch == _connectionEpoch && _nativeNeedsStop) {
         _connectTimeout?.cancel(); _connectTimeout = null; state = ConnectionState.connected;
+        connectionVerified = true;
         message = '${activeServer?.protocol ?? 'VPN'} подключён, HTTPS-проверка пройдена'; _scheduleTraffic(); _notify();
       }
     } catch (_) {
@@ -260,7 +357,7 @@ class VpnViewModel extends ChangeNotifier {
     finally { busy = false; _stopping = false; _notify(); }
   }
   @override void dispose() {
-    _disposed = true; _trafficTimer?.cancel(); _poll?.cancel(); _connectTimeout?.cancel();
+    _disposed = true; _autoEpoch++; _autoMonitor.cancel(); _trafficTimer?.cancel(); _poll?.cancel(); _connectTimeout?.cancel();
     _verificationClient?.close(force: true); monitor.cancel();
     unawaited(_subscription?.cancel());
     super.dispose();

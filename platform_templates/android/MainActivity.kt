@@ -42,6 +42,35 @@ class MainActivity : FlutterActivity() {
                 } else if (call.method == "cancelProbe") { ProxyProbe.cancel(); XrayDiagnostics.stop(); result.success(null) }
                 else result.notImplemented()
             }
+        io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/catalog-cache")
+            .setMethodCallHandler { call, result ->
+                if (call.method == "network") {
+                    val manager = getSystemService(android.net.ConnectivityManager::class.java)
+                    val networks = manager.allNetworks.mapNotNull { manager.getNetworkCapabilities(it) }
+                        .filter { it.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                            !it.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) }
+                    result.success(when {
+                        networks.any { it.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) } -> "wifi"
+                        networks.any { it.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) } -> "mobile"
+                        networks.isNotEmpty() -> "other"
+                        else -> "offline"
+                    })
+                    return@setMethodCallHandler
+                }
+                val source = call.argument<String>("source")
+                if (source == null || !CatalogCache.sources.containsKey(source)) {
+                    result.error("source", "Неизвестная подписка", null)
+                } else try {
+                    when (call.method) {
+                        "read" -> result.success(CatalogCache.read(applicationContext, source))
+                        "save" -> {
+                            CatalogCache.save(applicationContext, source, call.argument<String>("text") ?: "", true)
+                            result.success(null)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (_: Exception) { result.error("cache", "Кэш недоступен", null) }
+            }
         wg = WgBridge(this)
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/wg").setMethodCallHandler(wg::handle)
         io.flutter.plugin.common.EventChannel(engine.dartExecutor.binaryMessenger, "quietvpn/wg-events").setStreamHandler(object : io.flutter.plugin.common.EventChannel.StreamHandler {

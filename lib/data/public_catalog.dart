@@ -14,6 +14,7 @@ class PublicCatalogResult {
 }
 
 class PublicCatalog {
+  static const _cache = MethodChannel('quietvpn/catalog-cache');
   static const source = 'Au1rxx/free-vpn-subscriptions';
   static const maxBytes = 2 * 1024 * 1024;
   static const urls = [
@@ -90,13 +91,27 @@ class PublicCatalog {
             if (bytes.length + chunk.length > maxBytes) throw const FormatException('Каталог слишком большой');
             bytes.addAll(chunk);
           }
-          final parsed = parse(utf8.decode(bytes), sourceName: name);
+          final text = utf8.decode(bytes);
+          final parsed = parse(text, sourceName: name);
+          try { await _cache.invokeMethod<void>('save', {'source': name, 'text': text}); } catch (_) { }
           return PublicCatalogResult(parsed.servers, false, parsed.skipped, status: '$name: обновлено');
         })().timeout(const Duration(seconds: 12));
       } catch (_) {
         // A failed refresh must not remove the bundled fallback.
       } finally { client.close(force: true); }
     }
+    try {
+      final snapshots = await _cache.invokeListMethod<dynamic>('read', {'source': name}) ?? [];
+      for (final snapshot in snapshots) {
+        try {
+          final text = snapshot['text'] as String;
+          final parsed = parse(text, sourceName: name);
+          final updated = DateTime.fromMillisecondsSinceEpoch((snapshot['updated'] as num).toInt()).toLocal();
+          return PublicCatalogResult(parsed.servers, false, parsed.skipped,
+            status: '$name: сохранённое обновление ${updated.toString().substring(0, 16)}');
+        } catch (_) { /* Preserve the previous validated snapshot when a candidate is invalid. */ }
+      }
+    } catch (_) { /* Native cache is optional on other platforms. */ }
     try {
       final parsed = parse(await rootBundle.loadString(asset), bundled: true, sourceName: name);
       return PublicCatalogResult(parsed.servers, true, parsed.skipped, status: '$name: резервная база $date');

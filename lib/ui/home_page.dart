@@ -41,9 +41,15 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         const SizedBox(height: 8), Text(vm.activeServer?.name ?? vm.selected?.name ?? 'Добавьте первый сервер'),
         Text('↓ ${formatTrafficRate(vm.traffic.download)}   ↑ ${formatTrafficRate(vm.traffic.upload)}'),
         if (vm.message != null) Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(vm.message!)),
-        FilledButton.icon(onPressed: vm.busy || !vm.ready || (!vm.canDisconnect && vm.selected == null) ? null : () async {
+        FilledButton.icon(onPressed: vm.autoSelecting || vm.busy || !vm.ready || (!vm.canDisconnect && vm.selected == null) ? null : () async {
           if (vm.canDisconnect) { await vm.disconnect(); } else { await vm.connect(null); }
         }, icon: Icon(vm.canDisconnect ? Icons.stop : Icons.power_settings_new), label: Text(vm.canDisconnect ? 'Отключить' : 'Подключить')),
+        OutlinedButton.icon(onPressed: !vm.ready || vm.busy && !vm.autoSelecting || vm.canDisconnect && !vm.autoSelecting ? null
+          : () async { if (vm.autoSelecting) { await vm.cancelAutoSelection(); } else { await vm.autoConnect(); } },
+          icon: Icon(vm.autoSelecting ? Icons.stop : Icons.auto_awesome),
+          label: Text(vm.autoSelecting ? 'Остановить подбор' : 'ИИ-подбор и подключение')),
+        const Text('Локальная нейросеть учится на этом телефоне. До 6 попыток; успех подтверждается HTTPS. Первые рекомендации без накопленной истории.'),
+        if (vm.autoStatus != null) Text(vm.autoStatus!),
         if (vm.busy || vm.state == ConnectionState.connecting) const LinearProgressIndicator(),
       ]))),
       const SizedBox(height: 16), Text('Мои серверы', style: Theme.of(context).textTheme.titleLarge),

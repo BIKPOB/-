@@ -39,3 +39,32 @@ as unclassified. Native tests cover nested transport errors and secret exclusion
 This corrects the premature health-check deadline and the diagnostic blind spot.
 It does not prove a public server works in the user's network or establish that
 a timeout was caused by filtering, stale credentials, or a specific transport.
+
+
+## Local adaptive selection and background subscriptions
+
+Android JobScheduler refreshes the two fixed HTTPS subscriptions approximately
+every six hours with a network constraint and persistence across reboot. Android
+may defer jobs. Downloads have byte/time limits and do not follow redirects.
+Candidate downloads cannot overwrite the last foreground-validated snapshot;
+Dart validates any candidate before use and falls back to the validated snapshot
+and then packaged assets. Background jobs never change a running VPN.
+
+The optional on-device selector is a small real neural classifier (8 inputs,
+6 tanh hidden units, sigmoid output), initially untrained, updated by online
+gradient descent from confirmed HTTPS results. Inputs include protocol, coarse
+network type, latency, and hashed endpoint/network success history. It is not a
+pretrained LLM and does not generate credentials or browse arbitrary sources.
+Its weights and bounded history are stored in secure storage; no model API or
+profile credentials are sent to AI providers.
+
+The user starts selection explicitly. It probes up to 24 diverse candidates and
+tries up to six full connections sequentially, including available protocols.
+It stops on verified HTTPS success; successful selection is not a speed benchmark
+or proof of a globally best server. Cancelling or leaving the foreground stops
+selection. A network-type change stops the run without training on that result.
+WireGuard with a handshake but failed HTTPS is not a positive training sample.
+
+Refreshing public lists does not extend expiring provider credentials. There is
+no automatic renewal API, CAPTCHA bypass, background tunnel switching, or
+guaranteed uninterrupted reconnection in this build.

@@ -58,6 +58,7 @@ class _PublicCatalogPageState extends State<PublicCatalogPage> {
         const Text('Выберите сервер → «Добавить» → «Подключить» на главном экране. Ссылка провайдера не нужна.'),
         const SizedBox(height: 8),
         const Text('Общедоступные серверы сторонних владельцев: доступность и скорость могут меняться. Пинг не подтверждает работу VPN.'),
+        const Text('Автообновление базы: примерно раз в 6 часов при наличии сети. Android может отложить запуск. Срок ключей задаёт провайдер.'),
         if (result != null) Text(result!.status),
         if (result != null) Text('Совместимых: ${result!.servers.length}. Неподдерживаемых или некорректных: ${result!.skipped}.'),
         if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
