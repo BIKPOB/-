@@ -93,7 +93,7 @@ class VpnViewModel extends ChangeNotifier {
         await importProfile(server.profile, server.name, 'ИИ-подбор · ${server.source}');
         if (cancelled()) return;
         await connect(null);
-        final deadline = DateTime.now().add(const Duration(seconds: 80));
+        final deadline = DateTime.now().add(const Duration(seconds: 110));
         while (!cancelled() && (state == ConnectionState.connecting || _stopping) && DateTime.now().isBefore(deadline)) {
           await Future<void>.delayed(const Duration(milliseconds: 200));
         }
@@ -113,7 +113,7 @@ class VpnViewModel extends ChangeNotifier {
         if (_nativeNeedsStop) { autoStatus = 'Подбор остановлен: отключение не подтверждено'; return; }
         if (!sameNetwork) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
       }
-      autoStatus = 'Проверено $attempt вариантов: рабочий HTTPS не найден. Причина последней ошибки — в диагностике.';
+      autoStatus = 'Проверено $attempt вариантов: соединение с подходящей загрузкой не найдено. Причина последней ошибки — в диагностике.';
     } catch (_) { autoStatus = 'Подбор не завершён. Проверьте сеть и диагностику.'; }
     finally { autoSelecting = false; if (!_disposed) { _scheduleProbe(); _notify(); } }
   }
@@ -143,7 +143,6 @@ class VpnViewModel extends ChangeNotifier {
     });
   }
   StreamSubscription<EngineEvent>? _subscription;
-  HttpClient? _verificationClient;
   VpnServer? get selected {
     for (final server in servers) { if (server.id == selectedId) return server; }
     return null;
@@ -236,7 +235,7 @@ class VpnViewModel extends ChangeNotifier {
       traffic.reset(); connectionStage = 'Запуск VPN';
       _connectionEpoch++;
       _connectTimeout?.cancel();
-      _connectTimeout = Timer(Duration(seconds: activeServer?.protocol == 'wireguard' ? 50 : 75), () {
+      _connectTimeout = Timer(Duration(seconds: activeServer?.protocol == 'wireguard' ? 50 : 100), () {
         if (state == ConnectionState.connecting) {
           unawaited(_fail('Таймаут: ${connectionStage ?? 'нет ответа'}. Попробуйте другой сервер или транспорт.'));
         }
@@ -263,7 +262,7 @@ class VpnViewModel extends ChangeNotifier {
         _nativeConnected = true;
         _nativeNeedsStop = true;
         if (activeServer?.protocol == 'vless' || activeServer?.protocol == 'shadowsocks') {
-          connectionVerified = true;
+          connectionVerified = event.quality;
           state = ConnectionState.connected; message = event.message ?? 'Xray: ответ через сервер получен';
           _scheduleTraffic(); _notify();
         } else if (!_verifying && state != ConnectionState.connected) { unawaited(_verifyInternet()); }
@@ -273,10 +272,10 @@ class VpnViewModel extends ChangeNotifier {
         message = connectionStage; traffic.reset(); _trafficTimer?.cancel();
         _nativeNeedsStop = true;
         if (state == ConnectionState.connected || _verifying) {
-          _verificationClient?.close(force: true); _connectionEpoch++;
+          _connectionEpoch++;
         }
         state = ConnectionState.connecting;
-        _connectTimeout ??= Timer(Duration(seconds: activeServer?.protocol == 'wireguard' ? 50 : 75), () { unawaited(_fail('Таймаут VPN')); });
+        _connectTimeout ??= Timer(Duration(seconds: activeServer?.protocol == 'wireguard' ? 50 : 100), () { unawaited(_fail('Таймаут VPN')); });
         _notify();
       case ConnectionState.disconnected:
         _nativeConnected = false;
@@ -290,7 +289,6 @@ class VpnViewModel extends ChangeNotifier {
         }
         _nativeNeedsStop = false; activeServer = null;
         _connectionEpoch++; _connectTimeout?.cancel(); _connectTimeout = null;
-        _verificationClient?.close(force: true);
         state = ConnectionState.disconnected;
         _notify();
       case ConnectionState.error:
@@ -301,20 +299,14 @@ class VpnViewModel extends ChangeNotifier {
   Future<void> _verifyInternet() async {
     _verifying = true;
     final epoch = _connectionEpoch;
-    final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
-    _verificationClient = client;
     try {
-      await (() async {
-        final request = await client.getUrl(Uri.parse('https://www.gstatic.com/generate_204'));
-        request.followRedirects = false;
-        final response = await request.close();
-        if (response.statusCode != 204) throw const HttpException('Connectivity check failed');
-        await response.drain<void>();
-      })().timeout(const Duration(seconds: 8));
+      final result = await const MethodChannel('quietvpn/xray-state')
+        .invokeMapMethod<String, dynamic>('tunnelProbe').timeout(const Duration(seconds: 30));
+      if ((result?['delay'] as num? ?? -1) < 0) throw const HttpException('System VPN check failed');
       if (!_disposed && epoch == _connectionEpoch && _nativeNeedsStop) {
         _connectTimeout?.cancel(); _connectTimeout = null; state = ConnectionState.connected;
-        connectionVerified = true;
-        message = '${activeServer?.protocol ?? 'VPN'} подключён, HTTPS-проверка пройдена'; _scheduleTraffic(); _notify();
+        connectionVerified = result?['quality'] == true;
+        message = '${result?['detail'] ?? 'HTTPS-проверка пройдена'}'; _scheduleTraffic(); _notify();
       }
     } catch (_) {
       if (!_disposed && epoch == _connectionEpoch && !_stopping && _nativeConnected && _nativeNeedsStop) {
@@ -323,8 +315,6 @@ class VpnViewModel extends ChangeNotifier {
         _scheduleTraffic(); _notify();
       }
     } finally {
-      client.close(force: true);
-      if (identical(_verificationClient, client)) _verificationClient = null;
       _verifying = false;
       if (!_disposed && !_stopping && _nativeConnected && _nativeNeedsStop &&
           epoch != _connectionEpoch && state == ConnectionState.connecting) {
@@ -337,7 +327,6 @@ class VpnViewModel extends ChangeNotifier {
     if (busy) { _pendingFailure = reason; return; }
     traffic.reset(); _trafficTimer?.cancel();
     _stopping = true; _nativeConnected = false; _connectionEpoch++; _connectTimeout?.cancel(); _connectTimeout = null;
-    _verificationClient?.close(force: true);
     try {
       if (_nativeNeedsStop) await engine.disconnect();
       _nativeNeedsStop = false; activeServer = null;
@@ -349,7 +338,7 @@ class VpnViewModel extends ChangeNotifier {
     if (busy || _stopping) return;
     traffic.reset(); _trafficTimer?.cancel();
     busy = true; _stopping = true; _nativeConnected = false; _connectionEpoch++;
-    _connectTimeout?.cancel(); _connectTimeout = null; _verificationClient?.close(force: true); _notify();
+    _connectTimeout?.cancel(); _connectTimeout = null; _notify();
     try {
       await engine.disconnect(); _nativeNeedsStop = false; activeServer = null;
       state = ConnectionState.disconnected; message = null;
@@ -358,7 +347,7 @@ class VpnViewModel extends ChangeNotifier {
   }
   @override void dispose() {
     _disposed = true; _autoEpoch++; _autoMonitor.cancel(); _trafficTimer?.cancel(); _poll?.cancel(); _connectTimeout?.cancel();
-    _verificationClient?.close(force: true); monitor.cancel();
+    monitor.cancel();
     unawaited(_subscription?.cancel());
     super.dispose();
   }

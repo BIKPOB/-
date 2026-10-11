@@ -24,7 +24,7 @@ void main() {
     final key=base64Url.encode(List.filled(32,1)).replaceAll('=','');
     final p=ProxyProfile.parse('vless://$uuid@example.com:443?security=reality&type=tcp&sni=example.net&pbk=$key&sid=ab12&flow=xtls-rprx-vision');
     final config=jsonDecode(p.configuration) as Map;
-    final outbound=(config['outbounds'] as List).single as Map;
+    final outbound=(config['outbounds'] as List).first as Map;
     expect(outbound['protocol'],'vless');
     expect(outbound['streamSettings']['realitySettings']['publicKey'],key);
     expect(outbound['settings']['vnext'][0]['users'][0]['id'],uuid);
@@ -36,6 +36,19 @@ void main() {
     final config = jsonDecode(p.configurationWithDiagnostics(errorLogPath: '/private/xray.log')) as Map;
     expect(config['log'], {'loglevel': 'info', 'error': '/private/xray.log', 'access': 'none'});
     expect(config['outbounds'], jsonDecode(p.configuration)['outbounds']);
+  });
+  test('DNS stays inside proxy and endpoint resolution preserves TLS identity', () {
+    final p = ProxyProfile.parse('vless://$uuid@example.com:443?security=tls&type=ws&host=front.example&sni=tls.example');
+    final config = jsonDecode(p.configurationWithDiagnostics(endpointAddress: '203.0.113.1')) as Map;
+    final outbounds = config['outbounds'] as List;
+    expect(outbounds.first['settings']['vnext'][0]['address'], '203.0.113.1');
+    expect(outbounds.first['streamSettings']['tlsSettings']['serverName'], 'tls.example');
+    expect(outbounds.first['streamSettings']['wsSettings']['headers']['Host'], 'front.example');
+    expect(p.outbound['settings']['vnext'][0]['address'], 'example.com');
+    final tags = outbounds.map((o) => o['tag']).toSet();
+    expect((config['routing']['rules'] as List).every((r) => tags.contains(r['outboundTag'])), true);
+    expect(tags.contains('direct'), false);
+    expect(config['dns']['servers'], everyElement(startsWith('https://')));
   });
   test('Shadowsocks SIP002, plaintext and legacy links normalize identically', () {
     final auth=base64Url.encode(utf8.encode('aes-256-gcm:secret')).replaceAll('=','');

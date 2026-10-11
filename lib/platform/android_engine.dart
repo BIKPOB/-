@@ -17,7 +17,7 @@ class AndroidEngine implements VpnEngine, TrafficSource {
   bool _stopping = false, _checking = false, _verified = false, _disposed = false, _starting = false;
   int _epoch = 0;
   @override Stream<EngineEvent> get events => _events.stream;
-  void _emit(ConnectionState state, [String? detail]) { if (!_disposed) _events.add(EngineEvent(state, detail)); }
+  void _emit(ConnectionState state, [String? detail, bool quality = true]) { if (!_disposed) _events.add(EngineEvent(state, detail, quality)); }
   @override Future<void> initialize() async {
     _subscriptions.add(const EventChannel('quietvpn/wg-events').receiveBroadcastStream().listen((s) {
       if (_active == 'wireguard' && !_stopping) _wgEvent(s);
@@ -56,15 +56,15 @@ class AndroidEngine implements VpnEngine, TrafficSource {
   Future<void> _verifyProxy() async {
     _checking = true;
     final epoch = _epoch;
-    _emit(ConnectionState.connecting, 'Xray запущен локально · проверка удалённого соединения (до 40 с)');
+    _emit(ConnectionState.connecting, 'Xray запущен локально · проверка удалённого соединения (DNS и загрузка данных)');
     try {
-      final probe = await _stage.invokeMapMethod<String, dynamic>('probe').timeout(const Duration(seconds: 45));
+      final probe = await _stage.invokeMapMethod<String, dynamic>('probe').timeout(const Duration(seconds: 75));
       final delay = (probe?['delay'] as num?)?.toInt();
       final detail = probe?['detail'] as String? ?? 'Нет результата проверки';
       if (_stopping || epoch != _epoch || _disposed) return;
       if (delay == null || delay < 0) {
         _emit(ConnectionState.error, 'Запрос через Xray не прошёл: $detail');
-      } else { _verified = true; _emit(ConnectionState.connected, 'Ответ через сервер: $delay мс'); }
+      } else { _verified = true; _emit(ConnectionState.connected, '$detail · $delay мс', probe?['quality'] == true); }
     } catch (_) {
       if (!_stopping && epoch == _epoch) _emit(ConnectionState.error, 'Таймаут проверки Xray через сервер');
     } finally { _checking = false; }
@@ -77,7 +77,10 @@ class AndroidEngine implements VpnEngine, TrafficSource {
     }
     if (!{'vless','shadowsocks'}.contains(_active)) throw StateError('Протокол не поддерживается');
     final logPath = await _stage.invokeMethod<String>('prepareDiagnostics');
-    final config = ProxyProfile.parse(server.profile).configurationWithDiagnostics(errorLogPath: logPath);
+    _emit(ConnectionState.connecting, 'Разрешение адреса VPN-сервера до запуска туннеля');
+    final endpoint = await _stage.invokeMethod<String>('resolveEndpoint', {'host': server.host}).timeout(const Duration(seconds: 10));
+    if (endpoint == null) throw StateError('DNS: не удалось разрешить адрес VPN-сервера');
+    final config = ProxyProfile.parse(server.profile).configurationWithDiagnostics(errorLogPath: logPath, endpointAddress: endpoint);
     if (await _xray.invokeMethod<bool>('requestPermission') != true) throw StateError('Разрешение VPN отклонено');
     _xrayState = 'CONNECTING';
     _emit(ConnectionState.connecting, 'Запуск ${server.protocol.toUpperCase()}');

@@ -84,13 +84,24 @@ class ProxyProfile {
         {'id': u.userInfo, 'encryption': 'none', 'flow': flow}]}]}, 'streamSettings': stream});
   }
   String get configuration => configurationWithDiagnostics();
-  String configurationWithDiagnostics({String? errorLogPath}) => jsonEncode({
+  String configurationWithDiagnostics({String? errorLogPath, String? endpointAddress}) {
+    final proxy = jsonDecode(jsonEncode(outbound)) as Map<String, dynamic>;
+    if (endpointAddress != null) {
+      final settings = proxy['settings'] as Map;
+      (settings[protocol == 'vless' ? 'vnext' : 'servers'] as List).first['address'] = endpointAddress;
+    }
+    return jsonEncode({
     'log': {'loglevel': errorLogPath == null ? 'none' : 'info',
       if (errorLogPath != null) 'error': errorLogPath, 'access': 'none'},
     'inbounds': [{'tag': 'local', 'listen': '127.0.0.1', 'port': 10807, 'protocol': 'socks', 'settings': {'udp': true}}],
-    'outbounds': [outbound],
-    'dns': {'servers': ['1.1.1.1', '9.9.9.9']},
-    'routing': {'domainStrategy': 'AsIs', 'rules': []},
+    'outbounds': [proxy, {'tag': 'dns', 'protocol': 'dns', 'settings': <String, dynamic>{}}],
+    'dns': {'tag': 'dns-query', 'queryStrategy': 'UseIPv4',
+      'servers': ['https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query']},
+    'routing': {'domainStrategy': 'AsIs', 'rules': [
+      {'type': 'field', 'inboundTag': ['dns-query'], 'outboundTag': 'proxy'},
+      {'type': 'field', 'inboundTag': ['tun'], 'port': '53', 'outboundTag': 'dns'},
+    ]},
     'policy': {'system': {'statsOutboundUplink': true, 'statsOutboundDownlink': true}}, 'stats': {},
   });
+  }
 }

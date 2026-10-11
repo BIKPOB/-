@@ -68,3 +68,31 @@ WireGuard with a handshake but failed HTTPS is not a positive training sample.
 Refreshing public lists does not extend expiring provider credentials. There is
 no automatic renewal API, CAPTCHA bypass, background tunnel switching, or
 guaranteed uninterrupted reconnection in this build.
+
+
+## 0.7.6: DNS routing and real Android VPN checks
+
+Confirmed integration defect: the pinned plugin's ensureTunInbound injected
+port 53/853 and resolver-IP rules targeting `direct`, but Quiet VPN had no
+`direct` outbound. The checked patch removes this injection rather than adding
+a DNS bypass. TUN DNS now uses the DNS outbound and HTTPS resolvers routed
+through `proxy`; the DNS query inbound tag prevents routing recursion.
+
+The app is no longer excluded from its own Xray VPN. Xray uses its registered
+VpnService socket protector; counters expose success/failure. Server hostnames
+are resolved before establishing the TUN, preserving SNI and transport Host,
+to avoid endpoint bootstrap DNS recursion. Android and core TUN MTUs are both
+1280 as a conservative packet-size setting (not proof MTU caused the failure).
+
+SOCKS success alone no longer passes verification. Android Network.openConnection
+is bound explicitly to a VPN Network for DNS/HTTPS and a 256 KiB download from
+Cloudflare's speed-test endpoint. No non-VPN fallback is allowed. The small test
+is not a sustained bandwidth benchmark. Downloads below 128 KiB/s remain usable
+manually but are not positive AI outcomes. A six-candidate search downloads up
+to 1.5 MiB of measurement payload plus protocol overhead. WireGuard selection
+uses the same system check.
+
+Diagnostics distinguish an empty Xray file from nonempty logs without recognized
+errors and include per-socket protection counters. This removes two diagnostic
+blind spots; it does not establish why a specific public endpoint times out in
+Russia or prove its credentials are valid.

@@ -31,11 +31,25 @@ class MainActivity : FlutterActivity() {
                 if (call.method == "stage") {
                     val state = dev.amirzr.flutter_v2ray_client.v2ray.V2rayController.getConnectionState().name
                     result.success(state.removePrefix("V2RAY_"))
+                } else if (call.method == "resolveEndpoint") {
+                    val host = call.argument<String>("host") ?: ""
+                    probeWorker.execute {
+                        try {
+                            val addresses = java.net.InetAddress.getAllByName(host)
+                            val address = addresses.firstOrNull { it is java.net.Inet4Address } ?: addresses.first()
+                            runOnUiThread { result.success(address.hostAddress) }
+                        } catch (_: Exception) { runOnUiThread { result.error("dns", "DNS: адрес VPN-сервера не найден", null) } }
+                    }
                 } else if (call.method == "prepareDiagnostics") {
                     result.success(XrayDiagnostics.prepare(applicationContext))
+                } else if (call.method == "tunnelProbe") {
+                    probeWorker.execute {
+                        val measured = TunnelProbe.measure(applicationContext)
+                        runOnUiThread { result.success(measured) }
+                    }
                 } else if (call.method == "probe") {
                     probeWorker.execute {
-                        val delay = ProxyProbe.measure().toMutableMap()
+                        val delay = ProxyProbe.measure(applicationContext).toMutableMap()
                         delay["detail"] = "${delay["detail"]}\n${XrayDiagnostics.report(applicationContext)}"
                         runOnUiThread { result.success(delay) }
                     }

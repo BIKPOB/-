@@ -31,7 +31,7 @@ object ProxyProbe {
         val length = when (type) { 1 -> 4; 4 -> 16; 3 -> input.readUnsignedByte(); else -> throw IOException("SOCKS address") }
         input.readFully(ByteArray(length + 2))
     }
-    fun measure(): Map<String, Any> {
+    fun measure(context: android.content.Context): Map<String, Any> {
         val token = generation
         val failures = mutableListOf<String>()
         for (host in listOf("www.gstatic.com", "cp.cloudflare.com")) {
@@ -65,7 +65,8 @@ object ProxyProbe {
                     }
                     if (!Regex("HTTP/1\\.[01] 204(?: .*|\\r)?").matches(line.toString().trimEnd())) throw IOException("HTTP status")
                 }
-                return mapOf("delay" to android.os.SystemClock.elapsedRealtime() - start, "detail" to host)
+                if (token != generation) break
+                return TunnelProbe.measure(context)
             } catch (e: Exception) {
                 failures.add("$host: $stage (${e.javaClass.simpleName}, ${android.os.SystemClock.elapsedRealtime() - start} мс)")
             } finally {
@@ -76,5 +77,5 @@ object ProxyProbe {
         }
         return mapOf("delay" to -1L, "detail" to failures.joinToString("; "))
     }
-    fun cancel() { generation++; try { pending?.close() } catch (_: Exception) { }; pending = null }
+    fun cancel() { generation++; TunnelProbe.cancel(); try { pending?.close() } catch (_: Exception) { }; pending = null }
 }

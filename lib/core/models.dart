@@ -31,7 +31,8 @@ class HealthResult {
 }
 
 class EngineEvent {
-  const EngineEvent(this.state, [this.message]);
+  const EngineEvent(this.state, [this.message, this.quality = true]);
+  final bool quality;
   final ConnectionState state;
   final String? message;
 }
