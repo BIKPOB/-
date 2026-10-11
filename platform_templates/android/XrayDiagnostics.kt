@@ -66,9 +66,9 @@ object XrayDiagnostics {
                 ByteArray(length).also { bytes -> it.readFully(bytes) }
             }
             val core = dev.amirzr.flutter_v2ray_client.v2ray.core.V2rayCoreManager::class.java
-            val protected = try { core.getField("quietProtectOk").getLong(null) } catch (_: Exception) { -1L }
+            val protectedCount = try { core.getField("quietProtectOk").getLong(null) } catch (_: Exception) { -1L }
             val failed = try { core.getField("quietProtectFailed").getLong(null) } catch (_: Exception) { -1L }
-            "Журнал Xray: ${log.length()} байт; защита сокетов: $protected успешных, $failed отказов\n" +
+            "Журнал Xray: ${log.length()} байт; защита сокетов: $protectedCount успешных, $failed отказов\n" +
                 if (bytes.isEmpty()) "Xray: файл журнала пуст — работа записи не подтверждена"
                 else classify(bytes.toString(Charsets.UTF_8))
         }
