@@ -90,6 +90,30 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
     }
   });
+  test('cancellation during repeated measurement neither trains nor reconnects', () async {
+    final engine = MeasuredEngine(), probe = Completer<Map<String, dynamic>>();
+    final probing = Completer<void>();
+    const channel = MethodChannel('quietvpn/xray-state');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+      (call) { probing.complete(); return probe.future; });
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () async => const PublicCatalogResult([], false, 0), networkReader: () async => 'wifi',
+      autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize(); final task = vm.autoConnect(deep: true);
+      await probing.future; await vm.cancelAutoSelection();
+      probe.complete({'delay': 100, 'quality': true, 'bytesPerSecond': 900000});
+      await task;
+      expect(vm.learningSamples, 0);
+      expect(vm.learningJournal, isEmpty);
+      expect(engine.connects, 1);
+      expect(vm.canDisconnect, false);
+    } finally {
+      vm.dispose(); await engine.dispose();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+    }
+  });
   test('VPN metadata change after a failed candidate does not cancel the next attempt', () async {
     final engine = NetworkMetadataEngine();
     final other = VpnServer.fromJson({...server.toJson(), 'id': 'second', 'host': '9.9.9.9',

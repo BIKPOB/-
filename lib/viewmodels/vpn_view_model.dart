@@ -66,8 +66,9 @@ class VpnViewModel extends ChangeNotifier {
   }
   Future<void> _remember(VpnServer server, NetworkContext context, int? latency,
       String outcome, {int? speed, double? reward}) async {
-    if (reward != null) _selector.observe(server, context.type, latency,
-      success: reward >= .5, context: context, reward: reward);
+    if (reward != null) {
+      _selector.observe(server, context.type, latency, success: reward >= .5, context: context, reward: reward);
+    }
     _selector.record(server, context, outcome, speed: speed);
     try { await store.saveSelector(_selector.encode()); } catch (_) { }
   }

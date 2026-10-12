@@ -48,7 +48,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       content: SizedBox(width: 500, child: SingleChildScrollView(child: Text(
         vm.learningJournal.isEmpty ? 'Пока нет измерений. Модель начинает без готовых знаний о ваших серверах.' :
         vm.learningJournal.reversed.take(30).map((e) =>
-          '${e['time']} · ${e['network']} · ${e['protocol']}\n${e['outcome']} · ${e['bytesPerSecond'] == null ? 'скорость не измерена' : '${((e['bytesPerSecond'] as num) / 1024).round()} КиБ/с'}').join('\n\n')))),
+          '${e['time']} · ${e['network']} · ${e['protocol']}\n${switch (e['outcome']) { 'verified' => 'Проверено', 'slow_or_unstable' => 'Медленно или повторный замер не прошёл', 'network_uncertain' => 'Сеть не определена', _ => 'Соединение не подтверждено' }} · ${e['bytesPerSecond'] == null ? 'скорость не измерена' : '${((e['bytesPerSecond'] as num) / 1024).round()} КиБ/с'}').join('\n\n')))),
       actions: [TextButton(onPressed: vm.autoSelecting ? null : () async {
         final yes = await showDialog<bool>(context: c, builder: (d) => AlertDialog(
           title: const Text('Сбросить обучение?'), content: const Text('Будут удалены модель и история измерений. VPN-профили сохранятся.'),
