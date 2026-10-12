@@ -107,7 +107,7 @@ class VpnViewModel extends ChangeNotifier {
         final sameNetwork = context.sameConnection(await _network());
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
         final success = state == ConnectionState.connected && connectionVerified;
-        if (sameNetwork) {
+        if (sameNetwork && !context.ambiguous) {
           _selector.observe(server, network, latency[server.id]?.milliseconds, success: success, context: context);
           try { await store.saveSelector(_selector.encode()); } catch (_) { }
         }

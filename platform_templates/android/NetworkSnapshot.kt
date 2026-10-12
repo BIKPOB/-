@@ -13,14 +13,21 @@ object NetworkSnapshot {
         val activeCaps = active?.let { cm.getNetworkCapabilities(it) }
         val physical = cm.allNetworks.mapNotNull { n -> cm.getNetworkCapabilities(n)?.let { n to it } }
             .filter { it.second.hasCapability(NC.NET_CAPABILITY_INTERNET) && !it.second.hasTransport(NC.TRANSPORT_VPN) }
-        // Prefer the real default. With VPN, use its declared underlying network when available.
-        val underlying = if (Build.VERSION.SDK_INT >= 31) activeCaps?.underlyingNetworks else null
+        // VPN capabilities expose underlying transport types, not public network handles.
+        // When multiple physical networks match, report ambiguity instead of inventing a default.
+        val candidates = if (activeCaps?.hasTransport(NC.TRANSPORT_VPN) == true) physical.filter {
+            (it.second.hasTransport(NC.TRANSPORT_WIFI) && activeCaps.hasTransport(NC.TRANSPORT_WIFI)) ||
+            (it.second.hasTransport(NC.TRANSPORT_CELLULAR) && activeCaps.hasTransport(NC.TRANSPORT_CELLULAR)) ||
+            (it.second.hasTransport(NC.TRANSPORT_ETHERNET) && activeCaps.hasTransport(NC.TRANSPORT_ETHERNET))
+        } else physical
         val chosen = physical.firstOrNull { it.first == active }
-            ?: physical.firstOrNull { underlying?.contains(it.first) == true }
-            ?: physical.sortedWith(compareByDescending<Pair<android.net.Network, NC>> {
-                it.second.hasCapability(NC.NET_CAPABILITY_VALIDATED)
-            }.thenByDescending { it.second.hasTransport(NC.TRANSPORT_WIFI) }).firstOrNull()
-        if (chosen == null) return mapOf("type" to "offline", "session" to "")
+            ?: candidates.singleOrNull()
+            ?: if (candidates.isEmpty()) physical.singleOrNull() else null
+        if (chosen == null) return mapOf(
+            "type" to if (physical.isEmpty()) "offline" else "other",
+            "session" to physical.map { it.first.networkHandle }.sorted().joinToString(","),
+            "ambiguous" to physical.isNotEmpty()
+        )
         val (network, caps) = chosen
         val signal = if (Build.VERSION.SDK_INT >= 29) caps.signalStrength.takeIf { it != Int.MIN_VALUE } else null
         return mapOf(
