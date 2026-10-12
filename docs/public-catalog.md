@@ -70,6 +70,25 @@ no automatic renewal API, CAPTCHA bypass, background tunnel switching, or
 guaranteed uninterrupted reconnection in this build.
 
 
+## 0.7.9: selection coverage and explicit unverified manual tunnels
+
+Six attempts now use ranked round-robin protocol groups (two of each when all
+three have at least two candidates). The planned protocols and catalog counts
+are displayed/exported. Automatic imports do not force a protocol-only UI filter.
+Failed candidates are disconnected before comparing the underlying network again;
+VPN capability metadata alone no longer aborts the remaining search.
+
+Manual Xray sessions are retained after failed verification, matching WireGuard
+behavior. The UI explicitly labels limited/unverified tunnels; automatic selection
+still rejects them and disconnects before trying the next candidate. This restores
+manual inspection without claiming that native startup proves Internet access.
+
+The reported 0.7.8 Wi-Fi session has working endpoint TCP and successful protection
+callbacks, but neither numeric nor domain HTTPS responses through Shadowsocks.
+DNS alone cannot explain that result. These changes do not establish whether the
+remaining failure is server credentials, network filtering or a core integration
+defect; real-device connectivity is not claimed.
+
 ## 0.7.8: distinguish proxy transport, DNS and Android routing
 
 The 0.7.6 protection counters were read from UI-process static fields while

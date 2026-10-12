@@ -4,6 +4,14 @@ import 'package:quiet_vpn/core/models.dart';
 const server = VpnServer(id: 'test', name: 'test', country: '', countryCode: '', host: 'example.com',
   port: 443, transport: 'tcp', profile: 'secret-profile', source: 'test', protocol: 'vless');
 void main() {
+  test('six attempts cover each protocol twice even if WireGuard ranks first', () {
+    final ranked = [for (final p in ['wireguard', 'vless', 'shadowsocks'])
+      for (var i = 0; i < 8; i++) VpnServer.fromJson({...server.toJson(), 'id': '$p-$i', 'protocol': p})];
+    final chosen = AdaptiveSelector.shortlist(ranked);
+    expect(chosen.map((s) => s.protocol), ['wireguard', 'vless', 'shadowsocks', 'wireguard', 'vless', 'shadowsocks']);
+    expect(AdaptiveSelector.shortlist([]), isEmpty);
+    expect(AdaptiveSelector.shortlist(ranked.take(8).toList()).length, 6);
+  });
   test('online training increases confidence for success and decreases it for failure', () {
     final good = AdaptiveSelector(), bad = AdaptiveSelector();
     final features = good.features(server, 'wifi', 100);

@@ -63,10 +63,15 @@ class AndroidEngine implements VpnEngine, TrafficSource {
       final detail = probe?['detail'] as String? ?? 'Нет результата проверки';
       if (_stopping || epoch != _epoch || _disposed) return;
       if (delay == null || delay < 0) {
-        _emit(ConnectionState.error, 'Запрос через Xray не прошёл: $detail');
+        _verified = true; // Verification finished; do not repeat on every status tick.
+        _emit(ConnectionState.connected, 'Туннель включён, интернет НЕ подтверждён. '
+          'Проверка через Xray не прошла: $detail', false);
       } else { _verified = true; _emit(ConnectionState.connected, '$detail · $delay мс', probe?['quality'] == true); }
     } catch (_) {
-      if (!_stopping && epoch == _epoch) _emit(ConnectionState.error, 'Таймаут проверки Xray через сервер');
+      if (!_stopping && epoch == _epoch && !_disposed) {
+        _verified = true;
+        _emit(ConnectionState.connected, 'Туннель включён, интернет НЕ подтверждён: таймаут проверки Xray', false);
+      }
     } finally { _checking = false; }
   }
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {

@@ -7,6 +7,24 @@ import 'network_context.dart';
 /// Small on-device neural classifier: 15 inputs, 6 tanh units, sigmoid output.
 /// Starts untrained; learns only from verified connections, not ICMP responses.
 class AdaptiveSelector {
+  /// Input is already ranked. Round-robin keeps one protocol from using all slots.
+  static List<VpnServer> shortlist(List<VpnServer> ranked, {int limit = 6}) {
+    final groups = <String, List<VpnServer>>{};
+    for (final server in ranked) {
+      groups.putIfAbsent(server.protocol, () => []).add(server);
+    }
+    final result = <VpnServer>[];
+    for (var round = 0; result.length < limit; round++) {
+      var added = false;
+      for (final group in groups.values) {
+        if (round < group.length && result.length < limit) {
+          result.add(group[round]); added = true;
+        }
+      }
+      if (!added) break;
+    }
+    return result;
+  }
   AdaptiveSelector() {
     final random = Random(754);
     hidden = List.generate(6, (_) => List.generate(16, (_) => (random.nextDouble() - .5) * .2));

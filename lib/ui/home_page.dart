@@ -22,7 +22,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final native = await const MethodChannel('quietvpn/diagnostics').invokeMethod<String>('report') ?? '';
     final report = '$native\nПротокол: ${vm.activeServer?.protocol ?? vm.selected?.protocol ?? '—'}\n'
       'Состояние: ${vm.state.name}\nЭтап: ${vm.connectionStage ?? '—'}\n${vm.message ?? ''}\n'
-      '${vm.autoAttemptReports.join('\n\n')}';
+      'Интернет и качество подтверждены: ${vm.connectionVerified}\n'
+      'ИИ: ${vm.autoStatus ?? 'не запускался'}\n${vm.autoAttemptReports.join('\n\n')}';
     if (!mounted) return;
     await showDialog<void>(context: context, builder: (context) => AlertDialog(title: const Text('Диагностика'),
       content: SingleChildScrollView(child: SelectableText(report)), actions: [
@@ -37,7 +38,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     ]), floatingActionButton: FloatingActionButton.extended(onPressed: _add, icon: const Icon(Icons.add), label: const Text('Добавить сервер')),
     body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 820), child: ListView(padding: const EdgeInsets.fromLTRB(16,16,16,100), children: [
       Card(child: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(switch(vm.state) { ConnectionState.connected => 'Подключено', ConnectionState.connecting => 'Подключение…',
+        Text(switch(vm.state) { ConnectionState.connected => vm.connectionVerified ? 'Подключено · проверено' : 'Туннель включён · есть ограничения', ConnectionState.connecting => 'Подключение…',
           ConnectionState.error => 'Не удалось подключиться', _ => 'VPN выключен' }, style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 8), Text(vm.activeServer?.name ?? vm.selected?.name ?? 'Добавьте первый сервер'),
         Text('↓ ${formatTrafficRate(vm.traffic.download)}   ↑ ${formatTrafficRate(vm.traffic.upload)}'),
@@ -52,6 +53,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         const Text('Локальная нейросеть учится на этом телефоне. До 6 попыток; проверяются DNS, HTTPS и загрузка 256 КиБ (до 1,5 МиБ за подбор). Первые рекомендации без накопленной истории.'),
         if (vm.autoStatus != null) Text(vm.networkContext.label),
         if (vm.autoStatus != null) Text(vm.autoStatus!),
+        if (vm.autoPlan.isNotEmpty) Text(vm.autoPlan),
         if (vm.busy || vm.state == ConnectionState.connecting) const LinearProgressIndicator(),
       ]))),
       const SizedBox(height: 16), Text('Мои серверы', style: Theme.of(context).textTheme.titleLarge),

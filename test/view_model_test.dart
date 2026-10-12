@@ -47,7 +47,33 @@ class AutoEngine extends ControlledEngine {
       connects == 1 ? 'transport failure' : 'HTTPS verified'));
   }
 }
+class NetworkMetadataEngine extends ControlledEngine {
+  bool tunnel = false;
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++; tunnel = true;
+    controller.add(EngineEvent(ConnectionState.connected, 'probe result', connects > 1));
+  }
+  @override Future<void> disconnect() async { disconnects++; tunnel = false; }
+}
 void main() {
+  test('VPN metadata change after a failed candidate does not cancel the next attempt', () async {
+    final engine = NetworkMetadataEngine();
+    final other = VpnServer.fromJson({...server.toJson(), 'id': 'second', 'host': '9.9.9.9',
+      'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.9')});
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () async => PublicCatalogResult([other], false, 0),
+      networkReader: () async => engine.tunnel && engine.connects == 1 ? 'other' : 'wifi',
+      autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize(); vm.filterProtocol('wireguard'); await vm.autoConnect();
+      expect(engine.connects, 2);
+      expect(vm.connectionVerified, true);
+      expect(vm.protocolFilter, isNull);
+      expect(vm.autoPlan, contains('vless'));
+      await vm.disconnect();
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   test('auto selection retries a failed tunnel then stops on verified HTTPS', () async {
     final engine = AutoEngine();
     final other = VpnServer.fromJson({...server.toJson(), 'id': 'second', 'host': '9.9.9.9',

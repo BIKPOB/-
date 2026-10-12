@@ -42,6 +42,7 @@ class VpnViewModel extends ChangeNotifier {
   static const _networkChannel = MethodChannel('quietvpn/catalog-cache');
   NetworkContext networkContext = const NetworkContext();
   final List<String> autoAttemptReports = [];
+  String autoPlan = '';
   Future<NetworkContext> _network() async {
     if (_networkReader != null) return NetworkContext(type: await _networkReader());
     try {
@@ -57,6 +58,7 @@ class VpnViewModel extends ChangeNotifier {
     if (!ready || busy || autoSelecting || _nativeNeedsStop || _stopping) return;
     autoSelecting = true; final token = ++_autoEpoch;
     autoAttemptReports.clear();
+    autoPlan = ''; protocolFilter = null; country = null;
     autoStatus = 'Локальная нейросеть: обновление базы'; _notify();
     _poll?.cancel(); _probeEpoch++; monitor.cancel();
     bool cancelled() => token != _autoEpoch || _disposed;
@@ -86,19 +88,18 @@ class VpnViewModel extends ChangeNotifier {
       if (cancelled()) return;
       candidates.sort((a, b) => _selector.score(b, network, latency[b.id]?.milliseconds, context: context)
         .compareTo(_selector.score(a, network, latency[a.id]?.milliseconds, context: context)));
-      // Include the best candidate of every available protocol before repeats.
-      final ordered = <VpnServer>[];
-      final protocols = <String>{};
-      for (final s in candidates) { if (protocols.add(s.protocol)) ordered.add(s); }
-      ordered.addAll(candidates.where((s) => !ordered.contains(s)));
+      final ordered = AdaptiveSelector.shortlist(candidates);
+      autoPlan = 'План: ${ordered.map((s) => s.protocol).join(' → ')}';
+      autoAttemptReports.add('База: ${catalog.status}\n'
+        '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}\n$autoPlan');
       var attempt = 0;
       for (final server in ordered.take(6)) {
         if (cancelled()) return;
         if (!context.sameConnection(await _network())) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
         if (cancelled()) return;
         attempt++;
-        autoStatus = 'ИИ-подбор: попытка $attempt/6 · ${server.protocol} · проверка HTTPS'; _notify();
-        await importProfile(server.profile, server.name, 'ИИ-подбор · ${server.source}');
+        autoStatus = 'ИИ-подбор: попытка $attempt/${ordered.length} · ${server.protocol} · проверка HTTPS'; _notify();
+        await importProfile(server.profile, server.name, 'ИИ-подбор · ${server.source}', updateFilter: false);
         if (cancelled()) return;
         await connect(null);
         final deadline = DateTime.now().add(const Duration(seconds: 110));
@@ -106,12 +107,13 @@ class VpnViewModel extends ChangeNotifier {
           await Future<void>.delayed(const Duration(milliseconds: 200));
         }
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
-        final sameNetwork = context.sameConnection(await _network());
+        final duringVpn = await _network();
+        final sameNetwork = context.sameConnection(duringVpn);
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
         final success = state == ConnectionState.connected && connectionVerified;
         autoAttemptReports.add('Попытка $attempt · ${server.protocol} · ${success ? 'успех' : 'не подтверждено'}\n${message ?? connectionStage ?? 'Нет подробностей'}');
-        if (sameNetwork && !context.ambiguous) {
-          _selector.observe(server, network, latency[server.id]?.milliseconds, success: success, context: context);
+        if (success && sameNetwork && !context.ambiguous && !duringVpn.ambiguous) {
+          _selector.observe(server, network, latency[server.id]?.milliseconds, success: true, context: context);
           try { await store.saveSelector(_selector.encode()); } catch (_) { }
         }
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
@@ -120,7 +122,15 @@ class VpnViewModel extends ChangeNotifier {
         if (_nativeNeedsStop) await disconnect();
         message = failure;
         if (_nativeNeedsStop) { autoStatus = 'Подбор остановлен: отключение не подтверждено'; return; }
-        if (!sameNetwork) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
+        // VPN transport metadata can hide the underlying Wi-Fi/cellular network.
+        // For failed candidates compare after teardown, before starting the next one.
+        final afterVpn = await _network();
+        if (cancelled()) return;
+        if (!context.sameConnection(afterVpn)) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
+        if (!success && !context.ambiguous && !afterVpn.ambiguous) {
+          _selector.observe(server, network, latency[server.id]?.milliseconds, success: false, context: context);
+          try { await store.saveSelector(_selector.encode()); } catch (_) { }
+        }
       }
       autoStatus = 'Проверено $attempt вариантов: соединение с подходящей загрузкой не найдено. Результаты всех попыток — в диагностике.';
     } catch (_) { autoStatus = 'Подбор не завершён. Проверьте сеть и диагностику.'; }
@@ -211,7 +221,7 @@ class VpnViewModel extends ChangeNotifier {
       if (epoch == _probeEpoch) _scheduleProbe();
     });
   }
-  Future<void> importProfile(String text, String name, String region) async {
+  Future<void> importProfile(String text, String name, String region, {bool updateFilter = true}) async {
     final parsed = ProfilePolicy.parse(text);
     final id = 'local-${sha256.convert(utf8.encode(parsed.text)).toString().substring(0, 24)}';
     final server = VpnServer(id: id, name: name, country: region.isEmpty ? 'Мои профили' : region,
@@ -219,7 +229,8 @@ class VpnViewModel extends ChangeNotifier {
       profile: parsed.text, source: 'Импорт', protocol: parsed.protocol);
     final updated = [..._imports.where((s) => s.id != id), server];
     await store.save(updated);
-    _imports = updated; selectedId = id; country = null; protocolFilter = parsed.protocol;
+    _imports = updated; selectedId = id; country = null;
+    if (updateFilter) protocolFilter = parsed.protocol;
     message = '${parsed.protocol} профиль импортирован'; _scheduleProbe(immediate: true); _notify();
   }
   Future<void> removeSelected() async {
