@@ -16,17 +16,19 @@ void main() {
     expect(weak.features[1], 1);
     expect(weak.features.every((v) => v.isFinite && v >= -1 && v <= 1), isTrue);
   });
-  test('old model migration retains predictions with neutral context weights', () {
-    final old = {
-      'hidden': List.generate(6, (_) => List.filled(9, .1)),
-      'output': List.filled(7, .2), 'history': <String, dynamic>{}, 'samples': 3,
-    };
-    final migrated = AdaptiveSelector.decode(jsonEncode(old));
-    expect(migrated.samples, 3);
-    expect(migrated.hidden.first.length, 16);
-    final a = migrated.predict(List.filled(15, 0));
-    final b = migrated.predict([...List.filled(8, 0.0), ...List.filled(7, 1.0)]);
-    expect(a, b);
-    expect(AdaptiveSelector.decode(migrated.encode()).predict(List.filled(15, 0)), a);
+  test('old binary labels are not imported into the measured-quality model', () {
+    final old = {'hidden': List.generate(6, (_) => List.filled(9, .1)),
+      'output': List.filled(7, .2), 'history': <String, dynamic>{}, 'samples': 3};
+    final fresh = AdaptiveSelector.decode(jsonEncode(old));
+    expect(fresh.samples, 0);
+    expect(fresh.hidden.first.length, 19);
+  });
+  test('radio and band distinguish environments, missing data is explicit', () {
+    final wifi = NetworkContext.fromMap({'type': 'wifi', 'extended': true, 'wifiMhz': 5180});
+    expect(wifi.wifiBand, 5);
+    expect(wifi.features.length, 10);
+    expect(wifi.environmentKey, isNot(const NetworkContext(type: 'wifi', wifiMhz: 2412).environmentKey));
+    expect(const NetworkContext(type: 'mobile', extended: true).label, contains('нет разрешения'));
+    expect(const NetworkContext(type: 'mobile', radio: 13).radioLabel, 'LTE');
   });
 }

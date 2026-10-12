@@ -1,9 +1,30 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quiet_vpn/core/adaptive_selector.dart';
 import 'package:quiet_vpn/core/models.dart';
+import 'package:quiet_vpn/core/network_context.dart';
 const server = VpnServer(id: 'test', name: 'test', country: '', countryCode: '', host: 'example.com',
   port: 443, transport: 'tcp', profile: 'secret-profile', source: 'test', protocol: 'vless');
 void main() {
+  test('quality reward ranks measured fast outcomes over measured slow outcomes', () {
+    final fast = AdaptiveSelector(), slow = AdaptiveSelector();
+    for (var i = 0; i < 30; i++) {
+      fast.observe(server, 'wifi', 50, success: true, reward: .9);
+      slow.observe(server, 'wifi', 50, success: true, reward: .3);
+    }
+    expect(fast.score(server, 'wifi', 50), greaterThan(slow.score(server, 'wifi', 50)));
+  });
+  test('uncertain outcomes are journaled without training and journal stays bounded', () {
+    final model = AdaptiveSelector();
+    for (var i = 0; i < 220; i++) {
+      model.record(server, const NetworkContext(type: 'wifi'), 'unconfirmed');
+    }
+    expect(model.samples, 0);
+    expect(model.journal.length, 200);
+    final encoded = model.encode();
+    expect(encoded, isNot(contains('secret-profile')));
+    expect(encoded, isNot(contains('example.com')));
+    expect(AdaptiveSelector.decode(encoded).journal.length, 200);
+  });
   test('six attempts cover each protocol twice even if WireGuard ranks first', () {
     final ranked = [for (final p in ['wireguard', 'vless', 'shadowsocks'])
       for (var i = 0; i < 8; i++) VpnServer.fromJson({...server.toJson(), 'id': '$p-$i', 'protocol': p})];

@@ -55,7 +55,41 @@ class NetworkMetadataEngine extends ControlledEngine {
   }
   @override Future<void> disconnect() async { disconnects++; tunnel = false; }
 }
+class MeasuredEngine extends ControlledEngine {
+  final chosen = <String>[];
+  int currentSpeed = 0;
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++; chosen.add(server.host);
+    currentSpeed = server.host == '9.9.9.9' ? 900000 : 200000;
+    controller.add(EngineEvent(ConnectionState.connected, 'measured', true, currentSpeed));
+  }
+}
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  test('deep selection compares successful candidates and reconnects the faster one', () async {
+    final engine = MeasuredEngine();
+    const channel = MethodChannel('quietvpn/xray-state');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+      (call) async => {'delay': 100, 'quality': true, 'bytesPerSecond': engine.currentSpeed});
+    final other = VpnServer.fromJson({...server.toJson(), 'id': 'fast', 'host': '9.9.9.9',
+      'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.9')});
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () async => PublicCatalogResult([other], false, 0), networkReader: () async => 'wifi',
+      autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize(); await vm.autoConnect(deep: true);
+      expect(engine.connects, 3);
+      expect(engine.chosen.last, '9.9.9.9');
+      expect(vm.learningSamples, 2);
+      expect(vm.learningJournal.length, 2);
+      expect(vm.connectionVerified, true);
+      await vm.disconnect();
+    } finally {
+      vm.dispose(); await engine.dispose();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+    }
+  });
   test('VPN metadata change after a failed candidate does not cancel the next attempt', () async {
     final engine = NetworkMetadataEngine();
     final other = VpnServer.fromJson({...server.toJson(), 'id': 'second', 'host': '9.9.9.9',

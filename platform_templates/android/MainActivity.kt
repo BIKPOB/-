@@ -62,7 +62,7 @@ class MainActivity : FlutterActivity() {
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/catalog-cache")
             .setMethodCallHandler { call, result ->
                 if (call.method == "network" || call.method == "networkContext") {
-                    val snapshot = NetworkSnapshot.read(applicationContext)
+                    val snapshot = NetworkSnapshot.read(applicationContext, call.argument<Boolean>("extended") == true)
                     result.success(if (call.method == "network") snapshot["type"] else snapshot)
                     return@setMethodCallHandler
                 }

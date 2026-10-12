@@ -5,6 +5,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../core/models.dart';
 import '../core/traffic.dart';
 import '../core/profile_policy.dart';
@@ -43,10 +44,38 @@ class VpnViewModel extends ChangeNotifier {
   NetworkContext networkContext = const NetworkContext();
   final List<String> autoAttemptReports = [];
   String autoPlan = '';
+  bool extendedNetwork = false, requestingNetworkPermission = false;
+  int? measuredBytesPerSecond;
+  int get learningSamples => _selector.samples;
+  List<Map<String, dynamic>> get learningJournal => List.unmodifiable(_selector.journal);
+  Future<void> enableNetworkAnalysis() async {
+    if (requestingNetworkPermission || autoSelecting) return;
+    requestingNetworkPermission = true;
+    try {
+      final context = await _network();
+      // Wi-Fi signal and frequency use a normal manifest permission. No location is collected.
+      if (context.type == 'mobile') await Permission.phone.request();
+      extendedNetwork = true;
+      networkContext = await _network();
+    } finally { requestingNetworkPermission = false; _notify(); }
+  }
+  Future<void> resetLearning() async {
+    if (autoSelecting) return;
+    _selector = AdaptiveSelector();
+    await store.saveSelector(_selector.encode()); _notify();
+  }
+  Future<void> _remember(VpnServer server, NetworkContext context, int? latency,
+      String outcome, {int? speed, double? reward}) async {
+    if (reward != null) _selector.observe(server, context.type, latency,
+      success: reward >= .5, context: context, reward: reward);
+    _selector.record(server, context, outcome, speed: speed);
+    try { await store.saveSelector(_selector.encode()); } catch (_) { }
+  }
+
   Future<NetworkContext> _network() async {
     if (_networkReader != null) return NetworkContext(type: await _networkReader());
     try {
-      final data = await _networkChannel.invokeMapMethod<dynamic, dynamic>('networkContext');
+      final data = await _networkChannel.invokeMapMethod<dynamic, dynamic>('networkContext', {'extended': extendedNetwork});
       return NetworkContext.fromMap(data ?? {});
     } catch (_) { return const NetworkContext(); }
   }
@@ -54,7 +83,7 @@ class VpnViewModel extends ChangeNotifier {
     _autoEpoch++; _autoMonitor.cancel(); autoStatus = 'Подбор остановлен'; _notify();
     if (!busy && _nativeNeedsStop) await disconnect();
   }
-  Future<void> autoConnect() async {
+  Future<void> autoConnect({bool deep = false}) async {
     if (!ready || busy || autoSelecting || _nativeNeedsStop || _stopping) return;
     autoSelecting = true; final token = ++_autoEpoch;
     autoAttemptReports.clear();
@@ -80,7 +109,7 @@ class VpnViewModel extends ChangeNotifier {
         var count = 0;
         for (final server in group) {
           if (count >= 8) break;
-          if (hosts.add('$protocol|${server.host}')) { candidates.add(server); count++; }
+          if (hosts.add(sha256.convert(utf8.encode(server.profile)).toString())) { candidates.add(server); count++; }
         }
       }
       autoStatus = 'Сеть: ${context.label} · оценка ${candidates.length} адресов · опыт: ${_selector.samples}'; _notify();
@@ -88,12 +117,13 @@ class VpnViewModel extends ChangeNotifier {
       if (cancelled()) return;
       candidates.sort((a, b) => _selector.score(b, network, latency[b.id]?.milliseconds, context: context)
         .compareTo(_selector.score(a, network, latency[a.id]?.milliseconds, context: context)));
-      final ordered = AdaptiveSelector.shortlist(candidates);
+      final ordered = AdaptiveSelector.shortlist(candidates, limit: deep ? 12 : 6);
+      final finalists = <({VpnServer server, double utility})>[];
       autoPlan = 'План: ${ordered.map((s) => s.protocol).join(' → ')}';
       autoAttemptReports.add('База: ${catalog.status}\n'
         '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}\n$autoPlan');
       var attempt = 0;
-      for (final server in ordered.take(6)) {
+      for (final server in ordered) {
         if (cancelled()) return;
         if (!context.sameConnection(await _network())) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
         if (cancelled()) return;
@@ -110,14 +140,48 @@ class VpnViewModel extends ChangeNotifier {
         final duringVpn = await _network();
         final sameNetwork = context.sameConnection(duringVpn);
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
-        final success = state == ConnectionState.connected && connectionVerified;
+        var success = state == ConnectionState.connected && connectionVerified;
+        final speeds = <int>[];
+        if (measuredBytesPerSecond != null) speeds.add(measuredBytesPerSecond!);
+        var repeatFailed = false;
+        if (deep && state == ConnectionState.connected && measuredBytesPerSecond != null && sameNetwork) {
+          for (var round = 0; round < 2; round++) {
+            autoStatus = 'Сравнение $attempt/${ordered.length} · ${server.protocol} · замер ${round + 2}/3'; _notify();
+            try {
+              final result = await const MethodChannel('quietvpn/xray-state')
+                .invokeMapMethod<String, dynamic>('tunnelProbe').timeout(const Duration(seconds: 30));
+              if (cancelled()) return;
+              final current = await _network();
+              if (!context.sameConnection(current)) {
+                if (_nativeNeedsStop) await disconnect();
+                autoStatus = 'Сеть изменилась — результаты не смешиваются'; return;
+              }
+              final speed = (result?['bytesPerSecond'] as num?)?.toInt();
+              if ((result?['delay'] as num? ?? -1) < 0 || speed == null) { repeatFailed = true; break; }
+              speeds.add(speed);
+            } catch (_) { repeatFailed = true; break; }
+          }
+          if (cancelled()) return;
+          speeds.sort();
+          success = !repeatFailed && speeds.length == 3 && speeds.first >= 131072;
+        }
+        final medianSpeed = speeds.isEmpty ? null : speeds[speeds.length ~/ 2];
+        // Short repeated downloads measure consistency, not long-session stability.
+        final utility = medianSpeed == null ? 0.0 :
+          (.75 * (medianSpeed / (medianSpeed + 524288)) +
+           .25 * (speeds.first / max(1, speeds.last))).toDouble();
         autoAttemptReports.add('Попытка $attempt · ${server.protocol} · ${success ? 'успех' : 'не подтверждено'}\n${message ?? connectionStage ?? 'Нет подробностей'}');
-        if (success && sameNetwork && !context.ambiguous && !duringVpn.ambiguous) {
-          _selector.observe(server, network, latency[server.id]?.milliseconds, success: true, context: context);
-          try { await store.saveSelector(_selector.encode()); } catch (_) { }
+        if (sameNetwork && !context.ambiguous && !duringVpn.ambiguous) {
+          await _remember(server, context, latency[server.id]?.milliseconds,
+            success ? 'verified' : medianSpeed != null ? 'slow_or_unstable' : 'unconfirmed',
+            speed: medianSpeed, reward: medianSpeed == null || repeatFailed ? null : .2 + .8 * utility);
+        }
+        if (deep && success && sameNetwork && !context.ambiguous && medianSpeed != null) {
+          finalists.add((server: server, utility: utility));
+          autoAttemptReports.add('Три замера: ${speeds.map((n) => '${(n / 1024).round()} КиБ/с').join(', ')}');
         }
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
-        if (success && sameNetwork) { autoStatus = 'ИИ выбрал соединение с подтверждённым HTTPS · опыт: ${_selector.samples}'; return; }
+        if (!deep && success && sameNetwork) { autoStatus = 'ИИ выбрал соединение с подтверждённым HTTPS · опыт: ${_selector.samples}'; return; }
         final failure = message;
         if (_nativeNeedsStop) await disconnect();
         message = failure;
@@ -127,9 +191,27 @@ class VpnViewModel extends ChangeNotifier {
         final afterVpn = await _network();
         if (cancelled()) return;
         if (!context.sameConnection(afterVpn)) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
-        if (!success && !context.ambiguous && !afterVpn.ambiguous) {
-          _selector.observe(server, network, latency[server.id]?.milliseconds, success: false, context: context);
-          try { await store.saveSelector(_selector.encode()); } catch (_) { }
+        // An unknown launch/probe failure is not a negative server training label.
+        if (!sameNetwork) await _remember(server, context, null, 'network_uncertain');
+      }
+      if (deep && finalists.isNotEmpty) {
+        finalists.sort((a, b) => b.utility.compareTo(a.utility));
+        for (final finalist in finalists) {
+          if (cancelled() || !context.sameConnection(await _network())) return;
+          autoStatus = 'Повторное подключение лучшего из ${finalists.length} проверенных вариантов'; _notify();
+          await importProfile(finalist.server.profile, finalist.server.name, 'ИИ · финал', updateFilter: false);
+          if (cancelled()) return;
+          await connect(null);
+          final deadline = DateTime.now().add(const Duration(seconds: 110));
+          while (!cancelled() && (state == ConnectionState.connecting || _stopping) && DateTime.now().isBefore(deadline)) {
+            await Future<void>.delayed(const Duration(milliseconds: 200));
+          }
+          if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
+          if (state == ConnectionState.connected && connectionVerified && context.sameConnection(await _network())) {
+            autoStatus = 'Выбран лучший из ${finalists.length} прошедших сравнение · опыт: ${_selector.samples}'; return;
+          }
+          if (_nativeNeedsStop) await disconnect();
+          if (_nativeNeedsStop) return;
         }
       }
       autoStatus = 'Проверено $attempt вариантов: соединение с подходящей загрузкой не найдено. Результаты всех попыток — в диагностике.';
@@ -193,7 +275,7 @@ class VpnViewModel extends ChangeNotifier {
   }
   void setForeground(bool visible) {
     _foreground = visible;
-    if (!visible && autoSelecting) unawaited(cancelAutoSelection());
+    if (!visible && autoSelecting && !requestingNetworkPermission) unawaited(cancelAutoSelection());
     _scheduleTraffic();
     _probeEpoch++; monitor.cancel(); _poll?.cancel();
     if (visible) {
@@ -251,7 +333,7 @@ class VpnViewModel extends ChangeNotifier {
       if (credentials != null) await store.saveCredentials(server.id, credentials);
       _nativeNeedsStop = true; activeServer = server;
       state = ConnectionState.connecting;
-      connectionVerified = false;
+      connectionVerified = false; measuredBytesPerSecond = null;
       traffic.reset(); connectionStage = 'Запуск VPN';
       _connectionEpoch++;
       _connectTimeout?.cancel();
@@ -282,7 +364,7 @@ class VpnViewModel extends ChangeNotifier {
         _nativeConnected = true;
         _nativeNeedsStop = true;
         if (activeServer?.protocol == 'vless' || activeServer?.protocol == 'shadowsocks') {
-          connectionVerified = event.quality;
+          connectionVerified = event.quality; measuredBytesPerSecond = event.bytesPerSecond;
           state = ConnectionState.connected; message = event.message ?? 'Xray: ответ через сервер получен';
           _scheduleTraffic(); _notify();
         } else if (!_verifying && state != ConnectionState.connected) { unawaited(_verifyInternet()); }
@@ -325,7 +407,7 @@ class VpnViewModel extends ChangeNotifier {
       if ((result?['delay'] as num? ?? -1) < 0) throw const HttpException('System VPN check failed');
       if (!_disposed && epoch == _connectionEpoch && _nativeNeedsStop) {
         _connectTimeout?.cancel(); _connectTimeout = null; state = ConnectionState.connected;
-        connectionVerified = result?['quality'] == true;
+        connectionVerified = result?['quality'] == true; measuredBytesPerSecond = (result?['bytesPerSecond'] as num?)?.toInt();
         message = '${result?['detail'] ?? 'HTTPS-проверка пройдена'}'; _scheduleTraffic(); _notify();
       }
     } catch (_) {

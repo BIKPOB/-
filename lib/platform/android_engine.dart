@@ -17,7 +17,7 @@ class AndroidEngine implements VpnEngine, TrafficSource {
   bool _stopping = false, _checking = false, _verified = false, _disposed = false, _starting = false;
   int _epoch = 0;
   @override Stream<EngineEvent> get events => _events.stream;
-  void _emit(ConnectionState state, [String? detail, bool quality = true]) { if (!_disposed) _events.add(EngineEvent(state, detail, quality)); }
+  void _emit(ConnectionState state, [String? detail, bool quality = true, int? bytesPerSecond]) { if (!_disposed) _events.add(EngineEvent(state, detail, quality, bytesPerSecond)); }
   @override Future<void> initialize() async {
     _subscriptions.add(const EventChannel('quietvpn/wg-events').receiveBroadcastStream().listen((s) {
       if (_active == 'wireguard' && !_stopping) _wgEvent(s);
@@ -66,7 +66,7 @@ class AndroidEngine implements VpnEngine, TrafficSource {
         _verified = true; // Verification finished; do not repeat on every status tick.
         _emit(ConnectionState.connected, 'Туннель включён, интернет НЕ подтверждён. '
           'Проверка через Xray не прошла: $detail', false);
-      } else { _verified = true; _emit(ConnectionState.connected, '$detail · $delay мс', probe?['quality'] == true); }
+      } else { _verified = true; _emit(ConnectionState.connected, '$detail · $delay мс', probe?['quality'] == true, (probe?['bytesPerSecond'] as num?)?.toInt()); }
     } catch (_) {
       if (!_stopping && epoch == _epoch && !_disposed) {
         _verified = true;
