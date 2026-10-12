@@ -14,15 +14,21 @@ object ProxyProbe {
     @Volatile private var pending: Socket? = null
     @Volatile private var generation = 0
     private val timer = Executors.newSingleThreadScheduledExecutor()
-    fun socksConnect(socket: Socket, host: String) {
+    fun socksConnect(socket: Socket, host: String, ipv4: ByteArray? = null) {
         val output = socket.getOutputStream()
         val input = DataInputStream(socket.getInputStream())
         output.write(byteArrayOf(5, 1, 0)); output.flush()
         if (input.readUnsignedByte() != 5 || input.readUnsignedByte() != 0) throw IOException("SOCKS auth")
         val domain = host.toByteArray(Charsets.US_ASCII)
         require(domain.size in 1..255)
-        output.write(byteArrayOf(5, 1, 0, 3, domain.size.toByte()))
-        output.write(domain); output.write(byteArrayOf(1, 187.toByte())); output.flush()
+        if (ipv4 == null) {
+            output.write(byteArrayOf(5, 1, 0, 3, domain.size.toByte()))
+            output.write(domain)
+        } else {
+            require(ipv4.size == 4)
+            output.write(byteArrayOf(5, 1, 0, 1)); output.write(ipv4)
+        }
+        output.write(byteArrayOf(1, 187.toByte())); output.flush()
         val version = input.readUnsignedByte()
         val status = input.readUnsignedByte()
         input.readUnsignedByte()
@@ -34,7 +40,8 @@ object ProxyProbe {
     fun measure(context: android.content.Context): Map<String, Any> {
         val token = generation
         val failures = mutableListOf<String>()
-        for (host in listOf("www.gstatic.com", "cp.cloudflare.com")) {
+        // Isolate proxy transport from target DNS; TLS still verifies the IP SAN.
+        for (host in listOf("1.1.1.1", "www.gstatic.com", "cp.cloudflare.com")) {
             if (token != generation) break
             val start = android.os.SystemClock.elapsedRealtime()
             val socket = Socket()
@@ -46,15 +53,17 @@ object ProxyProbe {
                 socket.soTimeout = 18000
                 socket.connect(InetSocketAddress("127.0.0.1", 10807), 1500)
                 stage = "локальное согласование SOCKS"
-                socksConnect(socket, host)
-                stage = "ожидание HTTPS через Xray (удалённое соединение ещё не подтверждено)"
+                val numeric = host == "1.1.1.1"
+                socksConnect(socket, host, if (numeric) byteArrayOf(1, 1, 1, 1) else null)
+                stage = if (numeric) "HTTPS по IP через Xray без DNS" else "HTTPS по имени через Xray"
                 val tls = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(socket, host, 443, true) as SSLSocket
                 tls.use {
                     it.sslParameters = it.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
                     it.soTimeout = 18000
                     it.startHandshake()
                     stage = "HTTPS-ответ"
-                    it.outputStream.write("GET /generate_204 HTTP/1.1\r\nHost: $host\r\nConnection: close\r\n\r\n".toByteArray(Charsets.US_ASCII))
+                    val path = if (numeric) "/cdn-cgi/trace" else "/generate_204"
+                    it.outputStream.write("GET $path HTTP/1.1\r\nHost: $host\r\nConnection: close\r\n\r\n".toByteArray(Charsets.US_ASCII))
                     it.outputStream.flush()
                     val input = it.inputStream
                     val line = StringBuilder()
@@ -63,10 +72,13 @@ object ProxyProbe {
                         if (ch < 0 || ch == 10) break
                         line.append(ch.toChar())
                     }
-                    if (!Regex("HTTP/1\\.[01] 204(?: .*|\\r)?").matches(line.toString().trimEnd())) throw IOException("HTTP status")
+                    val status = if (numeric) 200 else 204
+                    if (!Regex("HTTP/1\\.[01] $status(?: .*|\\r)?").matches(line.toString().trimEnd())) throw IOException("HTTP status")
                 }
                 if (token != generation) break
-                return TunnelProbe.measure(context)
+                val tunnel = TunnelProbe.measure(context).toMutableMap()
+                tunnel["detail"] = "${if (numeric) "HTTPS по IP без DNS подтверждён" else "HTTPS через прокси подтверждён"}; ${tunnel["detail"]}"
+                return tunnel
             } catch (e: Exception) {
                 failures.add("$host: $stage (${e.javaClass.simpleName}, ${android.os.SystemClock.elapsedRealtime() - start} мс)")
             } finally {

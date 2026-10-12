@@ -9,6 +9,29 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ProxyProbeTest {
+    @Test fun sendsLiteralIpWithoutSocksDomainResolution() {
+        ServerSocket(0).use { server ->
+            val pool = Executors.newSingleThreadExecutor()
+            try {
+                val received = pool.submit<List<Int>> {
+                    server.accept().use { peer ->
+                        peer.soTimeout = 2000
+                        val input = DataInputStream(peer.getInputStream())
+                        input.readFully(ByteArray(3))
+                        peer.getOutputStream().write(byteArrayOf(5, 0))
+                        val request = List(10) { input.readUnsignedByte() }
+                        peer.getOutputStream().write(byteArrayOf(5, 0, 0, 1, 127, 0, 0, 1, 0, 0))
+                        request
+                    }
+                }
+                Socket("127.0.0.1", server.localPort).use {
+                    it.soTimeout = 2000
+                    ProxyProbe.socksConnect(it, "1.1.1.1", byteArrayOf(1, 1, 1, 1))
+                }
+                assertEquals(listOf(5, 1, 0, 1, 1, 1, 1, 1, 1, 187), received.get(3, TimeUnit.SECONDS))
+            } finally { pool.shutdownNow() }
+        }
+    }
     @Test fun sendsDomainToSocksWithoutLocalDns() {
         ServerSocket(0).use { server ->
             val pool = Executors.newSingleThreadExecutor()

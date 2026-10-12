@@ -41,6 +41,7 @@ class VpnViewModel extends ChangeNotifier {
   final ServerMonitor _autoMonitor;
   static const _networkChannel = MethodChannel('quietvpn/catalog-cache');
   NetworkContext networkContext = const NetworkContext();
+  final List<String> autoAttemptReports = [];
   Future<NetworkContext> _network() async {
     if (_networkReader != null) return NetworkContext(type: await _networkReader());
     try {
@@ -55,6 +56,7 @@ class VpnViewModel extends ChangeNotifier {
   Future<void> autoConnect() async {
     if (!ready || busy || autoSelecting || _nativeNeedsStop || _stopping) return;
     autoSelecting = true; final token = ++_autoEpoch;
+    autoAttemptReports.clear();
     autoStatus = 'Локальная нейросеть: обновление базы'; _notify();
     _poll?.cancel(); _probeEpoch++; monitor.cancel();
     bool cancelled() => token != _autoEpoch || _disposed;
@@ -107,6 +109,7 @@ class VpnViewModel extends ChangeNotifier {
         final sameNetwork = context.sameConnection(await _network());
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
         final success = state == ConnectionState.connected && connectionVerified;
+        autoAttemptReports.add('Попытка $attempt · ${server.protocol} · ${success ? 'успех' : 'не подтверждено'}\n${message ?? connectionStage ?? 'Нет подробностей'}');
         if (sameNetwork && !context.ambiguous) {
           _selector.observe(server, network, latency[server.id]?.milliseconds, success: success, context: context);
           try { await store.saveSelector(_selector.encode()); } catch (_) { }
@@ -119,7 +122,7 @@ class VpnViewModel extends ChangeNotifier {
         if (_nativeNeedsStop) { autoStatus = 'Подбор остановлен: отключение не подтверждено'; return; }
         if (!sameNetwork) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
       }
-      autoStatus = 'Проверено $attempt вариантов: соединение с подходящей загрузкой не найдено. Причина последней ошибки — в диагностике.';
+      autoStatus = 'Проверено $attempt вариантов: соединение с подходящей загрузкой не найдено. Результаты всех попыток — в диагностике.';
     } catch (_) { autoStatus = 'Подбор не завершён. Проверьте сеть и диагностику.'; }
     finally { autoSelecting = false; if (!_disposed) { _scheduleProbe(); _notify(); } }
   }

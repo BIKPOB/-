@@ -70,6 +70,26 @@ no automatic renewal API, CAPTCHA bypass, background tunnel switching, or
 guaranteed uninterrupted reconnection in this build.
 
 
+## 0.7.8: distinguish proxy transport, DNS and Android routing
+
+The 0.7.6 protection counters were read from UI-process static fields while
+the dependency runs Xray in `:RunSoLibV2RayDaemon`. Those zeros were invalid
+evidence of protection failure. The daemon now writes atomic private snapshots;
+the UI reports missing snapshots explicitly instead of inventing zero counts.
+No credentials, destinations or socket identifiers are written to this snapshot.
+
+Endpoint DNS and an informational TCP check bind to the active physical network
+before VPN startup. The first SOCKS request now uses IPv4 ATYP with 1.1.1.1,
+verified HTTPS and an expected HTTP response, eliminating target DNS from this
+specific check. Domain-based alternatives remain available. Success still
+requires the separate VPN-bound DNS, HTTPS and complete transfer checks.
+Selection reports retain all six outcomes in memory, without profile contents.
+
+This fixes confirmed diagnostic defects, not a proven explanation for all
+reported transport timeouts. Device protection invocation and real connectivity
+in the user's network require runtime verification. No success is inferred from
+TCP connect alone. Network-context changes from 0.7.7 are included.
+
 ## 0.7.6: DNS routing and real Android VPN checks
 
 Confirmed integration defect: the pinned plugin's ensureTunInbound injected

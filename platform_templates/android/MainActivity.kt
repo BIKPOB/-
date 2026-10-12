@@ -33,12 +33,15 @@ class MainActivity : FlutterActivity() {
                     result.success(state.removePrefix("V2RAY_"))
                 } else if (call.method == "resolveEndpoint") {
                     val host = call.argument<String>("host") ?: ""
+                    val port = call.argument<Int>("port") ?: 443
                     probeWorker.execute {
                         try {
-                            val addresses = java.net.InetAddress.getAllByName(host)
-                            val address = addresses.firstOrNull { it is java.net.Inet4Address } ?: addresses.first()
-                            runOnUiThread { result.success(address.hostAddress) }
-                        } catch (_: Exception) { runOnUiThread { result.error("dns", "DNS: адрес VPN-сервера не найден", null) } }
+                            val address = EndpointProbe.resolve(applicationContext, host, port)
+                            runOnUiThread { result.success(address) }
+                        } catch (e: Exception) {
+                            XrayDiagnostics.endpointReport += ": ${e.javaClass.simpleName}"
+                            runOnUiThread { result.error("network", "Базовая сеть или DNS сервера недоступны", null) }
+                        }
                     }
                 } else if (call.method == "prepareDiagnostics") {
                     result.success(XrayDiagnostics.prepare(applicationContext))

@@ -21,7 +21,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _diagnostics() async {
     final native = await const MethodChannel('quietvpn/diagnostics').invokeMethod<String>('report') ?? '';
     final report = '$native\nПротокол: ${vm.activeServer?.protocol ?? vm.selected?.protocol ?? '—'}\n'
-      'Состояние: ${vm.state.name}\nЭтап: ${vm.connectionStage ?? '—'}\n${vm.message ?? ''}';
+      'Состояние: ${vm.state.name}\nЭтап: ${vm.connectionStage ?? '—'}\n${vm.message ?? ''}\n'
+      '${vm.autoAttemptReports.join('\n\n')}';
     if (!mounted) return;
     await showDialog<void>(context: context, builder: (context) => AlertDialog(title: const Text('Диагностика'),
       content: SingleChildScrollView(child: SelectableText(report)), actions: [

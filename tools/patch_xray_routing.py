@@ -1,5 +1,6 @@
 """Fix pinned dependency routing without changing its upstream files in git."""
 import json
+import shutil
 from pathlib import Path
 from urllib.parse import urlparse, unquote
 root = Path(__file__).resolve().parents[1]
@@ -8,6 +9,7 @@ package = next(p for p in json.loads(config.read_text())['packages'] if p['name'
 uri = urlparse(package['rootUri'])
 base = Path(unquote(uri.path)) if uri.scheme == 'file' else (config.parent / unquote(package['rootUri'])).resolve()
 java = base / 'android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray'
+shutil.copyfile(root/'platform_templates/xray/QuietSocketDiagnostics.java', java/'core/QuietSocketDiagnostics.java')
 p = java/'utils/Utilities.java'
 s = p.read_text()
 if '// Quiet VPN owns DNS routing' not in s:
@@ -37,4 +39,15 @@ if 'quietProtectOk' not in s:
                 }
             });''', 1)
 p.write_text(s)
-print('Patched DNS routing, TUN MTU and per-socket VPN protection')
+# Static fields in the UI are unrelated to the :RunSoLibV2RayDaemon fields.
+if 'QuietSocketDiagnostics.start' not in s:
+    s = s.replace('quietProtectOk = 0; quietProtectFailed = 0;',
+        'quietProtectOk = 0; quietProtectFailed = 0;\n        QuietSocketDiagnostics.start(targetService);')
+    s = s.replace('if (ok) quietProtectOk++; else quietProtectFailed++;',
+        'if (ok) quietProtectOk++; else quietProtectFailed++;\n                        QuietSocketDiagnostics.record(ok);')
+    s = s.replace('                    quietProtectFailed++;',
+        '                    QuietSocketDiagnostics.record(false);\n                    quietProtectFailed++;')
+    p.write_text(s)
+assert 'QuietSocketDiagnostics.start(targetService)' in s
+assert 'QuietSocketDiagnostics.record(ok)' in s
+print('Patched DNS routing, TUN MTU and cross-process socket diagnostics')

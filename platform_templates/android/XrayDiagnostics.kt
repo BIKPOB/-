@@ -6,14 +6,18 @@ import java.io.RandomAccessFile
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import dev.amirzr.flutter_v2ray_client.v2ray.core.QuietSocketDiagnostics
 
 /** Private session diagnostics. Export only fixed categories, never raw Xray text. */
 object XrayDiagnostics {
     private val timer = Executors.newSingleThreadScheduledExecutor()
     private var limiter: ScheduledFuture<*>? = null
+    @Volatile var endpointReport: String = "Проверка базовой сети ещё не выполнена"
     private fun file(context: Context) = File(context.noBackupFilesDir, "xray-session.log")
     @Synchronized fun prepare(context: Context): String {
         limiter?.cancel(false)
+        android.util.AtomicFile(QuietSocketDiagnostics.path(context)).delete()
+        endpointReport = "Проверка базовой сети ещё не выполнена"
         val log = file(context)
         log.parentFile?.mkdirs()
         log.writeText("")
@@ -32,6 +36,8 @@ object XrayDiagnostics {
             "no such host" to "DNS: имя сервера не найдено",
             "failed to resolve ip" to "DNS: ошибка разрешения адреса сервера",
             "failed to lookup" to "DNS: ошибка разрешения имени",
+            "failed to apply external controller" to "Xray: ошибка защиты исходящего сокета",
+            "protect failed" to "Xray: защита сокета отклонена",
             "i/o timeout" to "Сеть: истекло ожидание ввода/вывода",
             "context deadline exceeded" to "Xray: истёк срок ожидания операции",
             "connection reset" to "TCP: соединение сброшено",
@@ -65,10 +71,10 @@ object XrayDiagnostics {
                 it.seek(it.length() - length)
                 ByteArray(length).also { bytes -> it.readFully(bytes) }
             }
-            val core = dev.amirzr.flutter_v2ray_client.v2ray.core.V2rayCoreManager::class.java
-            val protectedCount = try { core.getField("quietProtectOk").getLong(null) } catch (_: Exception) { -1L }
-            val failed = try { core.getField("quietProtectFailed").getLong(null) } catch (_: Exception) { -1L }
-            "Журнал Xray: ${log.length()} байт; защита сокетов: $protectedCount успешных, $failed отказов\n" +
+            val counts = QuietSocketDiagnostics.read(context)
+            val protection = if (counts == null) "данные VPN-процесса недоступны"
+                else "${counts[0]} успешных, ${counts[1]} отказов (VPN-процесс)"
+            "$endpointReport\nЖурнал Xray: ${log.length()} байт; защита сокетов: $protection\n" +
                 if (bytes.isEmpty()) "Xray: файл журнала пуст — работа записи не подтверждена"
                 else classify(bytes.toString(Charsets.UTF_8))
         }

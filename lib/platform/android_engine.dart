@@ -58,7 +58,7 @@ class AndroidEngine implements VpnEngine, TrafficSource {
     final epoch = _epoch;
     _emit(ConnectionState.connecting, 'Xray запущен локально · проверка удалённого соединения (DNS и загрузка данных)');
     try {
-      final probe = await _stage.invokeMapMethod<String, dynamic>('probe').timeout(const Duration(seconds: 75));
+      final probe = await _stage.invokeMapMethod<String, dynamic>('probe').timeout(const Duration(seconds: 100));
       final delay = (probe?['delay'] as num?)?.toInt();
       final detail = probe?['detail'] as String? ?? 'Нет результата проверки';
       if (_stopping || epoch != _epoch || _disposed) return;
@@ -78,7 +78,7 @@ class AndroidEngine implements VpnEngine, TrafficSource {
     if (!{'vless','shadowsocks'}.contains(_active)) throw StateError('Протокол не поддерживается');
     final logPath = await _stage.invokeMethod<String>('prepareDiagnostics');
     _emit(ConnectionState.connecting, 'Разрешение адреса VPN-сервера до запуска туннеля');
-    final endpoint = await _stage.invokeMethod<String>('resolveEndpoint', {'host': server.host}).timeout(const Duration(seconds: 10));
+    final endpoint = await _stage.invokeMethod<String>('resolveEndpoint', {'host': server.host, 'port': server.port}).timeout(const Duration(seconds: 15));
     if (endpoint == null) throw StateError('DNS: не удалось разрешить адрес VPN-сервера');
     final config = ProxyProfile.parse(server.profile).configurationWithDiagnostics(errorLogPath: logPath, endpointAddress: endpoint);
     if (await _xray.invokeMethod<bool>('requestPermission') != true) throw StateError('Разрешение VPN отклонено');
