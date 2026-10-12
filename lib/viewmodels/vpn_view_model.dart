@@ -12,6 +12,7 @@ import '../core/server_monitor.dart';
 import '../data/profile_store.dart';
 import '../data/public_catalog.dart';
 import '../core/adaptive_selector.dart';
+import '../core/network_context.dart';
 import '../platform/vpn_engine.dart';
 
 class VpnViewModel extends ChangeNotifier {
@@ -39,10 +40,13 @@ class VpnViewModel extends ChangeNotifier {
   AdaptiveSelector _selector = AdaptiveSelector();
   final ServerMonitor _autoMonitor;
   static const _networkChannel = MethodChannel('quietvpn/catalog-cache');
-  Future<String> _network() async {
-    if (_networkReader != null) return _networkReader();
-    try { return await _networkChannel.invokeMethod<String>('network') ?? 'other'; }
-    catch (_) { return 'other'; }
+  NetworkContext networkContext = const NetworkContext();
+  Future<NetworkContext> _network() async {
+    if (_networkReader != null) return NetworkContext(type: await _networkReader());
+    try {
+      final data = await _networkChannel.invokeMapMethod<dynamic, dynamic>('networkContext');
+      return NetworkContext.fromMap(data ?? {});
+    } catch (_) { return const NetworkContext(); }
   }
   Future<void> cancelAutoSelection() async {
     _autoEpoch++; _autoMonitor.cancel(); autoStatus = 'Подбор остановлен'; _notify();
@@ -55,7 +59,9 @@ class VpnViewModel extends ChangeNotifier {
     _poll?.cancel(); _probeEpoch++; monitor.cancel();
     bool cancelled() => token != _autoEpoch || _disposed;
     try {
-      final network = await _network();
+      final context = await _network();
+      networkContext = context;
+      final network = context.type;
       if (cancelled()) return;
       if (network == 'offline') { autoStatus = 'Нет доступной сети'; return; }
       final catalog = await _catalogLoader();
@@ -66,18 +72,18 @@ class VpnViewModel extends ChangeNotifier {
       final hosts = <String>{};
       for (final protocol in ['wireguard', 'vless', 'shadowsocks']) {
         final group = pool.where((s) => s.protocol == protocol).toList()
-          ..sort((a, b) => _selector.score(b, network, null).compareTo(_selector.score(a, network, null)));
+          ..sort((a, b) => _selector.score(b, network, null, context: context).compareTo(_selector.score(a, network, null, context: context)));
         var count = 0;
         for (final server in group) {
           if (count >= 8) break;
           if (hosts.add('$protocol|${server.host}')) { candidates.add(server); count++; }
         }
       }
-      autoStatus = 'Сеть: $network · оценка ${candidates.length} адресов · опыт: ${_selector.samples}'; _notify();
+      autoStatus = 'Сеть: ${context.label} · оценка ${candidates.length} адресов · опыт: ${_selector.samples}'; _notify();
       final latency = await _autoMonitor.sample(candidates);
       if (cancelled()) return;
-      candidates.sort((a, b) => _selector.score(b, network, latency[b.id]?.milliseconds)
-        .compareTo(_selector.score(a, network, latency[a.id]?.milliseconds)));
+      candidates.sort((a, b) => _selector.score(b, network, latency[b.id]?.milliseconds, context: context)
+        .compareTo(_selector.score(a, network, latency[a.id]?.milliseconds, context: context)));
       // Include the best candidate of every available protocol before repeats.
       final ordered = <VpnServer>[];
       final protocols = <String>{};
@@ -86,7 +92,7 @@ class VpnViewModel extends ChangeNotifier {
       var attempt = 0;
       for (final server in ordered.take(6)) {
         if (cancelled()) return;
-        if (await _network() != network) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
+        if (!context.sameConnection(await _network())) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
         if (cancelled()) return;
         attempt++;
         autoStatus = 'ИИ-подбор: попытка $attempt/6 · ${server.protocol} · проверка HTTPS'; _notify();
@@ -98,11 +104,11 @@ class VpnViewModel extends ChangeNotifier {
           await Future<void>.delayed(const Duration(milliseconds: 200));
         }
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
-        final sameNetwork = await _network() == network;
+        final sameNetwork = context.sameConnection(await _network());
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
         final success = state == ConnectionState.connected && connectionVerified;
         if (sameNetwork) {
-          _selector.observe(server, network, latency[server.id]?.milliseconds, success: success);
+          _selector.observe(server, network, latency[server.id]?.milliseconds, success: success, context: context);
           try { await store.saveSelector(_selector.encode()); } catch (_) { }
         }
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }

@@ -49,6 +49,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           icon: Icon(vm.autoSelecting ? Icons.stop : Icons.auto_awesome),
           label: Text(vm.autoSelecting ? 'Остановить подбор' : 'ИИ-подбор и подключение')),
         const Text('Локальная нейросеть учится на этом телефоне. До 6 попыток; проверяются DNS, HTTPS и загрузка 256 КиБ (до 1,5 МиБ за подбор). Первые рекомендации без накопленной истории.'),
+        if (vm.autoStatus != null) Text(vm.networkContext.label),
         if (vm.autoStatus != null) Text(vm.autoStatus!),
         if (vm.busy || vm.state == ConnectionState.connecting) const LinearProgressIndicator(),
       ]))),

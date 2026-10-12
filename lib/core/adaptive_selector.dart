@@ -2,29 +2,30 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'models.dart';
+import 'network_context.dart';
 
-/// Small on-device neural classifier: 8 inputs, 6 tanh units, sigmoid output.
+/// Small on-device neural classifier: 15 inputs, 6 tanh units, sigmoid output.
 /// Starts untrained; learns only from verified connections, not ICMP responses.
 class AdaptiveSelector {
   AdaptiveSelector() {
     final random = Random(754);
-    hidden = List.generate(6, (_) => List.generate(9, (_) => (random.nextDouble() - .5) * .2));
+    hidden = List.generate(6, (_) => List.generate(16, (_) => (random.nextDouble() - .5) * .2));
   }
   late List<List<double>> hidden;
   List<double> output = List.filled(7, 0);
   final history = <String, List<int>>{};
   int samples = 0;
   String key(VpnServer s, String network) => sha256.convert(utf8.encode('$network|${s.protocol}|${s.host}|${s.port}')).toString();
-  List<double> features(VpnServer s, String network, int? latency) {
+  List<double> features(VpnServer s, String network, int? latency, {NetworkContext? context}) {
     final h = history[key(s, network)] ?? [0, 0];
     return [s.protocol == 'wireguard' ? 1 : 0, s.protocol == 'vless' ? 1 : 0,
       s.protocol == 'shadowsocks' ? 1 : 0, network == 'wifi' ? 1 : 0,
       network == 'mobile' ? 1 : 0, latency == null ? 0 : 1 / (1 + latency / 200),
-      (h[0] + 1) / (h[1] + 2), min(h[1], 10) / 10];
+      (h[0] + 1) / (h[1] + 2), min(h[1], 10) / 10, ...(context ?? NetworkContext(type: network)).features];
   }
   List<double> _activation(List<double> x) => hidden.map((w) {
     var z = w.last;
-    for (var i = 0; i < 8; i++) { z += w[i] * x[i]; }
+    for (var i = 0; i < 15; i++) { z += w[i] * x[i]; }
     final e = exp(2 * z.clamp(-15, 15));
     return (e - 1) / (e + 1);
   }).toList();
@@ -34,19 +35,19 @@ class AdaptiveSelector {
     for (var j = 0; j < 6; j++) { z += output[j] * h[j]; }
     return 1 / (1 + exp(-z.clamp(-30, 30)));
   }
-  double score(VpnServer s, String network, int? latency) {
-    final x = features(s, network, latency);
+  double score(VpnServer s, String network, int? latency, {NetworkContext? context}) {
+    final x = features(s, network, latency, context: context);
     return .65 * predict(x) + .25 * x[6] + .1 * x[5];
   }
-  void observe(VpnServer s, String network, int? latency, {required bool success}) {
-    final x = features(s, network, latency);
+  void observe(VpnServer s, String network, int? latency, {required bool success, NetworkContext? context}) {
+    final x = features(s, network, latency, context: context);
     for (var step = 0; step < 4; step++) {
       final h = _activation(x), old = List<double>.from(output);
       final error = predict(x) - (success ? 1 : 0);
       for (var j = 0; j < 6; j++) {
         final delta = error * old[j] * (1 - h[j] * h[j]);
-        for (var i = 0; i < 8; i++) { hidden[j][i] -= .08 * delta * x[i]; }
-        hidden[j][8] -= .08 * delta;
+        for (var i = 0; i < 15; i++) { hidden[j][i] -= .08 * delta * x[i]; }
+        hidden[j][15] -= .08 * delta;
         output[j] -= .08 * error * h[j];
       }
       output[6] -= .08 * error;
@@ -62,8 +63,10 @@ class AdaptiveSelector {
     try {
       final j = jsonDecode(raw) as Map;
       final h = (j['hidden'] as List).map((r) => (r as List).map((n) => (n as num).toDouble()).toList()).toList();
+      // Preserve the learned old model with neutral weights for new inputs.
+      for (final row in h) { if (row.length == 9) row.insertAll(8, List.filled(7, 0.0)); }
       final o = (j['output'] as List).map((n) => (n as num).toDouble()).toList();
-      if (h.length != 6 || h.any((r) => r.length != 9) || o.length != 7 || [...h.expand((r) => r), ...o].any((v) => !v.isFinite)) return model;
+      if (h.length != 6 || h.any((r) => r.length != 16) || o.length != 7 || [...h.expand((r) => r), ...o].any((v) => !v.isFinite)) return model;
       final records = Map<String, dynamic>.from(j['history'] as Map);
       if (records.length > 500) return model;
       final parsed = records.map((k, v) => MapEntry(k, (v as List).cast<int>()));

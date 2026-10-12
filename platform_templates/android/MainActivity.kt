@@ -58,17 +58,9 @@ class MainActivity : FlutterActivity() {
             }
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/catalog-cache")
             .setMethodCallHandler { call, result ->
-                if (call.method == "network") {
-                    val manager = getSystemService(android.net.ConnectivityManager::class.java)
-                    val networks = manager.allNetworks.mapNotNull { manager.getNetworkCapabilities(it) }
-                        .filter { it.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                            !it.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) }
-                    result.success(when {
-                        networks.any { it.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) } -> "wifi"
-                        networks.any { it.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) } -> "mobile"
-                        networks.isNotEmpty() -> "other"
-                        else -> "offline"
-                    })
+                if (call.method == "network" || call.method == "networkContext") {
+                    val snapshot = NetworkSnapshot.read(applicationContext)
+                    result.success(if (call.method == "network") snapshot["type"] else snapshot)
                     return@setMethodCallHandler
                 }
                 val source = call.argument<String>("source")
