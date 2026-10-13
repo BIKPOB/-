@@ -1,17 +1,17 @@
-name: Publish verified Android release
+name: Publish verified desktop and Android release
 on:
   push:
     branches: [main]
     paths: ['.github/workflows/publish-release.yml']
   workflow_run:
-    workflows: ['Build Android APK']
+    workflows: ['Build Android APK', 'Build Windows installer']
     types: [completed]
   workflow_dispatch:
 permissions:
   contents: write
   actions: read
 concurrency:
-  group: publish-verified-android
+  group: publish-verified-release
   cancel-in-progress: false
 jobs:
   release:
@@ -21,64 +21,86 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      BUILD_RUN: ${{ github.event.workflow_run.id || '38397294650' }}
+      BUILD_RUN: ${{ github.event.workflow_run.id || '38437529917' }}
     steps:
-      - name: Verify build identity and download artifact
+      - name: Require successful Windows and Android builds from the same source
+        id: builds
         run: |
           gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
+          SOURCE_SHA=$(python3 -c "import json;print(json.load(open('run.json'))['head_sha'])")
+          gh api "repos/$GH_REPO/actions/runs?head_sha=$SOURCE_SHA&per_page=100" > runs.json
           python3 - <<'PY'
           import json, os, re
-          run = json.load(open('run.json'))
-          assert run['conclusion'] == 'success' and run['name'] == 'Build Android APK'
-          assert run['event'] == 'push' and run['head_branch'] == 'main'
-          assert run['head_repository']['full_name'] == os.environ['GH_REPO']
-          sha = run['head_sha']
+          event = json.load(open('run.json'))
+          sha = event['head_sha']
           assert re.fullmatch('[0-9a-f]{40}', sha)
-          with open(os.environ['GITHUB_ENV'], 'a') as f: f.write(f'SOURCE_SHA={sha}\n')
+          runs = [r for r in json.load(open('runs.json'))['workflow_runs'] if
+            r['head_sha'] == sha and r['event'] == 'push' and r['head_branch'] == 'main' and
+            r['head_repository']['full_name'] == os.environ['GH_REPO'] and r['conclusion'] == 'success']
+          android = next((r for r in runs if r['name'] == 'Build Android APK'), None)
+          windows = next((r for r in runs if r['name'] == 'Build Windows installer'), None)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f: f.write(f'ready={str(bool(android and windows)).lower()}\n')
+          if android and windows:
+            with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write(f"SOURCE_SHA={sha}\nANDROID_RUN={android['id']}\nWINDOWS_RUN={windows['id']}\n")
+          else:
+            print('Waiting for both platforms to pass; no release published.')
           PY
-          gh run download "$BUILD_RUN" -n quiet-vpn-android-apk -D payload
+      - name: Download verified artifacts
+        if: steps.builds.outputs.ready == 'true'
+        run: |
+          gh run download "$ANDROID_RUN" -n quiet-vpn-android-apk -D android
+          gh run download "$WINDOWS_RUN" -n quiet-vpn-windows-installer -D windows
           gh api "repos/$GH_REPO/contents/pubspec.yaml?ref=$SOURCE_SHA" --jq .content | base64 --decode > pubspec.yaml
-      - name: Verify checksum and stage user downloads
+      - name: Verify checksums and stage downloads
+        if: steps.builds.outputs.ready == 'true'
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import hashlib, os, re, shutil
-          p = Path('payload')
-          assert (p/'SOURCE_COMMIT.txt').read_text().strip() == os.environ['SOURCE_SHA']
-          assert re.search(r'Infected files:\s*0\s*$', (p/'ANTIVIRUS_SCAN.txt').read_text(), re.M)
-          apk = p/'quiet-vpn-android.apk'
-          digest = hashlib.sha256(apk.read_bytes()).hexdigest()
-          assert digest == (p/'SHA256SUMS.txt').read_text().split()[0]
+          for folder in ['android', 'windows']:
+            assert Path(folder, 'SOURCE_COMMIT.txt').read_text().strip() == os.environ['SOURCE_SHA']
+          assert re.search(r'Infected files:\s*0\s*$', Path('android/ANTIVIRUS_SCAN.txt').read_text(), re.M)
           version = re.search(r'^version:\s*(\d+\.\d+\.\d+)\+\d+\s*$', Path('pubspec.yaml').read_text(), re.M).group(1)
+          apk = Path('android/quiet-vpn-android.apk')
+          exe = Path('windows', f'quiet-vpn-{version}-windows-x64-setup.exe')
+          apkhash = hashlib.sha256(apk.read_bytes()).hexdigest()
+          exehash = hashlib.sha256(exe.read_bytes()).hexdigest()
+          assert apkhash == Path('android/SHA256SUMS.txt').read_text().split()[0]
+          assert exehash == Path('windows/SHA256SUMS-Windows.txt').read_text().split()[0]
           out = Path('release'); out.mkdir()
-          name = f'quiet-vpn-{version}.apk'
-          shutil.copyfile(apk, out/name)
-          (out/'SHA256SUMS.txt').write_text(f'{digest}  {name}\n')
-          shutil.copyfile(p/'SOURCE_COMMIT.txt', out/'SOURCE_COMMIT.txt')
-          Path('notes.md').write_text(f'''## Скачать приложение
-          В разделе Assets выберите **{name}**. ZIP с исходниками устанавливать не нужно.
+          apkname = f'quiet-vpn-{version}.apk'
+          shutil.copyfile(apk, out/apkname); shutil.copyfile(exe, out/exe.name)
+          (out/'SHA256SUMS.txt').write_text(f'{apkhash}  {apkname}\n{exehash}  {exe.name}\n')
+          shutil.copyfile('android/SOURCE_COMMIT.txt', out/'SOURCE_COMMIT.txt')
+          Path('notes.md').write_text(f'''## Скачать Quiet VPN {version}
+          **Android:** `{apkname}` — Android 8+, ARM64/ARMv7.
+          **Windows:** `{exe.name}` — Windows 10/11 x64, установщик с VPN-движками.
+          Файлы находятся в Assets ниже. Source code — исходники, не установщики.
 
-          Android 8+, arm64-v8a / armeabi-v7a. Проверено в CI: Dart, Flutter-тесты, нативные Android-тесты, структура APK и антивирусное сканирование.
+          Windows: VLESS/Shadowsocks, WireGuard/AmneziaWG, импорт ключей/файлов, каталог, быстрый и глубокий ИИ, локальное обучение, скорость и диагностика. Исключения приложений доступны только на Android.
+          Windows требует прав администратора. Установщик Quiet VPN пока не подписан сертификатом издателя.
+          Для встроенного браузера нужен Microsoft Edge WebView2; его установка доступна как дополнительная опция.
+          На Windows часть расширенных сведений Wi-Fi/LTE может быть недоступна. При принудительном завершении служба AmneziaWG может остаться включённой; повторный запуск приложения очищает её.
 
-          Windows EXE в этой версии отсутствует: текущие VPN-движки реализованы для Android.
-          Проверки CI не гарантируют доступность публичных VPN-серверов в вашей сети.
+          Проверены анализ Dart, Flutter-тесты, Android-тесты, Windows TUN и DNS/HTTPS через него, жизненный цикл службы AmneziaWG и установщик.
+          Подключение к конкретным публичным серверам в вашей сети требует проверки на устройстве.
 
-          Сборка: https://github.com/{os.environ['GH_REPO']}/actions/runs/{os.environ['BUILD_RUN']}
+          [Android CI](https://github.com/{os.environ['GH_REPO']}/actions/runs/{os.environ['ANDROID_RUN']}) · [Windows CI](https://github.com/{os.environ['GH_REPO']}/actions/runs/{os.environ['WINDOWS_RUN']})
           Исходный коммит: {os.environ['SOURCE_SHA']}
           '''.replace('\n          ', '\n'))
-          with open(os.environ['GITHUB_ENV'], 'a') as f:
-              f.write(f'RELEASE_TAG=v{version}\nRELEASE_TITLE=Quiet VPN {version} — Android\n')
+          with open(os.environ['GITHUB_ENV'], 'a') as f: f.write(f'RELEASE_TAG=v{version}\n')
           PY
       - name: Publish immutable versioned release
+        if: steps.builds.outputs.ready == 'true'
         run: |
           gh api "repos/$GH_REPO/releases?per_page=100" > releases.json
           if python3 - <<'PY'
           import json, os, sys
-          releases = json.load(open('releases.json'))
-          sys.exit(0 if any(r['tag_name'] == os.environ['RELEASE_TAG'] for r in releases) else 1)
+          sys.exit(0 if any(r['tag_name'] == os.environ['RELEASE_TAG'] for r in json.load(open('releases.json'))) else 1)
           PY
           then
             echo 'Release already exists; leaving it unchanged.'
           else
-            gh release create "$RELEASE_TAG" release/* --target "$SOURCE_SHA" --title "$RELEASE_TITLE" --notes-file notes.md
+            gh release create "$RELEASE_TAG" release/* --target "$SOURCE_SHA" --title "Quiet VPN $RELEASE_TAG — Android и Windows" --notes-file notes.md
           fi
