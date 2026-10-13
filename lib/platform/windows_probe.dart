@@ -69,7 +69,24 @@ class WindowsProbe {
     client.connectionFactory = (uri, _, _) async {
       if (token != _generation) throw const SocketException('Cancelled');
       final target = await _resolve(uri.host, local);
-      return Socket.startConnect(target, uri.port, sourceAddress: local);
+      final task = await Socket.startConnect(target, uri.port, sourceAddress: local);
+      Socket? current;
+      final secure = task.socket.then<Socket>((socket) async {
+        current = socket;
+        try {
+          // A custom HttpClient factory must perform TLS itself. Preserve the
+          // original DNS name for SNI and certificate validation after binding.
+          final tls = await SecureSocket.secure(socket, host: uri.host)
+              .timeout(const Duration(seconds: 8));
+          current = tls;
+          if (token != _generation) {
+            tls.destroy();
+            throw const SocketException('Cancelled');
+          }
+          return tls;
+        } catch (_) { socket.destroy(); rethrow; }
+      });
+      return ConnectionTask.fromSocket(secure, () { task.cancel(); current?.destroy(); });
     };
     final clock = Stopwatch()..start();
     try {
