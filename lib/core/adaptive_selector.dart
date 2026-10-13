@@ -55,7 +55,7 @@ class AdaptiveSelector {
       if (age.isNegative) return 0;
       if (entry['outcome'] == 'verified' && age < const Duration(hours: 24)) return 1;
       if ((entry['outcome'] == 'unconfirmed' || entry['outcome'] == 'slow_or_unstable') &&
-          age < const Duration(minutes: 10)) return -1;
+          age < const Duration(minutes: 10)) { return -1; }
       return 0;
     }
     return 0;
