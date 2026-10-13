@@ -4,6 +4,8 @@ import 'package:path_provider/path_provider.dart';
 import 'core/server_monitor.dart';
 import 'data/profile_store.dart';
 import 'platform/android_engine.dart';
+import 'platform/windows_engine.dart';
+import 'package:window_manager/window_manager.dart';
 import 'ui/home_page.dart';
 import 'viewmodels/vpn_view_model.dart';
 
@@ -15,7 +17,11 @@ Future<void> main() async {
     final file = File('${support.path}/$name');
     if (await file.exists()) await file.delete();
   }
-  final vm = VpnViewModel(AndroidEngine(), ProfileStore(), ServerMonitor());
+  if (Platform.isWindows) {
+    await windowManager.ensureInitialized();
+    await windowManager.setPreventClose(true);
+  }
+  final vm = VpnViewModel(Platform.isWindows ? WindowsEngine() : AndroidEngine(), ProfileStore(), ServerMonitor());
   runApp(MaterialApp(debugShowCheckedModeBanner: false, title: 'Quiet VPN',
     theme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF176B61))),
     home: HomePage(vm)));

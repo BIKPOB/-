@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 import '../core/models.dart';
 import '../core/profile_policy.dart';
+import 'windows_catalog_cache.dart';
 
 class PublicCatalogResult {
   const PublicCatalogResult(this.servers, this.bundled, this.skipped, {this.status = ''});
@@ -93,7 +94,10 @@ class PublicCatalog {
           }
           final text = utf8.decode(bytes);
           final parsed = parse(text, sourceName: name);
-          try { await _cache.invokeMethod<void>('save', {'source': name, 'text': text}); } catch (_) { }
+          try {
+            if (Platform.isWindows) { await WindowsCatalogCache.save(name, text); }
+            else { await _cache.invokeMethod<void>('save', {'source': name, 'text': text}); }
+          } catch (_) { }
           return PublicCatalogResult(parsed.servers, false, parsed.skipped, status: '$name: обновлено');
         })().timeout(const Duration(seconds: 12));
       } catch (_) {
@@ -101,7 +105,8 @@ class PublicCatalog {
       } finally { client.close(force: true); }
     }
     try {
-      final snapshots = await _cache.invokeListMethod<dynamic>('read', {'source': name}) ?? [];
+      final snapshots = Platform.isWindows ? await WindowsCatalogCache.read(name)
+        : await _cache.invokeListMethod<dynamic>('read', {'source': name}) ?? [];
       for (final snapshot in snapshots) {
         try {
           final text = snapshot['text'] as String;

@@ -29,7 +29,7 @@ class NetworkContext {
     wifiBand == null ? 0 : wifiBand! / 6,
     radio == 20 ? 1 : radio == 13 ? .7 : radio == null ? 0 : .3,
     mobileSignal == null ? 0 : (mobileSignal! / 4).clamp(0, 1).toDouble()];
-  String get label => ambiguous ? 'Базовая сеть VPN не определена однозначно' : '${type == 'wifi' ? 'Wi-Fi' : type == 'mobile' ? 'Мобильная сеть' : type == 'offline' ? 'Нет сети' : 'Другая сеть'}'
+  String get label => ambiguous ? 'Базовая сеть VPN не определена однозначно' : '${type == 'wifi' ? 'Wi-Fi' : type == 'mobile' ? 'Мобильная сеть' : type == 'offline' ? 'Нет сети' : type == 'ethernet' ? 'Ethernet' : 'Другая сеть'}'
     '${type == 'wifi' && extended ? ' · ${wifiBand == null ? 'диапазон недоступен' : '${wifiBand == 2 ? '2,4' : wifiBand} ГГц'}' : ''}'
     '${type == 'mobile' && extended ? ' · $radioLabel${phoneGranted ? '' : ' (нет разрешения)'}' : ''}'
     '${signal == null ? '' : ' · сигнал $signal'}${metered == true ? ' · лимитный трафик' : ''}${roaming == true ? ' · роуминг' : ''}';

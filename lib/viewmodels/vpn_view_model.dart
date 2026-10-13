@@ -15,6 +15,7 @@ import '../data/public_catalog.dart';
 import '../core/adaptive_selector.dart';
 import '../core/network_context.dart';
 import '../platform/vpn_engine.dart';
+import '../platform/desktop_capabilities.dart';
 
 class VpnViewModel extends ChangeNotifier {
   VpnViewModel(this.engine, this.store, this.monitor, {
@@ -54,7 +55,7 @@ class VpnViewModel extends ChangeNotifier {
     try {
       final context = await _network();
       // Wi-Fi signal and frequency use a normal manifest permission. No location is collected.
-      if (context.type == 'mobile') await Permission.phone.request();
+      if (context.type == 'mobile' && Platform.isAndroid) await Permission.phone.request();
       extendedNetwork = true;
       networkContext = await _network();
     } finally { requestingNetworkPermission = false; _notify(); }
@@ -75,6 +76,7 @@ class VpnViewModel extends ChangeNotifier {
 
   Future<NetworkContext> _network() async {
     if (_networkReader != null) return NetworkContext(type: await _networkReader());
+    if (engine is DesktopCapabilities) return (engine as DesktopCapabilities).readNetwork();
     try {
       final data = await _networkChannel.invokeMapMethod<dynamic, dynamic>('networkContext', {'extended': extendedNetwork});
       return NetworkContext.fromMap(data ?? {});
@@ -159,8 +161,7 @@ class VpnViewModel extends ChangeNotifier {
           for (var round = 0; round < 2; round++) {
             autoStatus = 'Сравнение $attempt/${ordered.length} · ${server.protocol} · замер ${round + 2}/3'; _notify();
             try {
-              final result = await const MethodChannel('quietvpn/xray-state')
-                .invokeMapMethod<String, dynamic>('tunnelProbe').timeout(const Duration(seconds: 30));
+              final result = await _probeTunnel();
               if (cancelled()) return;
               final current = await _network();
               if (!context.sameConnection(current)) {
@@ -267,7 +268,7 @@ class VpnViewModel extends ChangeNotifier {
       _imports = await store.load();
       try { _selector = AdaptiveSelector.decode(await store.loadSelector()); } catch (_) { }
       await engine.initialize(); ready = true;
-    } catch (_) { message = 'Не удалось инициализировать VPN или защищённое хранилище'; state = ConnectionState.error; }
+    } catch (_) { message = 'Не удалось инициализировать VPN или защищённое хранилище. На Windows проверьте установку и запуск от администратора.'; state = ConnectionState.error; }
     if (servers.isNotEmpty) selectedId = servers.first.id;
     _scheduleProbe(immediate: true); _notify();
   }
@@ -377,7 +378,7 @@ class VpnViewModel extends ChangeNotifier {
         _connectTimeout?.cancel(); _connectTimeout = null;
         _nativeConnected = true;
         _nativeNeedsStop = true;
-        if (activeServer?.protocol == 'vless' || activeServer?.protocol == 'shadowsocks') {
+        if (engine is DesktopCapabilities || activeServer?.protocol == 'vless' || activeServer?.protocol == 'shadowsocks') {
           connectionVerified = event.quality; measuredBytesPerSecond = event.bytesPerSecond;
           state = ConnectionState.connected; message = event.message ?? 'Xray: ответ через сервер получен';
           _scheduleTraffic(); _notify();
@@ -412,12 +413,15 @@ class VpnViewModel extends ChangeNotifier {
     }
   }
 
+  Future<Map<String, dynamic>?> _probeTunnel() => engine is DesktopCapabilities
+    ? (engine as DesktopCapabilities).probeTunnel().timeout(const Duration(seconds: 35))
+    : const MethodChannel('quietvpn/xray-state').invokeMapMethod<String, dynamic>('tunnelProbe').timeout(const Duration(seconds: 30));
+
   Future<void> _verifyInternet() async {
     _verifying = true;
     final epoch = _connectionEpoch;
     try {
-      final result = await const MethodChannel('quietvpn/xray-state')
-        .invokeMapMethod<String, dynamic>('tunnelProbe').timeout(const Duration(seconds: 30));
+      final result = await _probeTunnel();
       if ((result?['delay'] as num? ?? -1) < 0) throw const HttpException('System VPN check failed');
       if (!_disposed && epoch == _connectionEpoch && _nativeNeedsStop) {
         _connectTimeout?.cancel(); _connectTimeout = null; state = ConnectionState.connected;

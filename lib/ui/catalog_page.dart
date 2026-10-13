@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import '../core/profile_policy.dart';
 import 'public_catalog_page.dart';
 import '../platform/config_browser.dart';
+import 'windows_browser_page.dart';
 import '../viewmodels/vpn_view_model.dart';
 
 const protocols = {'wireguard':'WireGuard', 'vless':'VLESS', 'shadowsocks':'Shadowsocks'};
@@ -67,7 +68,9 @@ class _AddServerPageState extends State<AddServerPage> {
         final uri=Uri.tryParse(url);
         if(uri==null||uri.scheme!='https'||uri.host.isEmpty||uri.userInfo.isNotEmpty) throw const FormatException('Введите HTTPS-адрес сайта выдачи конфигураций');
       }
-      final text=await ConfigBrowser.open(vpnbook?'vpnbook':'custom',url:vpnbook?null:url);
+      final text=Platform.isWindows
+        ? await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => WindowsBrowserPage(vpnbook ? 'https://www.vpnbook.com/' : url)))
+        : await ConfigBrowser.open(vpnbook?'vpnbook':'custom',url:vpnbook?null:url);
       if(text!=null&&mounted) await receive(text);
     } catch(e) {if(mounted)setState(()=>error=e is FormatException?e.message:'Не удалось открыть сайт');}
   }

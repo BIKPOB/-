@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:window_manager/window_manager.dart';
+import '../platform/desktop_capabilities.dart';
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 import '../core/models.dart';
@@ -13,10 +16,22 @@ class HomePage extends StatefulWidget {
   final VpnViewModel vm;
   @override State<HomePage> createState() => _HomePageState();
 }
-class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver, WindowListener {
+  bool _closing = false;
+  @override void onWindowClose() async {
+    if (_closing) return;
+    _closing = true;
+    try {
+      await vm.cancelAutoSelection();
+      while (vm.busy || vm.autoSelecting) { await Future<void>.delayed(const Duration(milliseconds: 200)); }
+      if (vm.canDisconnect) await vm.disconnect();
+      if (!vm.canDisconnect) await windowManager.destroy();
+    } finally { _closing = false; }
+  }
   VpnViewModel get vm => widget.vm;
-  @override void initState() { super.initState(); WidgetsBinding.instance.addObserver(this); unawaited(vm.initialize()); }
+  @override void initState() { super.initState(); if (vm.engine is DesktopCapabilities) windowManager.addListener(this); WidgetsBinding.instance.addObserver(this); unawaited(vm.initialize()); }
   @override void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (Platform.isWindows) return;
     // Notification shade and permission dialogs remove focus without hiding the app.
     // Ignore inactive, including the transition back from paused to resumed.
     switch (state) {
@@ -30,10 +45,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         break;
     }
   }
-  @override void dispose() { WidgetsBinding.instance.removeObserver(this); vm.dispose(); super.dispose(); }
+  @override void dispose() { WidgetsBinding.instance.removeObserver(this); if (vm.engine is DesktopCapabilities) windowManager.removeListener(this); vm.dispose(); super.dispose(); }
   void _add() => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => CatalogPage(vm)));
   Future<void> _diagnostics() async {
-    final native = await const MethodChannel('quietvpn/diagnostics').invokeMethod<String>('report') ?? '';
+    final native = vm.engine is DesktopCapabilities ? await (vm.engine as DesktopCapabilities).diagnostics()
+      : await const MethodChannel('quietvpn/diagnostics').invokeMethod<String>('report') ?? '';
     final report = '$native\nПротокол: ${vm.activeServer?.protocol ?? vm.selected?.protocol ?? '—'}\n'
       'Состояние: ${vm.state.name}\nЭтап: ${vm.connectionStage ?? '—'}\n${vm.message ?? ''}\n'
       'Интернет и качество подтверждены: ${vm.connectionVerified}\n'
@@ -48,7 +64,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _deepSearch() async {
     final deep = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
       title: const Text('Режим ИИ-подбора'),
-      content: const Text('Быстрый режим оставит первый профиль, прошедший проверку системного VPN, DNS, HTTPS и скорости. Недавно работавшие профили проверяются первыми, недавно неудачные — позже. До 12 кандидатов; при таймаутах ожидание всё ещё может быть долгим.\n\nГлубокое сравнение изучит текущую сеть и сравнит до 12 VPN-профилей: DNS, HTTPS и до трёх загрузок по 256 КиБ на каждый. Затем повторно подключит лучший прошедший проверку вариант. Это может занять несколько минут, а при таймаутах — значительно дольше и около 12 МиБ тестовых данных плюс служебный трафик.\n\nДля мобильной сети Android запросит доступ к состоянию телефона: он нужен для типа связи и уровня сигнала. Для Wi-Fi используются сигнал и диапазон. Геолокация, звонки и содержимое трафика не собираются. Данные обучения остаются на телефоне. При отказе от разрешения часть параметров будет недоступна.'),
+      content: const Text('Быстрый режим оставит первый профиль, прошедший проверку системного VPN, DNS, HTTPS и скорости. Недавно работавшие профили проверяются первыми, недавно неудачные — позже. До 12 кандидатов; при таймаутах ожидание всё ещё может быть долгим.\n\nГлубокое сравнение изучит текущую сеть и сравнит до 12 VPN-профилей: DNS, HTTPS и до трёх загрузок по 256 КиБ на каждый. Затем повторно подключит лучший прошедший проверку вариант. Это может занять несколько минут, а при таймаутах — значительно дольше и около 12 МиБ тестовых данных плюс служебный трафик.\n\nНа Windows VPN запускается с правами администратора; сбор параметров сети использует системные API. На Android для мобильной сети приложение запросит доступ к состоянию телефона: он нужен для типа связи и уровня сигнала. Для Wi-Fi используются сигнал и диапазон. Геолокация, звонки и содержимое трафика не собираются. Данные обучения остаются на телефоне. При отказе от разрешения часть параметров будет недоступна.'),
       actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Отмена')),
         TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Глубокое сравнение')),
         FilledButton(onPressed: () => Navigator.pop(c, false), child: const Text('Быстро подключиться'))]));
@@ -94,7 +110,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           : () async { if (vm.autoSelecting) { await vm.cancelAutoSelection(); } else { await _deepSearch(); } },
           icon: Icon(vm.autoSelecting ? Icons.stop : Icons.auto_awesome),
           label: Text(vm.autoSelecting ? 'Остановить подбор' : 'ИИ-подбор')),
-        OutlinedButton.icon(onPressed: vm.autoSelecting || vm.busy ? null : () =>
+        if (!Platform.isWindows) OutlinedButton.icon(onPressed: vm.autoSelecting || vm.busy ? null : () =>
           Navigator.push(context, MaterialPageRoute<void>(builder: (_) => AppRoutingPage(vpnActive: vm.canDisconnect))),
           icon: const Icon(Icons.call_split), label: const Text('Приложения в обход VPN')),
         const Text('Быстрый режим оставляет первый проверенный VPN. Глубокий сравнивает скорость нескольких вариантов. Недавние результаты учитываются для похожих параметров сети. Во время подбора оставьте приложение открытым.'),

@@ -1,0 +1,83 @@
+name: Build Windows installer
+on:
+  push:
+    paths: ['assets/**', 'lib/**', 'test/**', 'tools/**', 'platform_templates/**', 'pubspec*', '.github/workflows/windows.yml', 'docs/windows*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.32.8'
+          channel: stable
+          cache: true
+      - name: Generate Windows runner
+        run: python tools/bootstrap.py --platforms windows
+      - name: Analyze and test Flutter
+        run: |
+          flutter analyze
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          flutter test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/checkout@v4
+        with:
+          repository: XTLS/Xray-core
+          ref: c77a4d0e4932a53f3eeafafdfef877b56fd660ad
+          path: xray-source
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: xray-source/go.mod
+          cache-dependency-path: xray-source/go.sum
+      - name: Build pinned Xray from source
+        working-directory: xray-source
+        run: |
+          $env:CGO_ENABLED='0'
+          go build -trimpath -ldflags='-s -w' -o xray.exe ./main
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build Windows app
+        run: |
+          flutter build windows --release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Package verified engines
+        run: ./tools/windows/package.ps1
+      - name: Test Windows TUN and service lifecycle
+        run: ./tools/windows/smoke.ps1
+      - name: Build installer
+        run: |
+          $iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
+          if (!$iscc) { $isccPath='C:\Program Files (x86)\Inno Setup 6\ISCC.exe' } else { $isccPath=$iscc.Source }
+          New-Item -ItemType Directory -Force dist-windows | Out-Null
+          & $isccPath /O"$pwd/dist-windows" platform_templates/windows/installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item pubspec.lock dist-windows/DEPENDENCIES.lock
+          git rev-parse HEAD | Set-Content dist-windows/SOURCE_COMMIT.txt -Encoding ascii
+          Get-ChildItem dist-windows -Filter *.exe | ForEach-Object {"$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"} | Set-Content dist-windows/SHA256SUMS-Windows.txt -Encoding ascii
+      - name: Test installer extraction
+        run: |
+          $setup=Get-ChildItem dist-windows -Filter *.exe | Select-Object -First 1
+          $target=Join-Path $env:RUNNER_TEMP 'QuietVPN-install-test'
+          $p=Start-Process $setup.FullName -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/DIR="'+$target+'"')) -Wait -PassThru
+          if($p.ExitCode -ne 0 -or !(Test-Path "$target/quiet_vpn.exe") -or !(Test-Path "$target/engines/xray.exe")){throw 'Installer test failed'}
+          $p=Start-Process "$target/unins000.exe" -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -Wait -PassThru
+          if($p.ExitCode -ne 0){throw 'Uninstaller test failed'}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: quiet-vpn-windows-installer
+          path: dist-windows/
+          if-no-files-found: error
+          retention-days: 30

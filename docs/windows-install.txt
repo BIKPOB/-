@@ -1,8 +1,27 @@
-Quiet VPN — статус Windows
+Quiet VPN 0.9.0 — Windows 10/11 x64
 
-В версии 0.8.x Windows не поддерживается. Готового EXE нет.
-Инструкции тестовой версии OpenVPN 0.3.0 устарели: тот движок удалён.
-Текущий клиент использует AndroidEngine и Android VPN API.
+Download quiet-vpn-0.9.0-windows-x64-setup.exe from GitHub Releases.
+Run the installer and approve the administrator prompt. Quiet VPN also needs
+administrator rights to create VPN adapters and manage its own tunnel service.
+The Quiet VPN installer is unsigned: no publisher signing certificate is configured.
 
-Готовые Android APK: https://github.com/BIKPOB/-/releases
-Выберите файл .apk в Assets. Source code — исходники, а не установщик.
+Included: VLESS/Shadowsocks via Xray; WireGuard/AmneziaWG via AmneziaWG;
+profile/file import, public catalog, quick and deep AI selection, local learning,
+network type, adapter traffic counters, DNS/HTTPS/download checks, diagnostics,
+and a WebView2 browser. Per-application bypass is intentionally absent on Windows.
+Wi-Fi signal/band and cellular operator data may be unavailable on Windows.
+
+If the embedded browser is unavailable, use the optional WebView2 installer task
+or use the external browser, then import a key or .conf file. Page-key capture and
+clipboard import are supported. Downloaded .conf files are imported with the file picker.
+
+Closing the application normally disconnects its VPN. On forced termination the
+AmneziaWG service may remain active; restart Quiet VPN to clean up that service,
+or uninstall the application. There is no claim of a persistent system-wide kill switch.
+The UI can be minimized during selection. Network changes require a new selection.
+
+Tests in CI check code, configuration, Windows adapters/services and installer packaging.
+They do not prove connectivity to public servers on a particular ISP.
+Do not run a second VPN at the same time during initial testing.
+
+Downloads: https://github.com/BIKPOB/-/releases

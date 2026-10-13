@@ -55,10 +55,10 @@ class ServerMonitor {
     return value?.ceil();
   }
   Future<int?> _icmp(String host, int generation) async {
-    if (!Platform.isAndroid || !RegExp(r'^[a-zA-Z0-9:][a-zA-Z0-9.:%_-]*$').hasMatch(host)) return null;
+    if (!(Platform.isAndroid || Platform.isWindows) || !RegExp(r'^[a-zA-Z0-9:][a-zA-Z0-9.:%_-]*$').hasMatch(host)) return null;
     Process? process;
     try {
-      process = await Process.start('/system/bin/ping', ['-n', '-c', '1', '-W', '2', '-w', '3', host]);
+      process = await Process.start(Platform.isWindows ? '${Platform.environment['SystemRoot'] ?? r'C:\Windows'}\\System32\\PING.EXE' : '/system/bin/ping', Platform.isWindows ? ['-n', '1', '-w', '2000', host] : ['-n', '-c', '1', '-W', '2', '-w', '3', host]);
       _processes.add(process);
       if (generation != _generation) { process.kill(ProcessSignal.sigkill); return null; }
       final output = process.stdout.transform(utf8.decoder).join();

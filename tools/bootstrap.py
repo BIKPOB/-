@@ -66,6 +66,27 @@ if 'windows' in args.platforms:
     text = runner_cmake.read_text()
     text += "\ntarget_link_options(${BINARY_NAME} PRIVATE \"/MANIFESTUAC:level='requireAdministrator' uiAccess='false'\")\n"
     runner_cmake.write_text(text)
+    runner_main = ROOT/'windows/runner/main.cpp'
+    text = runner_main.read_text()
+    marker = '  // Attach to console'
+    # A single UI owns the one fixed tunnel name. Child Xray dies with the UI;
+    # normal close first disconnects via the Flutter WindowListener.
+    setup = r'''  HANDLE instance = CreateMutexW(nullptr, TRUE, L"Local\\QuietVPN.Desktop");
+  if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    MessageBoxW(nullptr, L"Quiet VPN is already running.", L"Quiet VPN", MB_OK);
+    return EXIT_SUCCESS;
+  }
+  if (!instance) return EXIT_FAILURE;
+  HANDLE job = CreateJobObjectW(nullptr, nullptr);
+  JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
+  limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+  if (!job || !SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+      &limits, sizeof(limits)) || !AssignProcessToJobObject(job, GetCurrentProcess())) {
+    return EXIT_FAILURE;
+  }
+'''
+    if marker not in text: raise RuntimeError('Windows runner entrypoint changed')
+    runner_main.write_text(text.replace(marker, setup + marker, 1))
 default_test = ROOT/'test/widget_test.dart'
 if default_test.exists():
     default_test.unlink()
