@@ -29,4 +29,10 @@ Filename: "{app}\engines\vc_redist.x64.exe"; Parameters: "/install /quiet /nores
 Filename: "{app}\engines\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; Tasks: webview; Flags: waituntilterminated
 Filename: "{app}\quiet_vpn.exe"; Description: "Запустить Quiet VPN"; Flags: nowait postinstall skipifsilent
 [UninstallRun]
-Filename: "{app}\engines\amneziawg.exe"; Parameters: "/uninstalltunnelservice QuietVPN-AWG"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveOwnedTunnel"
+Filename: "{app}\engines\amneziawg.exe"; Parameters: "/uninstalltunnelservice QuietVPN-AWG"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveOwnedTunnel"; Check: HasOwnedTunnel
+
+[Code]
+function HasOwnedTunnel: Boolean;
+begin
+  Result := RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\AmneziaWGTunnel$QuietVPN-AWG');
+end;

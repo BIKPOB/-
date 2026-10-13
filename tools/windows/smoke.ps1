@@ -54,14 +54,23 @@ AllowedIPs = 0.0.0.0/0, ::/0
 PersistentKeepalive = 25
 "@ | Set-Content $config -Encoding ascii
 try {
- & "$engines/amneziawg.exe" /installtunnelservice $config
- if($LASTEXITCODE -ne 0){throw 'AWG service installation failed'}
+ $install=Start-Process "$engines/amneziawg.exe" -ArgumentList @('/installtunnelservice', ('"'+$config+'"')) -Wait -PassThru
+ if($install.ExitCode -ne 0){throw 'AWG service installation failed'}
  Start-Sleep -Seconds 3
  $service=Get-Service -Name 'AmneziaWGTunnel$QuietVPN-AWG'
- if($service.Status -ne 'Running'){throw 'AWG service not running'}
+ try { if($service.Status -ne 'Running'){throw 'AWG service not running'} } finally { $service.Dispose() }
 } finally {
- & "$engines/amneziawg.exe" /uninstalltunnelservice QuietVPN-AWG
+ $uninstall=Start-Process "$engines/amneziawg.exe" -ArgumentList @('/uninstalltunnelservice','QuietVPN-AWG') -Wait -PassThru
+ if($uninstall.ExitCode -ne 0){throw 'AWG service removal failed'}
  Remove-Item $config -ErrorAction SilentlyContinue
 }
-if(Get-Service -Name 'AmneziaWGTunnel$QuietVPN-AWG' -ErrorAction SilentlyContinue){throw 'Owned AWG service was not removed'}
+$removed=$false
+for($i=0;$i -lt 40;$i++) {
+ & "$env:SystemRoot/System32/sc.exe" query 'AmneziaWGTunnel$QuietVPN-AWG' | Out-Null
+ if($LASTEXITCODE -eq 1060){$removed=$true;break}
+ Start-Sleep -Milliseconds 250
+}
+if(!$removed){throw 'Owned AWG service was not removed'}
+# sc.exe returns 1060 for the expected absent service; do not propagate it as script failure.
+$global:LASTEXITCODE=0
 'Windows TUN, bound DNS/HTTPS, and AWG lifecycle passed.'

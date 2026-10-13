@@ -66,13 +66,20 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities {
     await _system('cleanup');
   }
   Future<void> _stopAwg() async {
-    final r = await _run(_file('amneziawg.exe'), ['/uninstalltunnelservice', 'QuietVPN-AWG']);
-    if (r.exitCode != 0) {
-      final systemRoot = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    final systemRoot = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+    final existing = await _run('$systemRoot\\System32\\sc.exe', ['query', r'AmneziaWGTunnel$QuietVPN-AWG']);
+    if (existing.exitCode == 1060) return;
+    await _run(_file('amneziawg.exe'), ['/uninstalltunnelservice', 'QuietVPN-AWG']);
+    // Service deletion is asynchronous even when the uninstall process succeeds.
+    // Wait until SCM confirms absence before reusing the fixed tunnel name.
+    for (var i = 0; i < 30; i++) {
       final check = await _run('$systemRoot\\System32\\sc.exe', ['query', r'AmneziaWGTunnel$QuietVPN-AWG']);
-      if (check.exitCode != 1060) throw StateError('Отключение службы WireGuard не подтверждено');
+      if (check.exitCode == 1060) return;
+      await Future<void>.delayed(const Duration(milliseconds: 250));
     }
+    throw StateError('Отключение службы WireGuard не подтверждено');
   }
+
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
     if (_active || _stopping) throw StateError('Сначала отключите VPN');
     final profile = ProfilePolicy.parse(server.profile);
