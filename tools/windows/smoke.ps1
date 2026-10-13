@@ -28,7 +28,7 @@ try {
  }
  if(!$ready){throw 'Xray TUN interface/routes not ready'}
  $env:QUIET_TUNNEL_ADDRESS=$info.address
- flutter test test/windows_live_probe_test.dart
+ dart run tools/windows/live_probe.dart
  if($LASTEXITCODE -ne 0){throw 'Bound DNS/HTTPS probe test failed'}
 } finally {
  if($p -and !$p.HasExited){Stop-Process -Id $p.Id -Force; $p.WaitForExit()}

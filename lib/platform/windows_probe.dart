@@ -77,13 +77,13 @@ class WindowsProbe {
         final request = await client.getUrl(Uri.parse('https://www.gstatic.com/generate_204'));
         request.followRedirects = false;
         final response = await request.close();
-        if (response.statusCode != 204) throw const HttpException('HTTPS status');
+        if (response.statusCode != 204) throw HttpException('HTTPS status ${response.statusCode}');
         await response.drain<void>();
         final download = Stopwatch()..start();
         final data = await client.getUrl(Uri.parse('https://speed.cloudflare.com/__down?bytes=262144'));
         data.followRedirects = false; data.headers.set('Accept-Encoding', 'identity');
         final stream = await data.close();
-        if (stream.statusCode != 200) throw const HttpException('Download status');
+        if (stream.statusCode != 200) throw HttpException('Download status ${stream.statusCode}');
         var bytes = 0;
         await for (final chunk in stream) {
           if (token != _generation) throw const SocketException('Cancelled');
@@ -96,7 +96,7 @@ class WindowsProbe {
           'bytesPerSecond': speed, 'detail': 'Windows VPN: DNS, HTTPS и 256 КиБ подтверждены · ${speed ~/ 1024} КиБ/с'};
       })().timeout(const Duration(seconds: 27));
     } catch (e) {
-      return {'delay': -1, 'quality': false, 'detail': 'Проверка через интерфейс VPN: ${e.runtimeType}'};
+      return {'delay': -1, 'quality': false, 'detail': 'Проверка через интерфейс VPN: ${e is HttpException ? e.message : e.runtimeType}'};
     } finally { client.close(force: true); if (identical(_client, client)) _client = null; }
   }
 }
