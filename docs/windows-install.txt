@@ -1,20 +1,8 @@
-Quiet VPN 0.3.0 — Windows 10/11 x64 test build
+Quiet VPN — статус Windows
 
-1. Extract the entire ZIP to a folder. Keep DLL files and the data folder beside quiet_vpn.exe.
-2. In the app, open "База и протоколы" and press "Скачать и установить" for OpenVPN.
-   The official MSI is downloaded to an app cache, its publisher signature is verified,
-   then Windows Installer installs the engine and driver. An Internet connection is required.
-   Alternatively, install official OpenVPN Community for Windows x64:
-   https://openvpn.net/community/
-   OpenVPN Connect is a different client and is not the required runtime.
-   The included install-openvpn.ps1 accepts a downloaded MSI and verifies its OpenVPN signature.
-3. Start quiet_vpn.exe and approve the administrator prompt.
-4. Wait for the VPN Gate catalog, select a server and connect.
+В версии 0.8.x Windows не поддерживается. Готового EXE нет.
+Инструкции тестовой версии OpenVPN 0.3.0 устарели: тот движок удалён.
+Текущий клиент использует AndroidEngine и Android VPN API.
 
-The application verifies the OpenVPN EXE publisher signature before launching it.
-The Quiet VPN EXE itself is unsigned; no production signing certificate is configured.
-The runtime and driver are separate prerequisites, not included in this ZIP.
-A real VPN connection, routing and leak protection still require device testing.
-Public servers can be unavailable. This build does not implement a full kill switch.
-
-Source: https://github.com/BIKPOB/-
+Готовые Android APK: https://github.com/BIKPOB/-/releases
+Выберите файл .apk в Assets. Source code — исходники, а не установщик.

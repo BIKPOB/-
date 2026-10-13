@@ -1,0 +1,84 @@
+name: Publish verified Android release
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-release.yml']
+  workflow_run:
+    workflows: ['Build Android APK']
+    types: [completed]
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: publish-verified-android
+  cancel-in-progress: false
+jobs:
+  release:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN: ${{ github.event.workflow_run.id || '38397294650' }}
+    steps:
+      - name: Verify build identity and download artifact
+        run: |
+          gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
+          python3 - <<'PY'
+          import json, os, re
+          run = json.load(open('run.json'))
+          assert run['conclusion'] == 'success' and run['name'] == 'Build Android APK'
+          assert run['event'] == 'push' and run['head_branch'] == 'main'
+          assert run['head_repository']['full_name'] == os.environ['GH_REPO']
+          sha = run['head_sha']
+          assert re.fullmatch('[0-9a-f]{40}', sha)
+          with open(os.environ['GITHUB_ENV'], 'a') as f: f.write(f'SOURCE_SHA={sha}\n')
+          PY
+          gh run download "$BUILD_RUN" -n quiet-vpn-android-apk -D payload
+          gh api "repos/$GH_REPO/contents/pubspec.yaml?ref=$SOURCE_SHA" --jq .content | base64 --decode > pubspec.yaml
+      - name: Verify checksum and stage user downloads
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, os, re, shutil
+          p = Path('payload')
+          assert (p/'SOURCE_COMMIT.txt').read_text().strip() == os.environ['SOURCE_SHA']
+          assert re.search(r'Infected files:\s*0\s*$', (p/'ANTIVIRUS_SCAN.txt').read_text(), re.M)
+          apk = p/'quiet-vpn-android.apk'
+          digest = hashlib.sha256(apk.read_bytes()).hexdigest()
+          assert digest == (p/'SHA256SUMS.txt').read_text().split()[0]
+          version = re.search(r'^version:\s*(\d+\.\d+\.\d+)\+\d+\s*$', Path('pubspec.yaml').read_text(), re.M).group(1)
+          out = Path('release'); out.mkdir()
+          name = f'quiet-vpn-{version}.apk'
+          shutil.copyfile(apk, out/name)
+          (out/'SHA256SUMS.txt').write_text(f'{digest}  {name}\n')
+          shutil.copyfile(p/'SOURCE_COMMIT.txt', out/'SOURCE_COMMIT.txt')
+          Path('notes.md').write_text(f'''## Скачать приложение
+          В разделе Assets выберите **{name}**. ZIP с исходниками устанавливать не нужно.
+
+          Android 8+, arm64-v8a / armeabi-v7a. Проверено в CI: Dart, Flutter-тесты, нативные Android-тесты, структура APK и антивирусное сканирование.
+
+          Windows EXE в этой версии отсутствует: текущие VPN-движки реализованы для Android.
+          Проверки CI не гарантируют доступность публичных VPN-серверов в вашей сети.
+
+          Сборка: https://github.com/{os.environ['GH_REPO']}/actions/runs/{os.environ['BUILD_RUN']}
+          Исходный коммит: {os.environ['SOURCE_SHA']}
+          '''.replace('\n          ', '\n'))
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write(f'RELEASE_TAG=v{version}\nRELEASE_TITLE=Quiet VPN {version} — Android\n')
+          PY
+      - name: Publish immutable versioned release
+        run: |
+          gh api "repos/$GH_REPO/releases?per_page=100" > releases.json
+          if python3 - <<'PY'
+          import json, os, sys
+          releases = json.load(open('releases.json'))
+          sys.exit(0 if any(r['tag_name'] == os.environ['RELEASE_TAG'] for r in releases) else 1)
+          PY
+          then
+            echo 'Release already exists; leaving it unchanged.'
+          else
+            gh release create "$RELEASE_TAG" release/* --target "$SOURCE_SHA" --title "$RELEASE_TITLE" --notes-file notes.md
+          fi

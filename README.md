@@ -1,4 +1,15 @@
-# Quiet VPN 0.7.0 — Android
+# Quiet VPN — Android
+
+## Скачать готовое приложение
+
+**[Скачать APK 0.8.3](https://github.com/BIKPOB/-/releases/download/v0.8.3/quiet-vpn-0.8.3.apk)** · **[Все версии и контрольные суммы](https://github.com/BIKPOB/-/releases)**
+
+На странице релиза раскройте **Assets** и скачайте файл `.apk`. Папки этого репозитория и архивы **Source code** — исходный код, их не нужно устанавливать на телефон.
+
+**Windows / EXE:** в актуальной версии не поддерживается. Текущий клиент использует Android VPN API; готового Windows-установщика нет. Старые инструкции OpenVPN 0.3.0 не относятся к версии 0.8.x.
+
+Успешные Android-сборки из `main` автоматически публикуются в Releases после тестов и проверки контрольной суммы. Результаты тестов доступны в [Actions](https://github.com/BIKPOB/-/actions).
+
 
 Flutter MVVM клиент для WireGuard, VLESS и Shadowsocks. Android 8+;
 APK для arm64-v8a и armeabi-v7a. OpenVPN, его нативная библиотека,
