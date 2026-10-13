@@ -80,7 +80,7 @@ object ProxyProbe {
                 tunnel["detail"] = "${if (numeric) "HTTPS по IP без DNS подтверждён" else "HTTPS через прокси подтверждён"}; ${tunnel["detail"]}"
                 return tunnel
             } catch (e: Exception) {
-                failures.add("$host: $stage (${e.javaClass.simpleName}, ${android.os.SystemClock.elapsedRealtime() - start} мс)")
+                failures.add("$host: $stage (${ProbeFailure.describe(e)}, ${android.os.SystemClock.elapsedRealtime() - start} мс)")
             } finally {
                 deadline.cancel(false)
                 try { socket.close() } catch (_: Exception) { }
@@ -91,3 +91,4 @@ object ProxyProbe {
     }
     fun cancel() { generation++; TunnelProbe.cancel(); try { pending?.close() } catch (_: Exception) { }; pending = null }
 }
+

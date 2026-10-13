@@ -46,15 +46,16 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Закрыть'))]));
   }
   Future<void> _deepSearch() async {
-    final proceed = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
-      title: const Text('Глубокий подбор'),
-      content: const Text('Приложение изучит текущую сеть и сравнит до 12 VPN-профилей: DNS, HTTPS и до трёх загрузок по 256 КиБ на каждый. Затем повторно подключит лучший прошедший проверку вариант. Это может занять несколько минут, а при таймаутах — значительно дольше и около 12 МиБ тестовых данных плюс служебный трафик.\n\nДля мобильной сети Android запросит доступ к состоянию телефона: он нужен для типа связи и уровня сигнала. Для Wi-Fi используются сигнал и диапазон. Геолокация, звонки и содержимое трафика не собираются. Данные обучения остаются на телефоне. При отказе от разрешения часть параметров будет недоступна.'),
-      actions: [TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Отмена')),
-        FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Изучить сеть и начать'))]));
-    if (proceed != true || !mounted) return;
+    final deep = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
+      title: const Text('Режим ИИ-подбора'),
+      content: const Text('Быстрый режим оставит первый профиль, прошедший проверку системного VPN, DNS, HTTPS и скорости. Недавно работавшие профили проверяются первыми, недавно неудачные — позже. До 12 кандидатов; при таймаутах ожидание всё ещё может быть долгим.\n\nГлубокое сравнение изучит текущую сеть и сравнит до 12 VPN-профилей: DNS, HTTPS и до трёх загрузок по 256 КиБ на каждый. Затем повторно подключит лучший прошедший проверку вариант. Это может занять несколько минут, а при таймаутах — значительно дольше и около 12 МиБ тестовых данных плюс служебный трафик.\n\nДля мобильной сети Android запросит доступ к состоянию телефона: он нужен для типа связи и уровня сигнала. Для Wi-Fi используются сигнал и диапазон. Геолокация, звонки и содержимое трафика не собираются. Данные обучения остаются на телефоне. При отказе от разрешения часть параметров будет недоступна.'),
+      actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Отмена')),
+        TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Глубокое сравнение')),
+        FilledButton(onPressed: () => Navigator.pop(c, false), child: const Text('Быстро подключиться'))]));
+    if (deep == null || !mounted) return;
     await vm.enableNetworkAnalysis();
     if (!mounted) return;
-    await vm.autoConnect(deep: true);
+    await vm.autoConnect(deep: deep);
   }
   Future<void> _learning() async {
     await showDialog<void>(context: context, builder: (c) => AlertDialog(
@@ -92,11 +93,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         OutlinedButton.icon(onPressed: !vm.ready || vm.busy && !vm.autoSelecting || vm.canDisconnect && !vm.autoSelecting ? null
           : () async { if (vm.autoSelecting) { await vm.cancelAutoSelection(); } else { await _deepSearch(); } },
           icon: Icon(vm.autoSelecting ? Icons.stop : Icons.auto_awesome),
-          label: Text(vm.autoSelecting ? 'Остановить подбор' : 'Глубокий ИИ-подбор')),
+          label: Text(vm.autoSelecting ? 'Остановить подбор' : 'ИИ-подбор')),
         OutlinedButton.icon(onPressed: vm.autoSelecting || vm.busy ? null : () =>
           Navigator.push(context, MaterialPageRoute<void>(builder: (_) => AppRoutingPage(vpnActive: vm.canDisconnect))),
           icon: const Icon(Icons.call_split), label: const Text('Приложения в обход VPN')),
-        const Text('Нейросеть учится на измерениях этой сети. Сравнивает WireGuard, VLESS и Shadowsocks по загрузке и повторяемости результатов. До 12 кандидатов. Во время подбора оставьте приложение открытым.'),
+        const Text('Быстрый режим оставляет первый проверенный VPN. Глубокий сравнивает скорость нескольких вариантов. Недавние результаты учитываются для похожих параметров сети. Во время подбора оставьте приложение открытым.'),
         if (vm.autoStatus != null) Text(vm.networkContext.label),
         if (vm.autoStatus != null) Text(vm.autoStatus!),
         if (vm.autoPlan.isNotEmpty) Text(vm.autoPlan),
@@ -125,3 +126,4 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     ]))));
   });
 }
+

@@ -66,9 +66,10 @@ object TunnelProbe {
                 } finally { deadline.cancel(false); request.disconnect(); if (pending === request) pending = null }
             }
         } catch (e: Exception) {
-            return mapOf("delay" to -1L, "detail" to "$phase: ${e.javaClass.simpleName}, $bytes байт")
+            return mapOf("delay" to -1L, "detail" to "$phase: ${ProbeFailure.describe(e)}, $bytes байт")
         }
         return mapOf("delay" to -1L, "detail" to "Системная проверка не завершена")
     }
     fun cancel() { generation++; pending?.disconnect(); pending = null }
 }
+

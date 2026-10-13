@@ -5,6 +5,26 @@ import 'package:quiet_vpn/core/network_context.dart';
 const server = VpnServer(id: 'test', name: 'test', country: '', countryCode: '', host: 'example.com',
   port: 443, transport: 'tcp', profile: 'secret-profile', source: 'test', protocol: 'vless');
 void main() {
+  test('retry preference is bounded, network-specific, persisted and does not train', () {
+    const wifi = NetworkContext(type: 'wifi');
+    const mobile = NetworkContext(type: 'mobile');
+    final model = AdaptiveSelector();
+    final now = DateTime.utc(2026, 10, 13);
+    model.record(server, wifi, 'verified', speed: 200000);
+    model.journal.last['time'] = now.toIso8601String();
+    expect(model.recentPriority(server, wifi, now: now), 1);
+    expect(model.recentPriority(server, mobile, now: now), 0);
+    expect(model.recentPriority(server, wifi, now: now.add(const Duration(days: 1))), 0);
+    expect(model.recentPriority(server, wifi, now: now.subtract(const Duration(seconds: 1))), 0);
+    final restored = AdaptiveSelector.decode(model.encode());
+    expect(restored.recentPriority(server, wifi, now: now), 1);
+    restored.record(server, wifi, 'unconfirmed');
+    restored.journal.last['time'] = now.toIso8601String();
+    expect(restored.recentPriority(server, wifi, now: now), -1);
+    expect(restored.recentPriority(server, wifi, now: now.add(const Duration(minutes: 10))), 0);
+    expect(restored.recentPriority(server, const NetworkContext(type: 'wifi', ambiguous: true), now: now), 0);
+    expect(restored.samples, 0);
+  });
   test('quality reward ranks measured fast outcomes over measured slow outcomes', () {
     final fast = AdaptiveSelector(), slow = AdaptiveSelector();
     for (var i = 0; i < 30; i++) {
@@ -56,3 +76,4 @@ void main() {
     expect(AdaptiveSelector.decode('broken').samples, 0);
   });
 }
+

@@ -41,6 +41,25 @@ class AdaptiveSelector {
     if (journal.length > 200) journal.removeAt(0);
   }
   String key(VpnServer s, String network) => sha256.convert(utf8.encode('$network|${s.protocol}|${s.profile}')).toString();
+  /// Retry order is separate from neural training: an inconclusive probe is not
+  /// a negative training label. Old results lose their scheduling preference.
+  int recentPriority(VpnServer server, NetworkContext context, {DateTime? now}) {
+    if (context.ambiguous) return 0;
+    final id = key(server, context.environmentKey);
+    final clock = now ?? DateTime.now().toUtc();
+    for (final entry in journal.reversed) {
+      if (entry['profile'] != id) continue;
+      final stamp = DateTime.tryParse(entry['time']?.toString() ?? '');
+      if (stamp == null) return 0;
+      final age = clock.difference(stamp);
+      if (age.isNegative) return 0;
+      if (entry['outcome'] == 'verified' && age < const Duration(hours: 24)) return 1;
+      if ((entry['outcome'] == 'unconfirmed' || entry['outcome'] == 'slow_or_unstable') &&
+          age < const Duration(minutes: 10)) return -1;
+      return 0;
+    }
+    return 0;
+  }
   List<double> features(VpnServer s, String network, int? latency, {NetworkContext? context}) {
     final h = history[key(s, context?.environmentKey ?? network)] ?? [0, 0];
     return [s.protocol == 'wireguard' ? 1 : 0, s.protocol == 'vless' ? 1 : 0,
@@ -104,3 +123,4 @@ class AdaptiveSelector {
     return model;
   }
 }
+

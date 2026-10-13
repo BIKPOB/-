@@ -47,7 +47,9 @@ object CrashDiagnostics {
                     }
             } catch (_: Exception) { text.append("История завершений недоступна.\n") }
         }
+        text.append("Последняя диагностика Xray (может относиться к предыдущей попытке; не описывает WireGuard):\n")
         text.append(XrayDiagnostics.report(context)).append('\n')
         return text.toString()
     }
 }
+

@@ -80,8 +80,8 @@ class VpnViewModel extends ChangeNotifier {
       return NetworkContext.fromMap(data ?? {});
     } catch (_) { return const NetworkContext(); }
   }
-  Future<void> cancelAutoSelection() async {
-    _autoEpoch++; _autoMonitor.cancel(); autoStatus = 'Подбор остановлен'; _notify();
+  Future<void> cancelAutoSelection({String reason = 'Подбор остановлен пользователем'}) async {
+    _autoEpoch++; _autoMonitor.cancel(); autoStatus = reason; _notify();
     if (!busy && _nativeNeedsStop) await disconnect();
   }
   Future<void> autoConnect({bool deep = false}) async {
@@ -101,12 +101,18 @@ class VpnViewModel extends ChangeNotifier {
       final catalog = await _catalogLoader();
       if (cancelled()) return;
       final pool = [..._imports, ...catalog.servers];
+      int rank(VpnServer a, VpnServer b, Map<String, HealthResult>? latency) {
+        final recent = _selector.recentPriority(b, context).compareTo(_selector.recentPriority(a, context));
+        if (recent != 0) return recent;
+        return _selector.score(b, network, latency?[b.id]?.milliseconds, context: context)
+          .compareTo(_selector.score(a, network, latency?[a.id]?.milliseconds, context: context));
+      }
       // A small diverse shortlist avoids launching hundreds of ping processes.
       final candidates = <VpnServer>[];
       final hosts = <String>{};
       for (final protocol in ['wireguard', 'vless', 'shadowsocks']) {
         final group = pool.where((s) => s.protocol == protocol).toList()
-          ..sort((a, b) => _selector.score(b, network, null, context: context).compareTo(_selector.score(a, network, null, context: context)));
+          ..sort((a, b) => rank(a, b, null));
         var count = 0;
         for (final server in group) {
           if (count >= 8) break;
@@ -116,11 +122,15 @@ class VpnViewModel extends ChangeNotifier {
       autoStatus = 'Сеть: ${context.label} · оценка ${candidates.length} адресов · опыт: ${_selector.samples}'; _notify();
       final latency = await _autoMonitor.sample(candidates);
       if (cancelled()) return;
-      candidates.sort((a, b) => _selector.score(b, network, latency[b.id]?.milliseconds, context: context)
-        .compareTo(_selector.score(a, network, latency[a.id]?.milliseconds, context: context)));
-      final ordered = AdaptiveSelector.shortlist(candidates, limit: deep ? 12 : 6);
+      candidates.sort((a, b) => rank(a, b, latency));
+      final ordered = AdaptiveSelector.shortlist(candidates, limit: 12);
+      // Preserve protocol diversity within each retry tier, but do not force a
+      // recent failure ahead of an untried or recently verified profile.
+      final tiered = [for (final tier in [1, 0, -1])
+        ...ordered.where((s) => _selector.recentPriority(s, context) == tier)];
+      ordered..clear()..addAll(tiered);
       final finalists = <({VpnServer server, double utility})>[];
-      autoPlan = 'План: ${ordered.map((s) => s.protocol).join(' → ')}';
+      autoPlan = '${deep ? 'Глубокий' : 'Быстрый'} подбор · план: ${ordered.map((s) => s.protocol).join(' → ')}';
       autoAttemptReports.add('База: ${catalog.status}\n'
         '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}\n$autoPlan');
       var attempt = 0;
@@ -129,7 +139,7 @@ class VpnViewModel extends ChangeNotifier {
         if (!context.sameConnection(await _network())) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
         if (cancelled()) return;
         attempt++;
-        autoStatus = 'ИИ-подбор: попытка $attempt/${ordered.length} · ${server.protocol} · проверка HTTPS'; _notify();
+        autoStatus = 'ИИ-подбор: попытка $attempt/${ordered.length} · ${server.protocol} · подключение и проверка'; _notify();
         await importProfile(server.profile, server.name, 'ИИ-подбор · ${server.source}', updateFilter: false);
         if (cancelled()) return;
         await connect(null);
@@ -277,7 +287,9 @@ class VpnViewModel extends ChangeNotifier {
   void setForeground(bool visible) {
     if (_disposed || _foreground == visible) return;
     _foreground = visible;
-    if (!visible && autoSelecting && !requestingNetworkPermission) unawaited(cancelAutoSelection());
+    if (!visible && autoSelecting && !requestingNetworkPermission) {
+      unawaited(cancelAutoSelection(reason: 'Подбор остановлен: приложение ушло в фон'));
+    }
     _scheduleTraffic();
     _probeEpoch++; monitor.cancel(); _poll?.cancel();
     if (visible) {
@@ -456,3 +468,4 @@ class VpnViewModel extends ChangeNotifier {
     super.dispose();
   }
 }
+

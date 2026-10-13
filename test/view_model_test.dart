@@ -15,9 +15,10 @@ const server = VpnServer(id: 'fixture', name: 'fixture', country: 'Test', countr
   protocol: 'vless', profile: 'vless://12345678-1234-1234-1234-123456789abc@8.8.8.8:443?security=none');
 
 class MemoryProfiles extends ProfileStore {
+  String? selector;
   @override Future<List<VpnServer>> load() async => [server];
-  @override Future<String?> loadSelector() async => null;
-  @override Future<void> saveSelector(String value) async {}
+  @override Future<String?> loadSelector() async => selector;
+  @override Future<void> saveSelector(String value) async { selector = value; }
   @override Future<void> save(List<VpnServer> servers) async {}
   @override Future<Credentials?> credentials(String id) async => null;
 }
@@ -66,8 +67,57 @@ class MeasuredEngine extends ControlledEngine {
     controller.add(EngineEvent(ConnectionState.connected, 'measured', true, currentSpeed));
   }
 }
+class RetryEngine extends ControlledEngine {
+  final chosen = <String>[];
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++; chosen.add(server.host);
+    controller.add(EngineEvent(ConnectionState.connected, 'measured',
+      server.host == '9.9.9.9', server.host == '9.9.9.9' ? 200000 : null));
+  }
+}
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('quick selection keeps first measured success without repeated probes or reconnect', () async {
+    final engine = MeasuredEngine();
+    final other = VpnServer.fromJson({...server.toJson(), 'id': 'other', 'host': '9.9.9.9',
+      'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.9')});
+    var repeatProbes = 0;
+    const channel = MethodChannel('quietvpn/xray-state');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+      (call) async { repeatProbes++; return null; });
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () async => PublicCatalogResult([other], false, 0), networkReader: () async => 'wifi',
+      autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize(); await vm.autoConnect();
+      expect(engine.connects, 1); expect(engine.disconnects, 0);
+      expect(repeatProbes, 0); expect(vm.connectionVerified, true);
+      expect(vm.learningSamples, 1);
+      await vm.disconnect();
+    } finally {
+      vm.dispose(); await engine.dispose();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+    }
+  });
+  test('next quick search tries the saved verified profile before the failed one', () async {
+    final profiles = MemoryProfiles();
+    final other = VpnServer.fromJson({...server.toJson(), 'id': 'other', 'host': '9.9.9.9',
+      'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.9')});
+    for (var round = 0; round < 2; round++) {
+      final engine = RetryEngine();
+      final vm = VpnViewModel(engine, profiles,
+        ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+        catalogLoader: () async => PublicCatalogResult([other], false, 0), networkReader: () async => 'wifi',
+        autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+      try {
+        await vm.initialize(); await vm.autoConnect();
+        expect(vm.connectionVerified, true);
+        expect(engine.chosen, round == 0 ? ['8.8.8.8', '9.9.9.9'] : ['9.9.9.9']);
+        await vm.disconnect();
+      } finally { vm.dispose(); await engine.dispose(); }
+    }
+  });
   testWidgets('notification shade preserves search; actually hiding the app cancels it', (tester) async {
     final engine = AutoEngine(), catalog = Completer<PublicCatalogResult>();
     final vm = VpnViewModel(engine, MemoryProfiles(),
@@ -91,7 +141,7 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump();
-    expect(vm.autoStatus, 'Подбор остановлен');
+    expect(vm.autoStatus, 'Подбор остановлен: приложение ушло в фон');
     catalog.complete(const PublicCatalogResult([], false, 0));
     await tester.pump(); await search;
     expect(engine.connects, 0);
@@ -263,3 +313,4 @@ void main() {
     } finally { vm.dispose(); await engine.dispose(); }
   });
 }
+
