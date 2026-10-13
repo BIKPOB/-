@@ -32,6 +32,9 @@ Copy-Item 'docs/windows-third-party.txt' (Join-Path $Bundle 'licenses/SOURCES.tx
 Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile (Join-Path $dest 'MicrosoftEdgeWebview2Setup.exe')
 $sig=Get-AuthenticodeSignature (Join-Path $dest 'MicrosoftEdgeWebview2Setup.exe')
 if($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation'){throw 'Invalid WebView2 bootstrapper signature'}
+Invoke-WebRequest 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile (Join-Path $dest 'vc_redist.x64.exe')
+$sig=Get-AuthenticodeSignature (Join-Path $dest 'vc_redist.x64.exe')
+if($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation'){throw 'Invalid Visual C++ runtime signature'}
 $hashes=[ordered]@{}
 Get-ChildItem $dest -File | ForEach-Object {$hashes[$_.Name]=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}
 $hashes | ConvertTo-Json | Set-Content (Join-Path $dest 'SHA256.json') -Encoding utf8

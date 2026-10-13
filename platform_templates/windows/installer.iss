@@ -25,6 +25,7 @@ Name: "{autodesktop}\Quiet VPN"; Filename: "{app}\quiet_vpn.exe"; Tasks: desktop
 Name: desktopicon; Description: "Создать ярлык на рабочем столе"; Flags: unchecked
 Name: webview; Description: "Установить/обновить Microsoft Edge WebView2 для встроенного браузера (нужен интернет)"; Flags: unchecked
 [Run]
+Filename: "{app}\engines\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Установка Microsoft Visual C++ Runtime…"; Flags: waituntilterminated
 Filename: "{app}\engines\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; Tasks: webview; Flags: waituntilterminated
 Filename: "{app}\quiet_vpn.exe"; Description: "Запустить Quiet VPN"; Flags: nowait postinstall skipifsilent
 [UninstallRun]

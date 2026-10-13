@@ -54,7 +54,7 @@ class WindowsProbe {
       final packet = socket.receive();
       if (packet == null || packet.address.address != '1.1.1.1' || packet.port != 53) return;
       try { if (!result.isCompleted) result.complete(answer(packet.data, id)); } catch (_) { }
-    });
+    }, onError: (Object error) { if (!result.isCompleted) result.completeError(error); });
     try {
       socket.send(query(host, id), InternetAddress('1.1.1.1'), 53);
       return await result.future.timeout(const Duration(seconds: 6));
