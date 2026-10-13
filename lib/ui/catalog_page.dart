@@ -68,8 +68,9 @@ class _AddServerPageState extends State<AddServerPage> {
         final uri=Uri.tryParse(url);
         if(uri==null||uri.scheme!='https'||uri.host.isEmpty||uri.userInfo.isNotEmpty) throw const FormatException('Введите HTTPS-адрес сайта выдачи конфигураций');
       }
+      final navigator = Navigator.of(context);
       final text=Platform.isWindows
-        ? await Navigator.push<String>(context, MaterialPageRoute(builder: (_) => WindowsBrowserPage(vpnbook ? 'https://www.vpnbook.com/' : url)))
+        ? await navigator.push<String>(MaterialPageRoute(builder: (_) => WindowsBrowserPage(vpnbook ? 'https://www.vpnbook.com/' : url)))
         : await ConfigBrowser.open(vpnbook?'vpnbook':'custom',url:vpnbook?null:url);
       if(text!=null&&mounted) await receive(text);
     } catch(e) {if(mounted)setState(()=>error=e is FormatException?e.message:'Не удалось открыть сайт');}

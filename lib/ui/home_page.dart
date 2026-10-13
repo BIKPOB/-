@@ -31,7 +31,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
   VpnViewModel get vm => widget.vm;
   @override void initState() { super.initState(); if (vm.engine is DesktopCapabilities) windowManager.addListener(this); WidgetsBinding.instance.addObserver(this); unawaited(vm.initialize()); }
   @override void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (Platform.isWindows) return;
+    if (vm.engine is DesktopCapabilities) return;
     // Notification shade and permission dialogs remove focus without hiding the app.
     // Ignore inactive, including the transition back from paused to resumed.
     switch (state) {
