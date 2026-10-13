@@ -1,5 +1,5 @@
 import 'dart:io';
-import '../../lib/platform/windows_probe.dart';
+import 'package:quiet_vpn/platform/windows_probe.dart';
 
 // Run outside the Flutter widget-test HTTP interception layer.
 Future<void> main() async {
