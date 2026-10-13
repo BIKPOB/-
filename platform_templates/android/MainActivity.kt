@@ -80,6 +80,22 @@ class MainActivity : FlutterActivity() {
                     }
                 } catch (_: Exception) { result.error("cache", "Кэш недоступен", null) }
             }
+        io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/app-routing")
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "list" -> result.success(BypassApps.list(applicationContext))
+                        "selected" -> result.success(BypassApps.selected(applicationContext))
+                        "save" -> {
+                            val packages = call.argument<List<String>>("packages")
+                                ?: throw IllegalArgumentException("Missing packages")
+                            BypassApps.save(applicationContext, packages)
+                            result.success(BypassApps.selected(applicationContext))
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (_: Exception) { result.error("APP_ROUTING", "Не удалось прочитать или сохранить список приложений", null) }
+            }
         wg = WgBridge(this)
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/wg").setMethodCallHandler(wg::handle)
         io.flutter.plugin.common.EventChannel(engine.dartExecutor.binaryMessenger, "quietvpn/wg-events").setStreamHandler(object : io.flutter.plugin.common.EventChannel.StreamHandler {

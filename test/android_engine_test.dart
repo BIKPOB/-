@@ -5,6 +5,37 @@ import 'package:quiet_vpn/core/models.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  test('Xray receives saved bypass list and never starts when routing settings cannot be read', () async {
+    Map<dynamic, dynamic>? started;
+    var failRead = false;
+    messenger.setMockMethodCallHandler(const MethodChannel('flutter.baseflow.com/permissions/methods'),
+      (call) async => {for (final id in call.arguments as List) id: 1});
+    messenger.setMockMethodCallHandler(const MethodChannel('quietvpn/app-routing'), (call) async {
+      if (failRead) throw PlatformException(code: 'storage');
+      return ['com.example.bank'];
+    });
+    messenger.setMockMethodCallHandler(const MethodChannel('quietvpn/xray-state'), (call) async {
+      if (call.method == 'resolveEndpoint') return '192.0.2.1';
+      return null;
+    });
+    messenger.setMockMethodCallHandler(const MethodChannel('flutter_v2ray_client'), (call) async {
+      if (call.method == 'requestPermission') return true;
+      if (call.method == 'startV2Ray') started = call.arguments as Map;
+      return null;
+    });
+    const server = VpnServer(id: 'test', name: 'test', country: '', countryCode: '', host: '192.0.2.1',
+      port: 443, transport: 'tcp', source: 'test', protocol: 'vless',
+      profile: 'vless://12345678-1234-1234-1234-123456789abc@192.0.2.1:443?security=none');
+    final engine = AndroidEngine();
+    try {
+      await engine.connect(server, null);
+      expect(started?['blocked_apps'], ['com.example.bank']);
+      started = null; failRead = true;
+      await expectLater(engine.connect(server, null), throwsA(isA<PlatformException>()));
+      expect(started, isNull);
+    } finally { await engine.dispose(); }
+  });
+
   test('a failed proxy probe retains an explicitly unverified manual tunnel', () async {
     var stage = 'DISCONNECTED', probes = 0, stops = 0;
     for (final name in ['quietvpn/wg-events', 'flutter_v2ray_client/status']) {

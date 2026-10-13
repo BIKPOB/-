@@ -81,6 +81,7 @@ class AndroidEngine implements VpnEngine, TrafficSource {
       await _wg.invokeMethod<void>('start', {'profile':server.profile}); return;
     }
     if (!{'vless','shadowsocks'}.contains(_active)) throw StateError('Протокол не поддерживается');
+    final bypass = await const MethodChannel('quietvpn/app-routing').invokeListMethod<String>('selected') ?? <String>[];
     final logPath = await _stage.invokeMethod<String>('prepareDiagnostics');
     _emit(ConnectionState.connecting, 'Разрешение адреса VPN-сервера до запуска туннеля');
     final endpoint = await _stage.invokeMethod<String>('resolveEndpoint', {'host': server.host, 'port': server.port}).timeout(const Duration(seconds: 15));
@@ -90,7 +91,7 @@ class AndroidEngine implements VpnEngine, TrafficSource {
     _xrayState = 'CONNECTING';
     _emit(ConnectionState.connecting, 'Запуск ${server.protocol.toUpperCase()}');
     await _xray.invokeMethod<void>('startV2Ray', {'remark':'Quiet VPN', 'config':config,
-      'blocked_apps':null, 'bypass_subnets':null, 'proxy_only':false, 'notificationDisconnectButtonName':'Отключить'});
+      'blocked_apps':bypass, 'bypass_subnets':null, 'proxy_only':false, 'notificationDisconnectButtonName':'Отключить'});
   }
   @override Future<void> disconnect() async {
     _stopping = true; _starting = false; _epoch++; _verified = false;

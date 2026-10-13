@@ -5,6 +5,7 @@ import '../core/models.dart';
 import '../core/traffic.dart';
 import '../viewmodels/vpn_view_model.dart';
 import 'catalog_page.dart';
+import 'app_routing_page.dart';
 import 'latency_indicator.dart';
 
 class HomePage extends StatefulWidget {
@@ -92,6 +93,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           : () async { if (vm.autoSelecting) { await vm.cancelAutoSelection(); } else { await _deepSearch(); } },
           icon: Icon(vm.autoSelecting ? Icons.stop : Icons.auto_awesome),
           label: Text(vm.autoSelecting ? 'Остановить подбор' : 'Глубокий ИИ-подбор')),
+        OutlinedButton.icon(onPressed: vm.autoSelecting || vm.busy ? null : () =>
+          Navigator.push(context, MaterialPageRoute<void>(builder: (_) => AppRoutingPage(vpnActive: vm.canDisconnect))),
+          icon: const Icon(Icons.call_split), label: const Text('Приложения в обход VPN')),
         const Text('Нейросеть учится на измерениях этой сети. Сравнивает WireGuard, VLESS и Shadowsocks по загрузке и повторяемости результатов. До 12 кандидатов. Во время подбора оставьте приложение открытым.'),
         if (vm.autoStatus != null) Text(vm.networkContext.label),
         if (vm.autoStatus != null) Text(vm.autoStatus!),

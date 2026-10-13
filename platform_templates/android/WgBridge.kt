@@ -87,7 +87,8 @@ class WgController(private val context: Context,
         emit("connecting")
         worker.execute {
             try {
-                val config = Config.parse(ByteArrayInputStream(profile.toByteArray(Charsets.UTF_8)))
+                val routedProfile = BypassApps.wireGuardProfile(profile, BypassApps.selected(context))
+                val config = Config.parse(ByteArrayInputStream(routedProfile.toByteArray(Charsets.UTF_8)))
                 val engine = driver ?: factory(context) {
                     val ended = driverGeneration
                     main.post { if (generation == ended && !stopping) { generation++; needsStop = false; emit("disconnected") } }
