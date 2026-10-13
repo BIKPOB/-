@@ -71,12 +71,12 @@ if 'windows' in args.platforms:
     marker = '  // Attach to console'
     # A single UI owns the one fixed tunnel name. Child Xray dies with the UI;
     # normal close first disconnects via the Flutter WindowListener.
-    setup = r'''  HANDLE instance = CreateMutexW(nullptr, TRUE, L"Local\\QuietVPN.Desktop");
+    setup = r'''  HANDLE quietInstanceMutex = CreateMutexW(nullptr, TRUE, L"Local\\QuietVPN.Desktop");
   if (GetLastError() == ERROR_ALREADY_EXISTS) {
     MessageBoxW(nullptr, L"Quiet VPN is already running.", L"Quiet VPN", MB_OK);
     return EXIT_SUCCESS;
   }
-  if (!instance) return EXIT_FAILURE;
+  if (!quietInstanceMutex) return EXIT_FAILURE;
   HANDLE job = CreateJobObjectW(nullptr, nullptr);
   JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits = {};
   limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
