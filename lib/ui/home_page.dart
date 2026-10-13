@@ -15,7 +15,20 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   VpnViewModel get vm => widget.vm;
   @override void initState() { super.initState(); WidgetsBinding.instance.addObserver(this); unawaited(vm.initialize()); }
-  @override void didChangeAppLifecycleState(AppLifecycleState state) => vm.setForeground(state == AppLifecycleState.resumed);
+  @override void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Notification shade and permission dialogs remove focus without hiding the app.
+    // Ignore inactive, including the transition back from paused to resumed.
+    switch (state) {
+      case AppLifecycleState.resumed:
+        vm.setForeground(true);
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.detached:
+        vm.setForeground(false);
+      case AppLifecycleState.inactive:
+        break;
+    }
+  }
   @override void dispose() { WidgetsBinding.instance.removeObserver(this); vm.dispose(); super.dispose(); }
   void _add() => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => CatalogPage(vm)));
   Future<void> _diagnostics() async {

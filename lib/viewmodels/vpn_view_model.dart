@@ -275,6 +275,7 @@ class VpnViewModel extends ChangeNotifier {
     _scheduleProbe(immediate: true); _notify();
   }
   void setForeground(bool visible) {
+    if (_disposed || _foreground == visible) return;
     _foreground = visible;
     if (!visible && autoSelecting && !requestingNetworkPermission) unawaited(cancelAutoSelection());
     _scheduleTraffic();

@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart' hide ConnectionState;
+import 'package:quiet_vpn/ui/home_page.dart';
 import 'package:flutter/services.dart';
 import 'package:quiet_vpn/core/models.dart';
 import 'package:quiet_vpn/core/server_monitor.dart';
@@ -66,6 +68,38 @@ class MeasuredEngine extends ControlledEngine {
 }
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets('notification shade preserves search; actually hiding the app cancels it', (tester) async {
+    final engine = AutoEngine(), catalog = Completer<PublicCatalogResult>();
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () => catalog.future, networkReader: () async => 'wifi');
+    await tester.pumpWidget(MaterialApp(home: HomePage(vm)));
+    await tester.pump();
+    expect(vm.ready, true);
+    final search = vm.autoConnect(deep: true);
+    await tester.pump();
+    expect(vm.autoSelecting, true);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    expect(vm.autoStatus, isNot('Подбор остановлен'));
+    expect(vm.autoSelecting, true);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(vm.autoStatus, isNot('Подбор остановлен'));
+    expect(engine.disconnects, 0);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    expect(vm.autoStatus, 'Подбор остановлен');
+    catalog.complete(const PublicCatalogResult([], false, 0));
+    await tester.pump(); await search;
+    expect(engine.connects, 0);
+    await tester.pumpWidget(const SizedBox.shrink());
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await engine.dispose();
+  });
+
   test('deep selection compares successful candidates and reconnects the faster one', () async {
     final engine = MeasuredEngine();
     const channel = MethodChannel('quietvpn/xray-state');
