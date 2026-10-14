@@ -228,7 +228,9 @@ class VpnViewModel extends ChangeNotifier {
       }
       autoStatus = 'Проверено $attempt вариантов: соединение с подходящей загрузкой не найдено. Результаты всех попыток — в диагностике.';
     } catch (_) { autoStatus = 'Подбор не завершён. Проверьте сеть и диагностику.'; }
-    finally { autoSelecting = false; if (!_disposed) { _scheduleProbe(); _notify(); } }
+    finally {
+      try { await store.saveAttempts('${DateTime.now().toIso8601String()}\n${autoAttemptReports.join('\n\n')}'); } catch (_) { }
+      autoSelecting = false; if (!_disposed) { _scheduleProbe(); _notify(); } }
   }
   bool _foreground = true, _disposed = false, _nativeNeedsStop = false, _stopping = false;
   bool _verifying = false;
@@ -267,6 +269,10 @@ class VpnViewModel extends ChangeNotifier {
     try {
       _imports = await store.load();
       try { _selector = AdaptiveSelector.decode(await store.loadSelector()); } catch (_) { }
+      try {
+        final previous = await store.loadAttempts();
+        if (previous != null && previous.isNotEmpty) autoAttemptReports.add('Предыдущий подбор (сохранённый отчёт):\n$previous');
+      } catch (_) { }
       await engine.initialize(); ready = true;
     } catch (_) { message = 'Не удалось инициализировать VPN или защищённое хранилище. На Windows проверьте установку и запуск от администратора.'; state = ConnectionState.error; }
     if (servers.isNotEmpty) selectedId = servers.first.id;

@@ -5,6 +5,8 @@ import '../core/profile_policy.dart';
 
 class ProfileStore {
   final _storage = const FlutterSecureStorage();
+  Future<String?> loadAttempts() => _storage.read(key: 'attempts.v1');
+  Future<void> saveAttempts(String value) => _storage.write(key: 'attempts.v1', value: value);
   Future<String?> loadSelector() => _storage.read(key: 'selector.v2');
   Future<void> saveSelector(String value) => _storage.write(key: 'selector.v2', value: value);
   Future<List<VpnServer>> load() async {

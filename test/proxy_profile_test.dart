@@ -5,6 +5,14 @@ import 'package:quiet_vpn/core/proxy_profile.dart';
 import 'package:quiet_vpn/data/profile_store.dart';
 const uuid = '12345678-1234-1234-1234-123456789abc';
 void main() {
+  test('Shadowsocks 2022 rejects invalid keys before core startup', () {
+    String link(String key) => 'ss://${base64Url.encode(utf8.encode('2022-blake3-aes-128-gcm:$key'))}@example.com:443';
+    expect(() => ProxyProfile.parse(link('bad')), throwsFormatException);
+    expect(() => ProxyProfile.parse(link(base64.encode(List.filled(32, 1)))), throwsFormatException);
+    final valid = base64.encode(List.filled(16, 1));
+    expect(ProxyProfile.parse(link(valid)).protocol, 'shadowsocks');
+    expect(ProxyProfile.parse(link('$valid:$valid')).protocol, 'shadowsocks');
+  });
   test('WireGuard share links preserve keys, endpoint, address and MTU', () {
     final key = base64.encode(List.filled(32, 1));
     final link = 'wireguard://${Uri.encodeComponent(key)}@vpn.example.org:443?'

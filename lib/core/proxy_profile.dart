@@ -38,6 +38,14 @@ class ProxyProfile {
         '2022-blake3-aes-256-gcm', '2022-blake3-chacha20-poly1305'}.contains(method)) {
         throw const FormatException('Этот шифр Shadowsocks не поддерживается');
       }
+      if (method.startsWith('2022-')) {
+        final expected = method == '2022-blake3-aes-128-gcm' ? 16 : 32;
+        for (final key in password.split(':')) {
+          if (base64.decode(base64.normalize(key)).length != expected) {
+            throw const FormatException('Некорректная длина ключа Shadowsocks 2022');
+          }
+        }
+      }
       final canonical = Uri(scheme: 'ss', userInfo: base64Url.encode(utf8.encode(auth)).replaceAll('=', ''),
         host: host, port: u.port, fragment: u.fragment).toString();
       return ProxyProfile(canonical, host, u.port, 'shadowsocks', {

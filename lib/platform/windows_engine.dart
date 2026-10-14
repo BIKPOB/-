@@ -19,6 +19,14 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities {
   Process? _xray;
   bool _active = false, _stopping = false;
   int _epoch = 0, _logBytes = 0;
+  final _errors = <String>{};
+  void _capture(List<int> bytes) {
+    _logBytes += bytes.length;
+    final text = utf8.decode(bytes, allowMalformed: true).toLowerCase();
+    const categories = {'failed to build': 'Ошибка конфигурации', 'invalid': 'Некорректные параметры/ответ', 'timeout': 'Таймаут', 'deadline exceeded': 'Таймаут операции', 'connection refused': 'Сервер отказал', 'connection reset': 'Соединение сброшено', 'no such host': 'DNS не разрешён', 'certificate': 'Ошибка сертификата', 'bad handshake': 'Ошибка согласования', 'eof': 'Соединение закрыто'};
+    for (final entry in categories.entries) { if (text.contains(entry.key)) _errors.add(entry.value); }
+  }
+  String get _errorSummary => _errors.isEmpty ? 'Причина не классифицирована' : _errors.join('; ');
   String _protocol = '', _detail = 'Windows VPN не запускался';
   String? _privateDir;
   String get _alias => _protocol == 'wireguard' ? 'QuietVPN-AWG' : WindowsConfig.adapter;
@@ -85,7 +93,7 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities {
     final profile = ProfilePolicy.parse(server.profile);
     await _verifyBundle();
     final token = ++_epoch;
-    _protocol = profile.protocol; _active = true; _logBytes = 0;
+    _protocol = profile.protocol; _active = true; _logBytes = 0; _errors.clear();
     _emit(ConnectionState.connecting, 'Windows: запуск ${profile.protocol}');
     try {
       if (profile.protocol == 'wireguard') {
@@ -103,13 +111,13 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities {
         final p = await Process.start(_file('xray.exe'), ['run', '-config', 'stdin:'],
           workingDirectory: '$_root\\engines', runInShell: false);
         _xray = p;
-        p.stdout.listen((bytes) { _logBytes += bytes.length; });
-        p.stderr.listen((bytes) { _logBytes += bytes.length; });
+        p.stdout.listen(_capture);
+        p.stderr.listen(_capture);
         p.stdin.write(jsonEncode(config)); await p.stdin.flush(); await p.stdin.close();
         unawaited(p.exitCode.then((code) {
           if (identical(_xray, p)) _xray = null;
           if (token == _epoch && !_stopping) {
-            _emit(ConnectionState.error, 'Xray завершился, код $code; журнал: $_logBytes байт');
+            _emit(ConnectionState.error, 'Xray завершился, код $code; журнал: $_logBytes байт; $_errorSummary');
           }
         }));
       }

@@ -8,8 +8,9 @@ import 'dart:typed_data';
 class WindowsProbe {
   HttpClient? _client;
   RawDatagramSocket? _dns;
+  Socket? _dnsTcp;
   int _generation = 0;
-  void cancel() { _generation++; _client?.close(force: true); _dns?.close(); }
+  void cancel() { _generation++; _client?.close(force: true); _dns?.close(); _dnsTcp?.destroy(); }
   static Uint8List query(String name, int id) => Uint8List.fromList([
     id >> 8, id & 255, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0,
     for (final label in name.split('.')) ...[label.length, ...label.codeUnits], 0, 0, 1, 0, 1,
@@ -44,7 +45,7 @@ class WindowsProbe {
     }
     throw const FormatException('DNS A record missing');
   }
-  Future<InternetAddress> _resolve(String host, InternetAddress local) async {
+  Future<InternetAddress> _resolveUdp(String host, InternetAddress local) async {
     final id = Random.secure().nextInt(65536);
     final socket = await RawDatagramSocket.bind(local, 0);
     _dns = socket;
@@ -60,7 +61,35 @@ class WindowsProbe {
       return await result.future.timeout(const Duration(seconds: 6));
     } finally { await sub.cancel(); socket.close(); if (identical(_dns, socket)) _dns = null; }
   }
+  Future<InternetAddress> _resolve(String host, InternetAddress local) async {
+    final token = _generation;
+    try { return await _resolveUdp(host, local); } catch (_) {
+      if (token != _generation) throw const SocketException('Cancelled');
+      final socket = await Socket.connect(InternetAddress('1.1.1.1'), 53,
+          sourceAddress: local, timeout: const Duration(seconds: 4));
+      _dnsTcp = socket;
+      try {
+        final id = Random.secure().nextInt(65536), data = query(host, 0);
+        data[0] = id >> 8; data[1] = id & 255;
+        socket.add([data.length >> 8, data.length & 255, ...data]);
+        final bytes = <int>[];
+        return await (() async {
+          await for (final chunk in socket) {
+            bytes.addAll(chunk);
+            if (bytes.length >= 2) {
+              final length = bytes[0] * 256 + bytes[1];
+              if (length < 12) throw const FormatException('DNS TCP length');
+              if (bytes.length >= length + 2) return answer(Uint8List.fromList(bytes.sublist(2, length + 2)), id);
+            }
+          }
+          throw const SocketException('DNS TCP closed');
+        })().timeout(const Duration(seconds: 4));
+      } finally { socket.destroy(); if (identical(_dnsTcp, socket)) _dnsTcp = null; }
+    }
+  }
   Future<Map<String, dynamic>> measure(String address) async {
+    var phase = 'DNS';
+    var bytes = 0;
     final token = _generation;
     final local = InternetAddress(address);
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
@@ -68,7 +97,9 @@ class WindowsProbe {
     client.findProxy = (_) => 'DIRECT';
     client.connectionFactory = (uri, _, _) async {
       if (token != _generation) throw const SocketException('Cancelled');
+      phase = 'DNS: ${uri.host}';
       final target = await _resolve(uri.host, local);
+      phase = 'TCP: ${uri.host}:443';
       final task = await Socket.startConnect(target, uri.port, sourceAddress: local);
       Socket? current;
       final secure = task.socket.then<Socket>((socket) async {
@@ -76,6 +107,7 @@ class WindowsProbe {
         try {
           // A custom HttpClient factory must perform TLS itself. Preserve the
           // original DNS name for SNI and certificate validation after binding.
+          phase = 'TLS: ${uri.host}';
           final tls = await SecureSocket.secure(socket, host: uri.host)
               .timeout(const Duration(seconds: 8));
           current = tls;
@@ -83,6 +115,7 @@ class WindowsProbe {
             tls.destroy();
             throw const SocketException('Cancelled');
           }
+          phase = 'HTTPS-ответ: ${uri.host}';
           return tls;
         } catch (_) { socket.destroy(); rethrow; }
       });
@@ -101,7 +134,7 @@ class WindowsProbe {
         data.followRedirects = false; data.headers.set('Accept-Encoding', 'identity');
         final stream = await data.close();
         if (stream.statusCode != 200) throw HttpException('Download status ${stream.statusCode}');
-        var bytes = 0;
+        phase = 'Загрузка 256 КиБ';
         await for (final chunk in stream) {
           if (token != _generation) throw const SocketException('Cancelled');
           bytes += chunk.length;
@@ -113,7 +146,7 @@ class WindowsProbe {
           'bytesPerSecond': speed, 'detail': 'Windows VPN: DNS, HTTPS и 256 КиБ подтверждены · ${speed ~/ 1024} КиБ/с'};
       })().timeout(const Duration(seconds: 27));
     } catch (e) {
-      return {'delay': -1, 'quality': false, 'detail': 'Проверка через интерфейс VPN: ${e is HttpException ? e.message : e.runtimeType}'};
+      return {'delay': -1, 'quality': false, 'detail': 'Проверка через интерфейс VPN: $phase · ${e is HttpException ? e.message : e.runtimeType} · ${clock.elapsedMilliseconds} мс · $bytes байт'};
     } finally { client.close(force: true); if (identical(_client, client)) _client = null; }
   }
 }
