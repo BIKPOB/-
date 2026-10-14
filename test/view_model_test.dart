@@ -116,7 +116,8 @@ void main() {
     try {
       await vm.initialize(); await vm.autoConnect();
       expect(engine.connects, 2);
-      expect(vm.state, ConnectionState.disconnected);
+      expect(vm.state, ConnectionState.error);
+      expect(vm.canDisconnect, false);
       expect(vm.learningSamples, 0);
     } finally { vm.dispose(); await engine.dispose(); }
   });
