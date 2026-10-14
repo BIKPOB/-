@@ -43,8 +43,8 @@ object TunnelProbe {
                         check(request.responseCode == 204) { "HTTP status" }
                     } else {
                         phase = "загрузка 256 КиБ через системный VPN"
-                        val downloadStart = SystemClock.elapsedRealtime()
                         check(request.responseCode == 200) { "HTTP status" }
+                        val downloadStart = SystemClock.elapsedRealtime()
                         request.inputStream.use { input ->
                             val buffer = ByteArray(8192)
                             while (bytes < TEST_BYTES) {
@@ -59,7 +59,7 @@ object TunnelProbe {
                         check(bytes == TEST_BYTES) { "Incomplete download" }
                         if (!acceptable(bytes, elapsed)) return mapOf("delay" to SystemClock.elapsedRealtime() - start,
                             "quality" to false, "bytesPerSecond" to bps,
-                            "detail" to "VPN работает, но тест медленный: ${bps / 1024} КиБ/с. ИИ пропустит этот вариант (порог 128 КиБ/с)")
+                            "detail" to "VPN работает, но тест медленный: ${bps / 1024} КиБ/с. Сохранён как резервный кандидат (цель 128 КиБ/с)")
                         return mapOf("delay" to SystemClock.elapsedRealtime() - start, "bytesPerSecond" to bps, "quality" to true,
                             "detail" to "Системный VPN: DNS, HTTPS и 256 КиБ подтверждены · ${bps / 1024} КиБ/с")
                     }

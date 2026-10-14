@@ -47,10 +47,10 @@ object ProxyProbe {
             val socket = Socket()
             pending = socket
             if (token != generation) { socket.close(); break }
-            val deadline = timer.schedule({ try { socket.close() } catch (_: Exception) { } }, 20, TimeUnit.SECONDS)
+            val deadline = timer.schedule({ try { socket.close() } catch (_: Exception) { } }, 7, TimeUnit.SECONDS)
             var stage = "локальный SOCKS"
             try {
-                socket.soTimeout = 18000
+                socket.soTimeout = 6000
                 socket.connect(InetSocketAddress("127.0.0.1", 10807), 1500)
                 stage = "локальное согласование SOCKS"
                 val numeric = host == "1.1.1.1"
@@ -59,7 +59,7 @@ object ProxyProbe {
                 val tls = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(socket, host, 443, true) as SSLSocket
                 tls.use {
                     it.sslParameters = it.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
-                    it.soTimeout = 18000
+                    it.soTimeout = 6000
                     it.startHandshake()
                     stage = "HTTPS-ответ"
                     val path = if (numeric) "/cdn-cgi/trace" else "/generate_204"

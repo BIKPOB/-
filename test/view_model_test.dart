@@ -77,8 +77,49 @@ class RetryEngine extends ControlledEngine {
       server.host == '9.9.9.9', server.host == '9.9.9.9' ? 200000 : null));
   }
 }
+class SlowOnlyEngine extends ControlledEngine {
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++;
+    controller.add(const EngineEvent(ConnectionState.connected, 'measured slow', false, 95000));
+  }
+}
+class FailedEngine extends ControlledEngine {
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++;
+    controller.add(const EngineEvent(ConnectionState.error, 'unconfirmed transport'));
+  }
+}
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('quick selection reconnects a measured slow fallback instead of ending offline', () async {
+    final engine = SlowOnlyEngine();
+    final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () async => const PublicCatalogResult([], false, 0), networkReader: () async => 'wifi',
+      autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize(); await vm.autoConnect();
+      expect(engine.connects, 2);
+      expect(vm.state, ConnectionState.connected);
+      expect(vm.connectionVerified, false); // Do not relabel a slow path as high quality.
+      expect(vm.autoStatus, contains('резервный'));
+      expect(vm.learningJournal.single['outcome'], 'usable');
+      await vm.disconnect();
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+  test('repeated unconfirmed protocol stops after two attempts in this search', () async {
+    final engine = FailedEngine();
+    final pool = [for (var n = 1; n <= 7; n++) VpnServer.fromJson({...server.toJson(),
+      'id': 'node-$n', 'host': '9.9.9.$n', 'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.$n')})];
+    final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () async => PublicCatalogResult(pool, false, 0), networkReader: () async => 'wifi',
+      autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize(); await vm.autoConnect();
+      expect(engine.connects, 2);
+      expect(vm.state, ConnectionState.disconnected);
+      expect(vm.learningSamples, 0);
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   test('quick selection keeps first measured success without repeated probes or reconnect', () async {
     final engine = MeasuredEngine();
     final other = VpnServer.fromJson({...server.toJson(), 'id': 'other', 'host': '9.9.9.9',

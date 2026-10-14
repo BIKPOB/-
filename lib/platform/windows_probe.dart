@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -6,11 +7,12 @@ import 'dart:typed_data';
 /// Bind both DNS and HTTPS sockets to the actual VPN interface address.
 /// A broken tunnel cannot pass this test via the physical adapter.
 class WindowsProbe {
-  HttpClient? _client;
+  HttpClient? _client, _doh;
   RawDatagramSocket? _dns;
   Socket? _dnsTcp;
   int _generation = 0;
-  void cancel() { _generation++; _client?.close(force: true); _dns?.close(); _dnsTcp?.destroy(); }
+  bool _usedDoh = false;
+  void cancel() { _generation++; _client?.close(force: true); _doh?.close(force: true); _dns?.close(); _dnsTcp?.destroy(); }
   static Uint8List query(String name, int id) => Uint8List.fromList([
     id >> 8, id & 255, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0,
     for (final label in name.split('.')) ...[label.length, ...label.codeUnits], 0, 0, 1, 0, 1,
@@ -58,15 +60,15 @@ class WindowsProbe {
     }, onError: (Object error) { if (!result.isCompleted) result.completeError(error); });
     try {
       socket.send(query(host, id), InternetAddress('1.1.1.1'), 53);
-      return await result.future.timeout(const Duration(seconds: 6));
+      return await result.future.timeout(const Duration(milliseconds: 1500));
     } finally { await sub.cancel(); socket.close(); if (identical(_dns, socket)) _dns = null; }
   }
-  Future<InternetAddress> _resolve(String host, InternetAddress local) async {
+  Future<InternetAddress> _resolveClassic(String host, InternetAddress local) async {
     final token = _generation;
     try { return await _resolveUdp(host, local); } catch (_) {
       if (token != _generation) throw const SocketException('Cancelled');
       final socket = await Socket.connect(InternetAddress('1.1.1.1'), 53,
-          sourceAddress: local, timeout: const Duration(seconds: 4));
+          sourceAddress: local, timeout: const Duration(seconds: 2));
       _dnsTcp = socket;
       try {
         final id = Random.secure().nextInt(65536), data = query(host, 0);
@@ -83,11 +85,55 @@ class WindowsProbe {
             }
           }
           throw const SocketException('DNS TCP closed');
-        })().timeout(const Duration(seconds: 4));
+        })().timeout(const Duration(seconds: 2));
       } finally { socket.destroy(); if (identical(_dnsTcp, socket)) _dnsTcp = null; }
     }
   }
+  Future<InternetAddress> _resolve(String host, InternetAddress local) async {
+    final token = _generation;
+    try { return await _resolveClassic(host, local); } catch (_) {
+      if (token != _generation) throw const SocketException('Cancelled');
+      // DNS-over-HTTPS fallback remains bound to the TUN address. It cannot
+      // pass using the physical adapter and never disables TLS verification.
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 3);
+      _doh = client;
+      client.findProxy = (_) => 'DIRECT';
+      client.connectionFactory = (uri, _, _) async {
+        final task = await Socket.startConnect(InternetAddress('1.1.1.1'), 443, sourceAddress: local);
+        Socket? current;
+        final secure = task.socket.then<Socket>((socket) async {
+          current = socket;
+          try {
+            final tls = await SecureSocket.secure(socket, host: '1.1.1.1').timeout(const Duration(seconds: 3));
+            current = tls;
+            if (token != _generation) { tls.destroy(); throw const SocketException('Cancelled'); }
+            return tls;
+          } catch (_) { socket.destroy(); rethrow; }
+        });
+        return ConnectionTask.fromSocket(secure, () { task.cancel(); current?.destroy(); });
+      };
+      try {
+        return await (() async {
+          final id = Random.secure().nextInt(65536);
+          final encoded = base64Url.encode(query(host, id)).replaceAll('=', '');
+          final request = await client.getUrl(Uri.parse('https://1.1.1.1/dns-query?dns=$encoded'));
+          request.followRedirects = false;
+          request.headers.set('Accept', 'application/dns-message');
+          final response = await request.close();
+          if (response.statusCode != 200) throw const HttpException('DoH response');
+          final bytes = <int>[];
+          await for (final chunk in response) {
+            bytes.addAll(chunk);
+            if (bytes.length > 65535) throw const FormatException('DNS response too large');
+          }
+          _usedDoh = true;
+          return answer(Uint8List.fromList(bytes), id);
+        })().timeout(const Duration(seconds: 5));
+      } finally { client.close(force: true); if (identical(_doh, client)) _doh = null; }
+    }
+  }
   Future<Map<String, dynamic>> measure(String address) async {
+    _usedDoh = false;
     var phase = 'DNS';
     var bytes = 0;
     final token = _generation;
@@ -129,11 +175,11 @@ class WindowsProbe {
         final response = await request.close();
         if (response.statusCode != 204) throw HttpException('HTTPS status ${response.statusCode}');
         await response.drain<void>();
-        final download = Stopwatch()..start();
         final data = await client.getUrl(Uri.parse('https://speed.cloudflare.com/__down?bytes=262144'));
         data.followRedirects = false; data.headers.set('Accept-Encoding', 'identity');
         final stream = await data.close();
         if (stream.statusCode != 200) throw HttpException('Download status ${stream.statusCode}');
+        final download = Stopwatch()..start();
         phase = 'Загрузка 256 КиБ';
         await for (final chunk in stream) {
           if (token != _generation) throw const SocketException('Cancelled');
@@ -142,6 +188,10 @@ class WindowsProbe {
         }
         if (bytes < 262144) throw const HttpException('Incomplete download');
         final speed = 262144000 ~/ max(1, download.elapsedMilliseconds);
+        if (_usedDoh) {
+          return <String, dynamic>{'delay': -1, 'quality': false,
+            'detail': 'HTTPS и загрузка через VPN работают с DoH, но обычный DNS туннеля не подтверждён. Автоподбор не считает это исправным системным VPN.'};
+        }
         return <String, dynamic>{'delay': clock.elapsedMilliseconds, 'quality': speed >= 131072,
           'bytesPerSecond': speed, 'detail': 'Windows VPN: DNS, HTTPS и 256 КиБ подтверждены · ${speed ~/ 1024} КиБ/с'};
       })().timeout(const Duration(seconds: 27));

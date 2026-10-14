@@ -106,8 +106,13 @@ class VpnViewModel extends ChangeNotifier {
       int rank(VpnServer a, VpnServer b, Map<String, HealthResult>? latency) {
         final recent = _selector.recentPriority(b, context).compareTo(_selector.recentPriority(a, context));
         if (recent != 0) return recent;
-        return _selector.score(b, network, latency?[b.id]?.milliseconds, context: context)
+        final speed = _selector.recentSpeed(b, context).compareTo(_selector.recentSpeed(a, context));
+        if (speed != 0) return speed;
+        final score = _selector.score(b, network, latency?[b.id]?.milliseconds, context: context)
           .compareTo(_selector.score(a, network, latency?[a.id]?.milliseconds, context: context));
+        if (score != 0) return score;
+        // Untested UDP is not known-bad, but avoid spending the first 20s on it.
+        return (a.protocol == 'wireguard' ? 1 : 0).compareTo(b.protocol == 'wireguard' ? 1 : 0);
       }
       // A small diverse shortlist avoids launching hundreds of ping processes.
       final candidates = <VpnServer>[];
@@ -125,7 +130,7 @@ class VpnViewModel extends ChangeNotifier {
       final latency = await _autoMonitor.sample(candidates);
       if (cancelled()) return;
       candidates.sort((a, b) => rank(a, b, latency));
-      final ordered = AdaptiveSelector.shortlist(candidates, limit: 12);
+      final ordered = AdaptiveSelector.shortlist(candidates, limit: deep ? 8 : 6);
       // Preserve protocol diversity within each retry tier, but do not force a
       // recent failure ahead of an untried or recently verified profile.
       final tiered = [for (final tier in [1, 0, -1])
@@ -135,9 +140,17 @@ class VpnViewModel extends ChangeNotifier {
       autoPlan = '${deep ? 'Глубокий' : 'Быстрый'} подбор · план: ${ordered.map((s) => s.protocol).join(' → ')}';
       autoAttemptReports.add('База: ${catalog.status}\n'
         '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}\n$autoPlan');
+      final searchClock = Stopwatch()..start();
+      final budget = Duration(seconds: deep ? 300 : 150);
+      final protocolFailures = <String, int>{};
       var attempt = 0;
       for (final server in ordered) {
         if (cancelled()) return;
+        if (searchClock.elapsed >= budget || (deep && finalists.length >= 2)) break;
+        if ((protocolFailures[server.protocol] ?? 0) >= 2) {
+          autoAttemptReports.add('${server.protocol}: пропуск после двух неподтверждённых попыток в этом подборе');
+          continue;
+        }
         if (!context.sameConnection(await _network())) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
         if (cancelled()) return;
         attempt++;
@@ -145,7 +158,7 @@ class VpnViewModel extends ChangeNotifier {
         await importProfile(server.profile, server.name, 'ИИ-подбор · ${server.source}', updateFilter: false);
         if (cancelled()) return;
         await connect(null);
-        final deadline = DateTime.now().add(const Duration(seconds: 110));
+        final deadline = DateTime.now().add(const Duration(seconds: 70));
         while (!cancelled() && (state == ConnectionState.connecting || _stopping) && DateTime.now().isBefore(deadline)) {
           await Future<void>.delayed(const Duration(milliseconds: 200));
         }
@@ -178,6 +191,11 @@ class VpnViewModel extends ChangeNotifier {
           success = !repeatFailed && speeds.length == 3 && speeds.first >= 131072;
         }
         final medianSpeed = speeds.isEmpty ? null : speeds[speeds.length ~/ 2];
+        final usable = state == ConnectionState.connected && !repeatFailed &&
+            medianSpeed != null && medianSpeed > 0 && sameNetwork;
+        if (sameNetwork) {
+          protocolFailures[server.protocol] = usable || success ? 0 : (protocolFailures[server.protocol] ?? 0) + 1;
+        }
         // Short repeated downloads measure consistency, not long-session stability.
         final utility = medianSpeed == null ? 0.0 :
           (.75 * (medianSpeed / (medianSpeed + 524288)) +
@@ -185,12 +203,12 @@ class VpnViewModel extends ChangeNotifier {
         autoAttemptReports.add('Попытка $attempt · ${server.protocol} · ${success ? 'успех' : 'не подтверждено'}\n${message ?? connectionStage ?? 'Нет подробностей'}');
         if (sameNetwork && !context.ambiguous && !duringVpn.ambiguous) {
           await _remember(server, context, latency[server.id]?.milliseconds,
-            success ? 'verified' : medianSpeed != null ? 'slow_or_unstable' : 'unconfirmed',
+            success ? 'verified' : usable ? 'usable' : medianSpeed != null ? 'slow_or_unstable' : 'unconfirmed',
             speed: medianSpeed, reward: medianSpeed == null || repeatFailed ? null : .2 + .8 * utility);
         }
-        if (deep && success && sameNetwork && !context.ambiguous && medianSpeed != null) {
+        if (usable && !context.ambiguous) {
           finalists.add((server: server, utility: utility));
-          autoAttemptReports.add('Три замера: ${speeds.map((n) => '${(n / 1024).round()} КиБ/с').join(', ')}');
+          autoAttemptReports.add('${speeds.length} замер(а): ${speeds.map((n) => '${(n / 1024).round()} КиБ/с').join(', ')}');
         }
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
         if (!deep && success && sameNetwork) { autoStatus = 'ИИ выбрал соединение с подтверждённым HTTPS · опыт: ${_selector.samples}'; return; }
@@ -206,7 +224,7 @@ class VpnViewModel extends ChangeNotifier {
         // An unknown launch/probe failure is not a negative server training label.
         if (!sameNetwork) await _remember(server, context, null, 'network_uncertain');
       }
-      if (deep && finalists.isNotEmpty) {
+      if (finalists.isNotEmpty) {
         finalists.sort((a, b) => b.utility.compareTo(a.utility));
         for (final finalist in finalists) {
           if (cancelled() || !context.sameConnection(await _network())) return;
@@ -214,13 +232,15 @@ class VpnViewModel extends ChangeNotifier {
           await importProfile(finalist.server.profile, finalist.server.name, 'ИИ · финал', updateFilter: false);
           if (cancelled()) return;
           await connect(null);
-          final deadline = DateTime.now().add(const Duration(seconds: 110));
+          final deadline = DateTime.now().add(const Duration(seconds: 70));
           while (!cancelled() && (state == ConnectionState.connecting || _stopping) && DateTime.now().isBefore(deadline)) {
             await Future<void>.delayed(const Duration(milliseconds: 200));
           }
           if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
-          if (state == ConnectionState.connected && connectionVerified && context.sameConnection(await _network())) {
-            autoStatus = 'Выбран лучший из ${finalists.length} прошедших сравнение · опыт: ${_selector.samples}'; return;
+          if (state == ConnectionState.connected && (connectionVerified || (measuredBytesPerSecond ?? 0) > 0) && context.sameConnection(await _network())) {
+            autoStatus = connectionVerified
+                ? 'Выбран лучший из ${finalists.length} измеренных вариантов · опыт: ${_selector.samples}'
+                : 'Сохранён рабочий резервный VPN; скорость ниже целевой. Можно повторить подбор позже.'; return;
           }
           if (_nativeNeedsStop) await disconnect();
           if (_nativeNeedsStop) return;
@@ -358,7 +378,7 @@ class VpnViewModel extends ChangeNotifier {
       traffic.reset(); connectionStage = 'Запуск VPN';
       _connectionEpoch++;
       _connectTimeout?.cancel();
-      _connectTimeout = Timer(Duration(seconds: activeServer?.protocol == 'wireguard' ? 50 : 100), () {
+      _connectTimeout = Timer(Duration(seconds: autoSelecting ? (activeServer?.protocol == 'wireguard' ? 20 : 60) : (activeServer?.protocol == 'wireguard' ? 50 : 100)), () {
         if (state == ConnectionState.connecting) {
           unawaited(_fail('Таймаут: ${connectionStage ?? 'нет ответа'}. Попробуйте другой сервер или транспорт.'));
         }
@@ -398,7 +418,7 @@ class VpnViewModel extends ChangeNotifier {
           _connectionEpoch++;
         }
         state = ConnectionState.connecting;
-        _connectTimeout ??= Timer(Duration(seconds: activeServer?.protocol == 'wireguard' ? 50 : 100), () { unawaited(_fail('Таймаут VPN')); });
+        _connectTimeout ??= Timer(Duration(seconds: autoSelecting ? (activeServer?.protocol == 'wireguard' ? 20 : 60) : (activeServer?.protocol == 'wireguard' ? 50 : 100)), () { unawaited(_fail('Таймаут VPN')); });
         _notify();
       case ConnectionState.disconnected:
         _nativeConnected = false;

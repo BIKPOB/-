@@ -25,6 +25,20 @@ void main() {
     expect(restored.recentPriority(server, const NetworkContext(type: 'wifi', ambiguous: true), now: now), 0);
     expect(restored.samples, 0);
   });
+  test('measured speed preference expires, follows network and excludes failed newest results', () {
+    final model = AdaptiveSelector();
+    const wifi = NetworkContext(type: 'wifi');
+    final now = DateTime.utc(2026, 10, 14);
+    model.record(server, wifi, 'usable', speed: 95000);
+    model.journal.last['time'] = now.toIso8601String();
+    expect(model.recentSpeed(server, wifi, now: now), 95000);
+    expect(model.recentPriority(server, wifi, now: now), 1);
+    expect(model.recentSpeed(server, const NetworkContext(type: 'mobile'), now: now), 0);
+    expect(model.recentSpeed(server, wifi, now: now.add(const Duration(days: 1))), 0);
+    model.record(server, wifi, 'unconfirmed');
+    model.journal.last['time'] = now.toIso8601String();
+    expect(model.recentSpeed(server, wifi, now: now), 0);
+  });
   test('quality reward ranks measured fast outcomes over measured slow outcomes', () {
     final fast = AdaptiveSelector(), slow = AdaptiveSelector();
     for (var i = 0; i < 30; i++) {
