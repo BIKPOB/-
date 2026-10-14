@@ -15,7 +15,9 @@ const server = VpnServer(id: 'fixture', name: 'fixture', country: 'Test', countr
   protocol: 'vless', profile: 'vless://12345678-1234-1234-1234-123456789abc@8.8.8.8:443?security=none');
 
 class MemoryProfiles extends ProfileStore {
-  String? selector;
+  String? selector, attempts;
+  @override Future<String?> loadAttempts() async => attempts;
+  @override Future<void> saveAttempts(String value) async { attempts = value; }
   @override Future<List<VpnServer>> load() async => [server];
   @override Future<String?> loadSelector() async => selector;
   @override Future<void> saveSelector(String value) async { selector = value; }
@@ -111,7 +113,9 @@ void main() {
         catalogLoader: () async => PublicCatalogResult([other], false, 0), networkReader: () async => 'wifi',
         autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
       try {
-        await vm.initialize(); await vm.autoConnect();
+        await vm.initialize();
+        if (round == 1) expect(vm.autoAttemptReports.join(), contains('Предыдущий подбор'));
+        await vm.autoConnect();
         expect(vm.connectionVerified, true);
         expect(engine.chosen, round == 0 ? ['8.8.8.8', '9.9.9.9'] : ['9.9.9.9']);
         await vm.disconnect();
