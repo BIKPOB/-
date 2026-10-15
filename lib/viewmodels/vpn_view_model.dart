@@ -20,9 +20,10 @@ import '../platform/desktop_capabilities.dart';
 class VpnViewModel extends ChangeNotifier {
   VpnViewModel(this.engine, this.store, this.monitor, {
     Future<PublicCatalogResult> Function()? catalogLoader,
-    Future<String> Function()? networkReader, ServerMonitor? autoMonitor,
+    Future<String> Function()? networkReader, ServerMonitor? autoMonitor, ServerMonitor? backgroundMonitor,
   }) : _catalogLoader = catalogLoader ?? PublicCatalog().load,
-       _networkReader = networkReader, _autoMonitor = autoMonitor ?? ServerMonitor();
+       _networkReader = networkReader, _autoMonitor = autoMonitor ?? ServerMonitor(),
+       _backgroundMonitor = backgroundMonitor ?? ServerMonitor();
   final Future<PublicCatalogResult> Function() _catalogLoader;
   final Future<String> Function()? _networkReader;
   final VpnEngine engine;
@@ -41,6 +42,13 @@ class VpnViewModel extends ChangeNotifier {
   int _autoEpoch = 0;
   AdaptiveSelector _selector = AdaptiveSelector();
   final ServerMonitor _autoMonitor;
+  final ServerMonitor _backgroundMonitor;
+  Map<String, HealthResult> _backgroundHealth = {};
+  DateTime? _backgroundMeasuredAt;
+  NetworkContext? _backgroundContext;
+  Timer? _backgroundTimer;
+  int _backgroundEpoch = 0;
+  String? backgroundStatus;
   static const _networkChannel = MethodChannel('quietvpn/catalog-cache');
   NetworkContext networkContext = const NetworkContext();
   final List<String> autoAttemptReports = [];
@@ -93,6 +101,7 @@ class VpnViewModel extends ChangeNotifier {
     autoPlan = ''; protocolFilter = null; country = null;
     autoStatus = 'Локальная нейросеть: обновление базы'; _notify();
     _poll?.cancel(); _probeEpoch++; monitor.cancel();
+    _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     bool cancelled() => token != _autoEpoch || _disposed;
     try {
       final context = await _network();
@@ -127,7 +136,14 @@ class VpnViewModel extends ChangeNotifier {
         }
       }
       autoStatus = 'Сеть: ${context.label} · оценка ${candidates.length} адресов · опыт: ${_selector.samples}'; _notify();
-      final latency = await _autoMonitor.sample(candidates);
+      final cacheFresh = _backgroundMeasuredAt != null && _backgroundContext?.sameConnection(context) == true &&
+        DateTime.now().difference(_backgroundMeasuredAt!) < const Duration(minutes: 3);
+      final latency = <String, HealthResult>{
+        if (cacheFresh) for (final server in candidates)
+          if (_backgroundHealth[server.id] case final value?) server.id: value,
+      };
+      final missing = candidates.where((server) => !latency.containsKey(server.id)).toList();
+      if (missing.isNotEmpty) latency.addAll(await _autoMonitor.sample(missing));
       if (cancelled()) return;
       candidates.sort((a, b) => rank(a, b, latency));
       final ordered = AdaptiveSelector.shortlist(candidates, limit: deep ? 8 : 6);
@@ -256,7 +272,7 @@ class VpnViewModel extends ChangeNotifier {
     } catch (_) { autoStatus = 'Подбор не завершён. Проверьте сеть и диагностику.'; }
     finally {
       try { await store.saveAttempts('${DateTime.now().toIso8601String()}\n${autoAttemptReports.join('\n\n')}'); } catch (_) { }
-      autoSelecting = false; if (!_disposed) { _scheduleProbe(); _notify(); } }
+      autoSelecting = false; if (!_disposed) { _scheduleProbe(); _scheduleBackgroundPreflight(); _notify(); } }
   }
   bool _foreground = true, _disposed = false, _nativeNeedsStop = false, _stopping = false;
   bool _verifying = false;
@@ -302,7 +318,7 @@ class VpnViewModel extends ChangeNotifier {
       await engine.initialize(); ready = true;
     } catch (_) { message = 'Не удалось инициализировать VPN или защищённое хранилище. На Windows проверьте установку и запуск от администратора.'; state = ConnectionState.error; }
     if (servers.isNotEmpty) selectedId = servers.first.id;
-    _scheduleProbe(immediate: true); _notify();
+    _scheduleProbe(immediate: true); _scheduleBackgroundPreflight(immediate: true); _notify();
   }
   void refreshLatency() {
     _probeEpoch++; monitor.cancel();
@@ -320,6 +336,7 @@ class VpnViewModel extends ChangeNotifier {
   void setForeground(bool visible) {
     if (_disposed || _foreground == visible) return;
     _foreground = visible;
+    _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     if (!visible && autoSelecting && !requestingNetworkPermission) {
       unawaited(cancelAutoSelection(reason: 'Подбор остановлен: приложение ушло в фон'));
     }
@@ -328,12 +345,47 @@ class VpnViewModel extends ChangeNotifier {
     if (visible) {
       unawaited(engine.reconcile().catchError((Object _) { message = 'Не удалось сверить состояние VPN'; _notify(); }));
       _scheduleProbe(immediate: true);
+      _scheduleBackgroundPreflight(immediate: true);
     } else {
       health = {for (final s in servers) s.id: const HealthResult(Reachability.paused)};
       _notify();
     }
     // Android native foreground service owns the tunnel; Dart timers are not
     // used as a guarantee of background execution or kept alive with wake locks.
+  }
+  void _scheduleBackgroundPreflight({bool immediate = false}) {
+    _backgroundTimer?.cancel();
+    if (!_foreground || _disposed || autoSelecting || _nativeNeedsStop || state == ConnectionState.connected) return;
+    final token = ++_backgroundEpoch;
+    _backgroundTimer = Timer(Duration(seconds: immediate ? 3 : 120), () async {
+      try {
+        final context = await _network();
+        if (token != _backgroundEpoch || context.type == 'offline' || autoSelecting || _nativeNeedsStop) return;
+        final catalog = await _catalogLoader();
+        if (token != _backgroundEpoch || autoSelecting || _nativeNeedsStop) return;
+        final pool = [..._imports, ...catalog.servers];
+        final candidates = <VpnServer>[];
+        for (final protocol in ['wireguard', 'vless', 'shadowsocks']) {
+          final group = pool.where((server) => server.protocol == protocol).toList()
+            ..sort((a, b) {
+              final priority = _selector.recentPriority(b, context).compareTo(_selector.recentPriority(a, context));
+              return priority != 0 ? priority : _selector.recentSpeed(b, context).compareTo(_selector.recentSpeed(a, context));
+            });
+          candidates.addAll(group.take(8));
+        }
+        backgroundStatus = 'Фоновая проверка ${candidates.length} адресов…'; _notify();
+        final measured = await _backgroundMonitor.sample(candidates);
+        if (token != _backgroundEpoch || autoSelecting || _nativeNeedsStop) return;
+        _backgroundHealth = measured; _backgroundContext = context; _backgroundMeasuredAt = DateTime.now();
+        final reachable = measured.values.where((value) => value.state == Reachability.reachable).length;
+        backgroundStatus = 'Фоновая проверка: доступно $reachable из ${measured.length}; свежие данные будут использованы при подборе';
+        _notify();
+      } catch (_) {
+        if (token == _backgroundEpoch) backgroundStatus = 'Фоновая проверка адресов временно недоступна';
+      } finally {
+        if (token == _backgroundEpoch && !_disposed) _scheduleBackgroundPreflight();
+      }
+    });
   }
   void _scheduleProbe({bool immediate = false}) {
     _poll?.cancel();
@@ -372,7 +424,8 @@ class VpnViewModel extends ChangeNotifier {
   Future<void> connect(Credentials? credentials) async {
     final server = selected;
     if (!ready || busy || _stopping || _nativeNeedsStop || server == null) return;
-    busy = true; message = null; _notify();
+    _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
+    backgroundStatus = null; busy = true; message = null; _notify();
     try {
       final parsed = ProfilePolicy.parse(server.profile);
       final auth = credentials ?? await store.credentials(server.id);
@@ -495,10 +548,11 @@ class VpnViewModel extends ChangeNotifier {
       await engine.disconnect(); _nativeNeedsStop = false; activeServer = null;
       state = ConnectionState.disconnected; message = null;
     } catch (_) { state = ConnectionState.error; message = 'Отключение не подтверждено. Повторите или используйте настройки системы.'; }
-    finally { busy = false; _stopping = false; _notify(); }
+    finally { busy = false; _stopping = false; _scheduleBackgroundPreflight(immediate: true); _notify(); }
   }
   @override void dispose() {
-    _disposed = true; _autoEpoch++; _autoMonitor.cancel(); _trafficTimer?.cancel(); _poll?.cancel(); _connectTimeout?.cancel();
+    _disposed = true; _autoEpoch++; _autoMonitor.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
+    _backgroundTimer?.cancel(); _trafficTimer?.cancel(); _poll?.cancel(); _connectTimeout?.cancel();
     monitor.cancel();
     unawaited(_subscription?.cancel());
     super.dispose();

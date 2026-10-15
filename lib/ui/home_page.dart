@@ -114,6 +114,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
           Navigator.push(context, MaterialPageRoute<void>(builder: (_) => AppRoutingPage(vpnActive: vm.canDisconnect))),
           icon: const Icon(Icons.call_split), label: const Text('Приложения в обход VPN')),
         const Text('Быстрый режим оставляет первый проверенный VPN. Глубокий сравнивает скорость нескольких вариантов. Недавние результаты учитываются для похожих параметров сети. Во время подбора оставьте приложение открытым.'),
+        if (vm.backgroundStatus != null && !vm.autoSelecting) Text(vm.backgroundStatus!),
         if (vm.autoStatus != null) Text(vm.networkContext.label),
         if (vm.autoStatus != null) Text(vm.autoStatus!),
         if (vm.autoPlan.isNotEmpty) Text(vm.autoPlan),

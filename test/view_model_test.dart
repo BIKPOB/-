@@ -91,6 +91,30 @@ class FailedEngine extends ControlledEngine {
 }
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets('fresh background endpoint check is reused by selection', (tester) async {
+    final engine = MeasuredEngine();
+    var backgroundProbes = 0, selectionProbes = 0;
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () async => const PublicCatalogResult([], false, 0), networkReader: () async => 'wifi',
+      backgroundMonitor: ServerMonitor(probe: (_) async {
+        backgroundProbes++; return const HealthResult(Reachability.reachable, 12);
+      }),
+      autoMonitor: ServerMonitor(probe: (_) async {
+        selectionProbes++; return const HealthResult(Reachability.reachable, 99);
+      }));
+    try {
+      await vm.initialize();
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump();
+      expect(backgroundProbes, 1);
+      expect(vm.backgroundStatus, contains('доступно 1'));
+      await vm.autoConnect();
+      expect(selectionProbes, 0);
+      expect(vm.state, ConnectionState.connected);
+      await vm.disconnect();
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   test('quick selection keeps the first measured slow connection without reconnecting', () async {
     final engine = SlowOnlyEngine();
     final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
