@@ -1,4 +1,4 @@
-#define AppVersion "0.9.4"
+#define AppVersion "0.9.5"
 [Setup]
 AppId={{58DF1A93-00CD-4EAE-80B7-870198C92D37}
 AppName=Quiet VPN

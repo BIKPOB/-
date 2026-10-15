@@ -75,6 +75,7 @@ object NetworkSnapshot {
             "type" to when {
                 caps.hasTransport(NC.TRANSPORT_WIFI) -> "wifi"
                 caps.hasTransport(NC.TRANSPORT_CELLULAR) -> "mobile"
+                caps.hasTransport(NC.TRANSPORT_ETHERNET) -> "ethernet"
                 else -> "other"
             },
             // Used only to cancel a search when Wi-Fi changes to another Wi-Fi; never persisted.

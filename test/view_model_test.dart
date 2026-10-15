@@ -1,3 +1,4 @@
+import 'package:quiet_vpn/core/network_baseline.dart';
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart' hide ConnectionState;
@@ -91,6 +92,24 @@ class FailedEngine extends ControlledEngine {
 }
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('network baseline keeps search going past a working but insufficient VPN', () async {
+    final engine = MeasuredEngine();
+    final other = VpnServer.fromJson({...server.toJson(), 'id': 'fast', 'host': '9.9.9.9',
+      'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.9')});
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () async => PublicCatalogResult([other], false, 0), networkReader: () async => 'wifi',
+      autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize();
+      vm.baseline = NetworkBaseline('', 'wifi', DateTime.now(), 1000000, 10);
+      await vm.autoConnect();
+      expect(engine.chosen, ['8.8.8.8', '9.9.9.9']);
+      expect(vm.targetBytesPerSecond, 600000);
+      expect(vm.connectionVerified, true);
+      await vm.disconnect();
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   testWidgets('fresh background endpoint check is reused by selection', (tester) async {
     final engine = MeasuredEngine();
     var backgroundProbes = 0, selectionProbes = 0;

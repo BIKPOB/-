@@ -96,6 +96,18 @@ class MainActivity : FlutterActivity() {
                     }
                 } catch (_: Exception) { result.error("APP_ROUTING", "Не удалось прочитать или сохранить список приложений", null) }
             }
+        NetworkBaselineStore.schedule(applicationContext)
+        io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/baseline")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "pause" -> { NetworkBaselineStore.pause(call.arguments == true); result.success(null) }
+                    "tick" -> {
+                        NetworkBaselineStore.request(applicationContext)
+                        result.success(NetworkBaselineStore.read(applicationContext))
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         wg = WgBridge(this)
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/wg").setMethodCallHandler(wg::handle)
         io.flutter.plugin.common.EventChannel(engine.dartExecutor.binaryMessenger, "quietvpn/wg-events").setStreamHandler(object : io.flutter.plugin.common.EventChannel.StreamHandler {

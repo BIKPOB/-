@@ -14,6 +14,7 @@ import '../data/profile_store.dart';
 import '../data/public_catalog.dart';
 import '../core/adaptive_selector.dart';
 import '../core/network_context.dart';
+import '../core/network_baseline.dart';
 import '../platform/vpn_engine.dart';
 import '../platform/desktop_capabilities.dart';
 
@@ -49,6 +50,37 @@ class VpnViewModel extends ChangeNotifier {
   Timer? _backgroundTimer;
   int _backgroundEpoch = 0;
   String? backgroundStatus;
+  final _baselineMonitor = BaselineMonitor();
+  Timer? _baselineTimer;
+  NetworkBaseline? baseline;
+  String baselineStatus = 'Наблюдение за вашей сетью: ожидание замера без VPN';
+  int? _selectionTarget;
+  int get targetBytesPerSecond => _selectionTarget ?? 131072;
+  void _scheduleBaseline({bool immediate = false}) {
+    _baselineTimer?.cancel();
+    if (_disposed || !ready || (!Platform.isWindows && !_foreground)) return;
+    _baselineTimer = Timer(Duration(seconds: immediate ? 1 : 30), () async {
+      try {
+        if (!autoSelecting && !_nativeNeedsStop && !busy) {
+          final context = await _network();
+          if (_disposed || autoSelecting || _nativeNeedsStop || busy) return;
+          networkContext = context;
+          await _baselineMonitor.pause(false);
+          final result = await _baselineMonitor.tick(context, readNetwork: _network);
+          if (_disposed) return;
+          final current = await _network();
+          if (context.sameConnection(current) && result?.fresh(current, DateTime.now()) == true) {
+            baseline = result;
+            baselineStatus = '${result!.label} · цель VPN ${(result.target * 8 / 1000000).toStringAsFixed(1)} Мбит/с (60%)';
+          } else {
+            baseline = null;
+            baselineStatus = 'Ваша сеть: ${current.label} · свежий прямой замер пока недоступен';
+          }
+        }
+      } catch (_) { baselineStatus = 'Прямой замер временно недоступен; наблюдение продолжается'; }
+      finally { if (!_disposed) { _notify(); _scheduleBaseline(); } }
+    });
+  }
   static const _networkChannel = MethodChannel('quietvpn/catalog-cache');
   NetworkContext networkContext = const NetworkContext();
   final List<String> autoAttemptReports = [];
@@ -106,6 +138,8 @@ class VpnViewModel extends ChangeNotifier {
     try {
       final context = await _network();
       networkContext = context;
+      _selectionTarget = baseline?.fresh(context, DateTime.now()) == true ? baseline!.target : null;
+      await _baselineMonitor.pause(true);
       final network = context.type;
       if (cancelled()) return;
       if (network == 'offline') { autoStatus = 'Нет доступной сети'; return; }
@@ -153,7 +187,7 @@ class VpnViewModel extends ChangeNotifier {
         ...ordered.where((s) => _selector.recentPriority(s, context) == tier)];
       ordered..clear()..addAll(tiered);
       final finalists = <({VpnServer server, double utility})>[];
-      autoPlan = '${deep ? 'Глубокий' : 'Быстрый'} подбор · план: ${ordered.map((s) => s.protocol).join(' → ')}';
+      autoPlan = '${_selectionTarget == null ? '' : 'Цель сети: ${(targetBytesPerSecond * 8 / 1000000).toStringAsFixed(1)} Мбит/с · '}${deep ? 'Глубокий' : 'Быстрый'} подбор · план: ${ordered.map((s) => s.protocol).join(' → ')}';
       autoAttemptReports.add('База: ${catalog.status}\n'
         '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}\n$autoPlan');
       final searchClock = Stopwatch()..start();
@@ -183,6 +217,9 @@ class VpnViewModel extends ChangeNotifier {
         final sameNetwork = context.sameConnection(duringVpn);
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
         var success = state == ConnectionState.connected && connectionVerified;
+        if (_selectionTarget != null) {
+          success = state == ConnectionState.connected && (measuredBytesPerSecond ?? 0) >= targetBytesPerSecond;
+        }
         final speeds = <int>[];
         if (measuredBytesPerSecond != null) speeds.add(measuredBytesPerSecond!);
         var repeatFailed = false;
@@ -204,7 +241,7 @@ class VpnViewModel extends ChangeNotifier {
           }
           if (cancelled()) return;
           speeds.sort();
-          success = !repeatFailed && speeds.length == 3 && speeds.first >= 131072;
+          success = !repeatFailed && speeds.length == 3 && speeds.first >= targetBytesPerSecond;
         }
         final medianSpeed = speeds.isEmpty ? null : speeds[speeds.length ~/ 2];
         final usable = state == ConnectionState.connected && !repeatFailed &&
@@ -228,7 +265,8 @@ class VpnViewModel extends ChangeNotifier {
           autoAttemptReports.add('${speeds.length} замер(а): ${speeds.map((n) => '${(n / 1024).round()} КиБ/с').join(', ')}');
         }
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
-        if (!deep && (success || usable) && sameNetwork) {
+        if (!deep && (success || (usable && _selectionTarget == null)) && sameNetwork) {
+          connectionVerified = success;
           autoStatus = success
             ? 'ИИ выбрал соединение с подтверждённым HTTPS · опыт: ${_selector.samples}'
             : 'ИИ сохранил первый рабочий VPN; скорость ниже цели. Глубокий подбор может найти быстрее.';
@@ -260,6 +298,7 @@ class VpnViewModel extends ChangeNotifier {
           }
           if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
           if (state == ConnectionState.connected && (connectionVerified || (measuredBytesPerSecond ?? 0) > 0) && context.sameConnection(await _network())) {
+            if (_selectionTarget != null) connectionVerified = (measuredBytesPerSecond ?? 0) >= targetBytesPerSecond;
             autoStatus = connectionVerified
                 ? 'Выбран лучший из ${finalists.length} измеренных вариантов · опыт: ${_selector.samples}'
                 : 'Сохранён рабочий резервный VPN; скорость ниже целевой. Можно повторить подбор позже.'; return;
@@ -272,7 +311,7 @@ class VpnViewModel extends ChangeNotifier {
     } catch (_) { autoStatus = 'Подбор не завершён. Проверьте сеть и диагностику.'; }
     finally {
       try { await store.saveAttempts('${DateTime.now().toIso8601String()}\n${autoAttemptReports.join('\n\n')}'); } catch (_) { }
-      autoSelecting = false; if (!_disposed) { _scheduleProbe(); _scheduleBackgroundPreflight(); _notify(); } }
+      autoSelecting = false; if (!_disposed) { _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate: true); _notify(); } }
   }
   bool _foreground = true, _disposed = false, _nativeNeedsStop = false, _stopping = false;
   bool _verifying = false;
@@ -318,7 +357,7 @@ class VpnViewModel extends ChangeNotifier {
       await engine.initialize(); ready = true;
     } catch (_) { message = 'Не удалось инициализировать VPN или защищённое хранилище. На Windows проверьте установку и запуск от администратора.'; state = ConnectionState.error; }
     if (servers.isNotEmpty) selectedId = servers.first.id;
-    _scheduleProbe(immediate: true); _scheduleBackgroundPreflight(immediate: true); _notify();
+    _scheduleProbe(immediate: true); _scheduleBackgroundPreflight(immediate: true); _scheduleBaseline(immediate: true); _notify();
   }
   void refreshLatency() {
     _probeEpoch++; monitor.cancel();
@@ -336,6 +375,8 @@ class VpnViewModel extends ChangeNotifier {
   void setForeground(bool visible) {
     if (_disposed || _foreground == visible) return;
     _foreground = visible;
+    _baselineTimer?.cancel();
+    if (visible) _scheduleBaseline(immediate: true);
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     if (!visible && autoSelecting && !requestingNetworkPermission) {
       unawaited(cancelAutoSelection(reason: 'Подбор остановлен: приложение ушло в фон'));
@@ -427,6 +468,7 @@ class VpnViewModel extends ChangeNotifier {
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     backgroundStatus = null; busy = true; message = null; _notify();
     try {
+      await _baselineMonitor.pause(true);
       final parsed = ProfilePolicy.parse(server.profile);
       final auth = credentials ?? await store.credentials(server.id);
       if (parsed.needsAuth && auth == null) throw StateError('Укажите логин и пароль профиля');
@@ -546,11 +588,13 @@ class VpnViewModel extends ChangeNotifier {
     _connectTimeout?.cancel(); _connectTimeout = null; _notify();
     try {
       await engine.disconnect(); _nativeNeedsStop = false; activeServer = null;
+      await _baselineMonitor.pause(false);
       state = ConnectionState.disconnected; message = null;
     } catch (_) { state = ConnectionState.error; message = 'Отключение не подтверждено. Повторите или используйте настройки системы.'; }
     finally { busy = false; _stopping = false; _scheduleBackgroundPreflight(immediate: true); _notify(); }
   }
   @override void dispose() {
+    _baselineTimer?.cancel(); _baselineMonitor.dispose();
     _disposed = true; _autoEpoch++; _autoMonitor.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     _backgroundTimer?.cancel(); _trafficTimer?.cancel(); _poll?.cancel(); _connectTimeout?.cancel();
     monitor.cancel();

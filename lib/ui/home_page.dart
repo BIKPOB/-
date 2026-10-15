@@ -18,7 +18,8 @@ class HomePage extends StatefulWidget {
 }
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver, WindowListener {
   bool _closing = false;
-  @override void onWindowClose() async {
+  @override void onWindowClose() async { await windowManager.minimize(); }
+  Future<void> _exit() async {
     if (_closing) return;
     _closing = true;
     try {
@@ -54,6 +55,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
       'Состояние: ${vm.state.name}\nЭтап: ${vm.connectionStage ?? '—'}\n${vm.message ?? ''}\n'
       'Интернет и качество подтверждены: ${vm.connectionVerified}\n'
       'Сеть: ${vm.networkContext.label} · обучающих замеров: ${vm.learningSamples}\n'
+      '${vm.baselineStatus}\n'
       'ИИ: ${vm.autoStatus ?? 'не запускался'}\n${vm.autoAttemptReports.join('\n\n')}';
     if (!mounted) return;
     await showDialog<void>(context: context, builder: (context) => AlertDialog(title: const Text('Диагностика'),
@@ -64,7 +66,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
   Future<void> _deepSearch() async {
     final deep = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
       title: const Text('Режим ИИ-подбора'),
-      content: const Text('Быстрый режим оставит первый профиль, прошедший проверку системного VPN, DNS, HTTPS и скорости. Недавно работавшие профили проверяются первыми, недавно неудачные — позже. До 12 кандидатов; при таймаутах ожидание всё ещё может быть долгим.\n\nГлубокое сравнение изучит текущую сеть и сравнит до 12 VPN-профилей: DNS, HTTPS и до трёх загрузок по 256 КиБ на каждый. Затем повторно подключит лучший прошедший проверку вариант. Это может занять несколько минут, а при таймаутах — значительно дольше и около 12 МиБ тестовых данных плюс служебный трафик.\n\nНа Windows VPN запускается с правами администратора; сбор параметров сети использует системные API. На Android для мобильной сети приложение запросит доступ к состоянию телефона: он нужен для типа связи и уровня сигнала. Для Wi-Fi используются сигнал и диапазон. Геолокация, звонки и содержимое трафика не собираются. Данные обучения остаются на телефоне. При отказе от разрешения часть параметров будет недоступна.'),
+      content: const Text('Быстрый режим оставит первый профиль, прошедший проверку системного VPN, DNS, HTTPS и скорости. Недавно работавшие профили проверяются первыми, недавно неудачные — позже. До 6 кандидатов; при таймаутах ожидание всё ещё может быть долгим.\n\nГлубокое сравнение изучит текущую сеть и сравнит до 8 VPN-профилей: DNS, HTTPS и до трёх загрузок по 256 КиБ на каждый. Затем повторно подключит лучший прошедший проверку вариант. Это может занять несколько минут, а при таймаутах — значительно дольше и до 6 МиБ тестовых данных плюс служебный трафик.\n\nНа Windows VPN запускается с правами администратора; сбор параметров сети использует системные API. На Android для мобильной сети приложение запросит доступ к состоянию телефона: он нужен для типа связи и уровня сигнала. Для Wi-Fi используются сигнал и диапазон. Геолокация, звонки и содержимое трафика не собираются. Данные обучения остаются на телефоне. При отказе от разрешения часть параметров будет недоступна.'),
       actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Отмена')),
         TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Глубокое сравнение')),
         FilledButton(onPressed: () => Navigator.pop(c, false), child: const Text('Быстро подключиться'))]));
@@ -92,6 +94,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
   @override Widget build(BuildContext context) => ListenableBuilder(listenable: vm, builder: (context, _) {
     final items = vm.filtered;
     return Scaffold(appBar: AppBar(title: const Text('Quiet VPN'), actions: [
+      if (Platform.isWindows) IconButton(tooltip: 'Выйти и отключить VPN', onPressed: _exit, icon: const Icon(Icons.exit_to_app)),
       IconButton(tooltip: 'Проверить пинг', onPressed: vm.refreshLatency, icon: const Icon(Icons.refresh)),
       IconButton(tooltip: 'Обучение', onPressed: _learning, icon: const Icon(Icons.psychology_outlined)),
       IconButton(tooltip: 'Диагностика', onPressed: _diagnostics, icon: const Icon(Icons.bug_report_outlined)),
@@ -114,6 +117,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
           Navigator.push(context, MaterialPageRoute<void>(builder: (_) => AppRoutingPage(vpnActive: vm.canDisconnect))),
           icon: const Icon(Icons.call_split), label: const Text('Приложения в обход VPN')),
         const Text('Быстрый режим оставляет первый проверенный VPN. Глубокий сравнивает скорость нескольких вариантов. Недавние результаты учитываются для похожих параметров сети. Во время подбора оставьте приложение открытым.'),
+        Text('${vm.baselineStatus}${vm.canDisconnect ? ' · прямые замеры приостановлены' : ''}'),
+        const Text('Автозамеры сети без VPN: до 8 МиБ/сутки в лимитной сети, до 32 МиБ в безлимитной, плюс служебный трафик. При VPN замеры приостановлены.'),
         if (vm.backgroundStatus != null && !vm.autoSelecting) Text(vm.backgroundStatus!),
         if (vm.autoStatus != null) Text(vm.networkContext.label),
         if (vm.autoStatus != null) Text(vm.autoStatus!),

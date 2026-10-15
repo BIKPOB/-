@@ -26,8 +26,14 @@ switch ($Operation) {
   if(!$a){ @{type='offline';session=''} | ConvertTo-Json -Compress; break }
   $medium=[int]$a.NdisPhysicalMedium
   $type=if($medium -in @(1,9)){'wifi'}elseif($medium -eq 8){'mobile'}else{'ethernet'}
-  # Interface identifier stays on device; do not collect SSID, MAC or IP addresses.
-  @{type=$type;session=[string]$a.ifIndex;ambiguous=($routes.Count -gt 1 -and $routes[0].RouteMetric -eq $routes[1].RouteMetric)} | ConvertTo-Json -Compress
+  # Persist only a local hash to distinguish networks on the same adapter.
+  $profile=Get-NetConnectionProfile -InterfaceIndex $a.ifIndex -ErrorAction SilentlyContinue
+  $identity=([string]$a.InterfaceGuid)+'|'+([string]$profile.Name)
+  $hash=[System.Security.Cryptography.SHA256]::Create()
+  try { $session=([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($identity)))).Replace('-','') } finally { $hash.Dispose() }
+  # Be conservative: an active virtual adapter may route the speed sample through another VPN.
+  $virtual=@(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and !$_.HardwareInterface })
+  @{type=$type;session=$session;ambiguous=($virtual.Count -gt 0 -or ($routes.Count -gt 1 -and $routes[0].RouteMetric -eq $routes[1].RouteMetric))} | ConvertTo-Json -Compress
  }
  'tunnel' {
   $a=Get-NetAdapter -Name $Alias -ErrorAction SilentlyContinue

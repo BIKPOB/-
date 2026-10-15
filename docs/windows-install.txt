@@ -1,6 +1,6 @@
-Quiet VPN 0.9.4 — Windows 10/11 x64
+Quiet VPN 0.9.5 — Windows 10/11 x64
 
-Download quiet-vpn-0.9.4-windows-x64-setup.exe from GitHub Releases.
+Download quiet-vpn-0.9.5-windows-x64-setup.exe from GitHub Releases.
 Run the installer and approve the administrator prompt. Quiet VPN also needs
 administrator rights to create VPN adapters and manage its own tunnel service.
 The Quiet VPN installer is unsigned: no publisher signing certificate is configured.
