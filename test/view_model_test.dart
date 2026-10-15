@@ -1,3 +1,5 @@
+import 'package:quiet_vpn/platform/desktop_capabilities.dart';
+import 'package:quiet_vpn/core/network_context.dart';
 import 'package:quiet_vpn/core/network_baseline.dart';
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
@@ -70,6 +72,18 @@ class MeasuredEngine extends ControlledEngine {
     controller.add(EngineEvent(ConnectionState.connected, 'measured', true, currentSpeed));
   }
 }
+class DesktopSpeedEngine extends MeasuredEngine implements DesktopCapabilities {
+  @override Future<NetworkContext> readNetwork() async => const NetworkContext(type: 'ethernet');
+  @override Future<String> diagnostics() async => '';
+  @override Future<Map<String, dynamic>> probeTunnel() async =>
+    {'delay': 100, 'quality': true, 'bytesPerSecond': currentSpeed};
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++; chosen.add(server.host);
+    currentSpeed = server.host == '1.1.1.1' ? 900000 : server.host == '9.9.9.9' ? 300000 : 200000;
+    // Old/native quality flags must not override the desktop speed requirement.
+    controller.add(EngineEvent(ConnectionState.connected, 'measured', true, currentSpeed));
+  }
+}
 class RestoreEngine extends MeasuredEngine {
   RestoreEngine({this.permanent = false});
   final bool permanent;
@@ -105,6 +119,38 @@ class FailedEngine extends ControlledEngine {
 }
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  for (final deep in [false, true]) {
+    test('desktop skips two working slow endpoints and finds a fast one: deep=$deep', () async {
+      final engine = DesktopSpeedEngine();
+      final pool = [for (final host in ['9.9.9.9', '1.1.1.1'])
+        VpnServer.fromJson({...server.toJson(), 'id': host, 'host': host,
+          'profile': server.profile.replaceAll('8.8.8.8', host)})];
+      final vm = VpnViewModel(engine, MemoryProfiles(),
+        ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+        catalogLoader: () async => PublicCatalogResult(pool, false, 0),
+        autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+      try {
+        await vm.initialize(); await vm.autoConnect(deep: deep);
+        expect(engine.chosen, ['8.8.8.8', '9.9.9.9', '1.1.1.1']);
+        expect(vm.targetBytesPerSecond, 625000);
+        expect(vm.connectionVerified, true);
+        expect(vm.autoAttemptReports.where((r) => r.contains('работает, ниже цели')).length, 2);
+        await vm.disconnect();
+      } finally { vm.dispose(); await engine.dispose(); }
+    });
+  }
+  test('desktop manual connection cannot mark 1.6 Mbit as good quality', () async {
+    final engine = DesktopSpeedEngine();
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize(); await vm.connect(null);
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.state, ConnectionState.connected);
+      expect(vm.connectionVerified, false);
+      await vm.disconnect();
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   test('network baseline keeps search going past a working but insufficient VPN', () async {
     final engine = MeasuredEngine();
     final other = VpnServer.fromJson({...server.toJson(), 'id': 'fast', 'host': '9.9.9.9',

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
+import '../core/speed_policy.dart';
 
 /// Bind both DNS and HTTPS sockets to the actual VPN interface address.
 /// A broken tunnel cannot pass this test via the physical adapter.
@@ -175,25 +176,27 @@ class WindowsProbe {
         final response = await request.close();
         if (response.statusCode != 204) throw HttpException('HTTPS status ${response.statusCode}');
         await response.drain<void>();
-        final data = await client.getUrl(Uri.parse('https://speed.cloudflare.com/__down?bytes=262144'));
+        // Include request setup and first-byte latency so a buffered burst cannot
+        // make an otherwise sluggish endpoint look fast. Bound traffic to 4 MiB.
+        final download = Stopwatch()..start();
+        final data = await client.getUrl(Uri.parse('https://speed.cloudflare.com/__down?bytes=${SpeedPolicy.sampleMaximumBytes}'));
         data.followRedirects = false; data.headers.set('Accept-Encoding', 'identity');
         final stream = await data.close();
         if (stream.statusCode != 200) throw HttpException('Download status ${stream.statusCode}');
-        final download = Stopwatch()..start();
-        phase = 'Загрузка 256 КиБ';
+        phase = 'Замер загрузки до 4 МиБ';
         await for (final chunk in stream) {
           if (token != _generation) throw const SocketException('Cancelled');
           bytes += chunk.length;
-          if (bytes >= 262144) break;
+          if (SpeedPolicy.sampleComplete(bytes, download.elapsedMilliseconds)) break;
         }
-        if (bytes < 262144) throw const HttpException('Incomplete download');
-        final speed = 262144000 ~/ max(1, download.elapsedMilliseconds);
+        if (!SpeedPolicy.sampleComplete(bytes, download.elapsedMilliseconds)) throw const HttpException('Incomplete download');
+        final speed = bytes * 1000 ~/ max(1, download.elapsedMilliseconds);
         if (_usedDoh) {
           return <String, dynamic>{'delay': -1, 'quality': false,
             'detail': 'HTTPS и загрузка через VPN работают с DoH, но обычный DNS туннеля не подтверждён. Автоподбор не считает это исправным системным VPN.'};
         }
-        return <String, dynamic>{'delay': clock.elapsedMilliseconds, 'quality': speed >= 131072,
-          'bytesPerSecond': speed, 'detail': 'Windows VPN: DNS, HTTPS и 256 КиБ подтверждены · ${speed ~/ 1024} КиБ/с'};
+        return <String, dynamic>{'delay': clock.elapsedMilliseconds, 'quality': speed >= SpeedPolicy.desktopMinimum,
+          'bytesPerSecond': speed, 'detail': 'Windows VPN: DNS, HTTPS и ${bytes ~/ 1024} КиБ за ${download.elapsedMilliseconds} мс · ${(speed * 8 / 1000000).toStringAsFixed(2)} Мбит/с'};
       })().timeout(const Duration(seconds: 27));
     } catch (e) {
       return {'delay': -1, 'quality': false, 'detail': 'Проверка через интерфейс VPN: $phase · ${e is HttpException ? e.message : e.runtimeType} · ${clock.elapsedMilliseconds} мс · $bytes байт'};

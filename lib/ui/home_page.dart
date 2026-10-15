@@ -116,7 +116,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
         if (!Platform.isWindows) OutlinedButton.icon(onPressed: vm.autoSelecting || vm.busy ? null : () =>
           Navigator.push(context, MaterialPageRoute<void>(builder: (_) => AppRoutingPage(vpnActive: vm.canDisconnect))),
           icon: const Icon(Icons.call_split), label: const Text('Приложения в обход VPN')),
-        const Text('Быстрый режим оставляет первый проверенный VPN. Глубокий сравнивает скорость нескольких вариантов. Недавние результаты учитываются для похожих параметров сети. Во время подбора оставьте приложение открытым.'),
+        const Text('Быстрый режим ищет VPN с целевой скоростью. Глубокий сравнивает несколько вариантов. На Windows цель — не ниже 5 Мбит/с, медленный VPN отмечается как резерв. Недавние результаты учитываются для похожих параметров сети. Во время подбора оставьте приложение открытым.'),
+        if (Platform.isWindows) const Text('Проверка скорости VPN: до 4 МиБ на замер; глубокий режим делает до трёх замеров на кандидат. Скорость до тестового узла не гарантирует доступность YouTube.'),
         Text('${vm.baselineStatus}${vm.canDisconnect ? ' · прямые замеры приостановлены' : ''}'),
         const Text('Автозамеры сети без VPN: до 8 МиБ/сутки в лимитной сети, до 32 МиБ в безлимитной, плюс служебный трафик. При VPN замеры приостановлены.'),
         if (vm.backgroundStatus != null && !vm.autoSelecting) Text(vm.backgroundStatus!),

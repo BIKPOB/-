@@ -15,6 +15,7 @@ import '../data/public_catalog.dart';
 import '../core/adaptive_selector.dart';
 import '../core/network_context.dart';
 import '../core/network_baseline.dart';
+import '../core/speed_policy.dart';
 import '../platform/vpn_engine.dart';
 import '../platform/desktop_capabilities.dart';
 
@@ -55,7 +56,8 @@ class VpnViewModel extends ChangeNotifier {
   NetworkBaseline? baseline;
   String baselineStatus = 'Наблюдение за вашей сетью: ожидание замера без VPN';
   int? _selectionTarget;
-  int get targetBytesPerSecond => _selectionTarget ?? 131072;
+  bool get _desktop => engine is DesktopCapabilities;
+  int get targetBytesPerSecond => _desktop ? SpeedPolicy.desktopTarget(_selectionTarget) : _selectionTarget ?? 131072;
   void _scheduleBaseline({bool immediate = false}) {
     _baselineTimer?.cancel();
     if (_disposed || !ready || (!Platform.isWindows && !_foreground)) return;
@@ -146,8 +148,13 @@ class VpnViewModel extends ChangeNotifier {
       final catalog = await _catalogLoader();
       if (cancelled()) return;
       final pool = [..._imports, ...catalog.servers];
+      int priority(VpnServer server) {
+        final speed = _selector.recentSpeed(server, context);
+        if (_desktop && speed > 0 && speed < targetBytesPerSecond) return -1;
+        return _selector.recentPriority(server, context);
+      }
       int rank(VpnServer a, VpnServer b, Map<String, HealthResult>? latency) {
-        final recent = _selector.recentPriority(b, context).compareTo(_selector.recentPriority(a, context));
+        final recent = priority(b).compareTo(priority(a));
         if (recent != 0) return recent;
         final speed = _selector.recentSpeed(b, context).compareTo(_selector.recentSpeed(a, context));
         if (speed != 0) return speed;
@@ -184,10 +191,10 @@ class VpnViewModel extends ChangeNotifier {
       // Preserve protocol diversity within each retry tier, but do not force a
       // recent failure ahead of an untried or recently verified profile.
       final tiered = [for (final tier in [1, 0, -1])
-        ...ordered.where((s) => _selector.recentPriority(s, context) == tier)];
+        ...ordered.where((s) => priority(s) == tier)];
       ordered..clear()..addAll(tiered);
-      final finalists = <({VpnServer server, double utility})>[];
-      autoPlan = '${_selectionTarget == null ? '' : 'Цель сети: ${(targetBytesPerSecond * 8 / 1000000).toStringAsFixed(1)} Мбит/с · '}${deep ? 'Глубокий' : 'Быстрый'} подбор · план: ${ordered.map((s) => s.protocol).join(' → ')}';
+      final finalists = <({VpnServer server, double utility, int speed, bool qualified})>[];
+      autoPlan = '${_selectionTarget == null && !_desktop ? '' : 'Цель скорости: ${(targetBytesPerSecond * 8 / 1000000).toStringAsFixed(1)} Мбит/с · '}${deep ? 'Глубокий' : 'Быстрый'} подбор · план: ${ordered.map((s) => s.protocol).join(' → ')}';
       autoAttemptReports.add('База: ${catalog.status}\n'
         '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}\n$autoPlan');
       final searchClock = Stopwatch()..start();
@@ -196,7 +203,7 @@ class VpnViewModel extends ChangeNotifier {
       var attempt = 0;
       for (final server in ordered) {
         if (cancelled()) return;
-        if (searchClock.elapsed >= budget || (deep && finalists.length >= 2)) break;
+        if (searchClock.elapsed >= budget || (deep && finalists.where((candidate) => !_desktop || candidate.qualified).length >= 2)) break;
         if ((protocolFailures[server.protocol] ?? 0) >= 2) {
           autoAttemptReports.add('${server.protocol}: пропуск после двух неподтверждённых попыток в этом подборе');
           continue;
@@ -217,7 +224,7 @@ class VpnViewModel extends ChangeNotifier {
         final sameNetwork = context.sameConnection(duringVpn);
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
         var success = state == ConnectionState.connected && connectionVerified;
-        if (_selectionTarget != null) {
+        if (_selectionTarget != null || _desktop) {
           success = state == ConnectionState.connected && (measuredBytesPerSecond ?? 0) >= targetBytesPerSecond;
         }
         final speeds = <int>[];
@@ -261,11 +268,11 @@ class VpnViewModel extends ChangeNotifier {
             speed: medianSpeed, reward: medianSpeed == null || repeatFailed ? null : .2 + .8 * utility);
         }
         if (usable && !context.ambiguous) {
-          finalists.add((server: server, utility: utility));
+          finalists.add((server: server, utility: utility, speed: speeds.first, qualified: success));
           autoAttemptReports.add('${speeds.length} замер(а): ${speeds.map((n) => '${(n / 1024).round()} КиБ/с').join(', ')}');
         }
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
-        if (!deep && (success || (usable && _selectionTarget == null)) && sameNetwork) {
+        if (!deep && (success || (usable && _selectionTarget == null && !_desktop)) && sameNetwork) {
           connectionVerified = success;
           autoStatus = success
             ? 'ИИ выбрал соединение с подтверждённым HTTPS · опыт: ${_selector.samples}'
@@ -274,9 +281,9 @@ class VpnViewModel extends ChangeNotifier {
         }
         // Keep the best live tunnel when comparison is complete: reconnecting
         // a public endpoint can fail even immediately after a successful sample.
-        final comparisonDone = finalists.length >= 2 || server == ordered.last || searchClock.elapsed >= budget;
+        final comparisonDone = finalists.where((candidate) => !_desktop || candidate.qualified).length >= 2 || server == ordered.last || searchClock.elapsed >= budget;
         if (deep && usable && !context.ambiguous && comparisonDone &&
-            finalists.every((candidate) => candidate.utility <= utility)) {
+            finalists.every((candidate) => _desktop ? candidate.speed <= speeds.first : candidate.utility <= utility)) {
           connectionVerified = success;
           measuredBytesPerSecond = medianSpeed;
           autoStatus = success ? 'Сохранён лучший из ${finalists.length} измеренных вариантов без переподключения'
@@ -296,7 +303,7 @@ class VpnViewModel extends ChangeNotifier {
         if (!sameNetwork) await _remember(server, context, null, 'network_uncertain');
       }
       if (finalists.isNotEmpty) {
-        finalists.sort((a, b) => b.utility.compareTo(a.utility));
+        finalists.sort((a, b) => _desktop ? b.speed.compareTo(a.speed) : b.utility.compareTo(a.utility));
         var restoreAttempt = 0;
         // One bounded retry per finalist, after trying the other known-good paths.
         for (final finalist in [...finalists, ...finalists]) {
@@ -314,7 +321,7 @@ class VpnViewModel extends ChangeNotifier {
           if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
           autoAttemptReports.add('Восстановление $restoreAttempt · ${finalist.server.protocol} · ${message ?? connectionStage ?? 'Нет подробностей'}');
           if (state == ConnectionState.connected && (connectionVerified || (measuredBytesPerSecond ?? 0) > 0) && context.sameConnection(await _network())) {
-            if (_selectionTarget != null) connectionVerified = (measuredBytesPerSecond ?? 0) >= targetBytesPerSecond;
+            if (_selectionTarget != null || _desktop) connectionVerified = (measuredBytesPerSecond ?? 0) >= targetBytesPerSecond;
             autoStatus = connectionVerified
                 ? 'Выбран лучший из ${finalists.length} измеренных вариантов · опыт: ${_selector.samples}'
                 : 'Сохранён рабочий резервный VPN; скорость ниже целевой. Можно повторить подбор позже.'; return;
@@ -524,7 +531,7 @@ class VpnViewModel extends ChangeNotifier {
         _nativeConnected = true;
         _nativeNeedsStop = true;
         if (engine is DesktopCapabilities || activeServer?.protocol == 'vless' || activeServer?.protocol == 'shadowsocks') {
-          connectionVerified = event.quality; measuredBytesPerSecond = event.bytesPerSecond;
+          connectionVerified = _desktop ? (event.bytesPerSecond ?? 0) >= targetBytesPerSecond : event.quality; measuredBytesPerSecond = event.bytesPerSecond;
           state = ConnectionState.connected; message = event.message ?? 'Xray: ответ через сервер получен';
           _scheduleTraffic(); _notify();
         } else if (!_verifying && state != ConnectionState.connected) { unawaited(_verifyInternet()); }
