@@ -200,7 +200,8 @@ class VpnViewModel extends ChangeNotifier {
         final utility = medianSpeed == null ? 0.0 :
           (.75 * (medianSpeed / (medianSpeed + 524288)) +
            .25 * (speeds.first / max(1, speeds.last))).toDouble();
-        autoAttemptReports.add('Попытка $attempt · ${server.protocol} · ${success ? 'успех' : 'не подтверждено'}\n${message ?? connectionStage ?? 'Нет подробностей'}');
+        final attemptResult = success ? 'успех' : usable ? 'работает, ниже цели' : 'не подтверждено';
+        autoAttemptReports.add('Попытка $attempt · ${server.protocol} · $attemptResult\n${message ?? connectionStage ?? 'Нет подробностей'}');
         if (sameNetwork && !context.ambiguous && !duringVpn.ambiguous) {
           await _remember(server, context, latency[server.id]?.milliseconds,
             success ? 'verified' : usable ? 'usable' : medianSpeed != null ? 'slow_or_unstable' : 'unconfirmed',
@@ -211,7 +212,12 @@ class VpnViewModel extends ChangeNotifier {
           autoAttemptReports.add('${speeds.length} замер(а): ${speeds.map((n) => '${(n / 1024).round()} КиБ/с').join(', ')}');
         }
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
-        if (!deep && success && sameNetwork) { autoStatus = 'ИИ выбрал соединение с подтверждённым HTTPS · опыт: ${_selector.samples}'; return; }
+        if (!deep && usable && sameNetwork) {
+          autoStatus = success
+            ? 'ИИ выбрал соединение с подтверждённым HTTPS · опыт: ${_selector.samples}'
+            : 'ИИ сохранил первый рабочий VPN; скорость ниже цели. Глубокий подбор может найти быстрее.';
+          return;
+        }
         final failure = message;
         if (_nativeNeedsStop) await disconnect();
         message = failure;

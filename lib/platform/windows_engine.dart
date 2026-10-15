@@ -23,7 +23,7 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities {
   void _capture(List<int> bytes) {
     _logBytes += bytes.length;
     final text = utf8.decode(bytes, allowMalformed: true).toLowerCase();
-    const categories = {'failed to build': 'Ошибка конфигурации', 'invalid': 'Некорректные параметры/ответ', 'timeout': 'Таймаут', 'deadline exceeded': 'Таймаут операции', 'connection refused': 'Сервер отказал', 'connection reset': 'Соединение сброшено', 'no such host': 'DNS не разрешён', 'certificate': 'Ошибка сертификата', 'bad handshake': 'Ошибка согласования', 'eof': 'Соединение закрыто'};
+    const categories = {'failed to build': 'Ошибка конфигурации', 'failed to load': 'Ошибка загрузки конфигурации', 'failed to start': 'Ошибка запуска Xray', 'failed': 'Xray сообщил об ошибке запуска/соединения', 'invalid': 'Некорректные параметры/ответ', 'unsupported': 'Неподдерживаемый параметр', 'timeout': 'Таймаут', 'deadline exceeded': 'Таймаут операции', 'connection refused': 'Сервер отказал', 'connection reset': 'Соединение сброшено', 'no such host': 'DNS не разрешён', 'certificate': 'Ошибка сертификата', 'bad handshake': 'Ошибка согласования', 'eof': 'Соединение закрыто'};
     for (final entry in categories.entries) { if (text.contains(entry.key)) _errors.add(entry.value); }
   }
   String get _errorSummary => _errors.isEmpty ? 'Причина не классифицирована' : _errors.join('; ');

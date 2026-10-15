@@ -91,17 +91,18 @@ class FailedEngine extends ControlledEngine {
 }
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  test('quick selection reconnects a measured slow fallback instead of ending offline', () async {
+  test('quick selection keeps the first measured slow connection without reconnecting', () async {
     final engine = SlowOnlyEngine();
     final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
       catalogLoader: () async => const PublicCatalogResult([], false, 0), networkReader: () async => 'wifi',
       autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
     try {
       await vm.initialize(); await vm.autoConnect();
-      expect(engine.connects, 2);
+      expect(engine.connects, 1);
       expect(vm.state, ConnectionState.connected);
       expect(vm.connectionVerified, false); // Do not relabel a slow path as high quality.
-      expect(vm.autoStatus, contains('резервный'));
+      expect(vm.autoStatus, contains('первый рабочий'));
+      expect(vm.autoAttemptReports.join('\n'), contains('работает, ниже цели'));
       expect(vm.learningJournal.single['outcome'], 'usable');
       await vm.disconnect();
     } finally { vm.dispose(); await engine.dispose(); }

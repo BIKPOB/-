@@ -1,6 +1,7 @@
 package app.quietvpn.quiet_vpn
 
 import java.io.DataInputStream
+import java.io.BufferedInputStream
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -36,6 +37,59 @@ object ProxyProbe {
         if (version != 5 || status != 0) throw IOException("SOCKS reply $status")
         val length = when (type) { 1 -> 4; 4 -> 16; 3 -> input.readUnsignedByte(); else -> throw IOException("SOCKS address") }
         input.readFully(ByteArray(length + 2))
+    }
+    private fun download(token: Int): Map<String, Any> {
+        val host = "speed.cloudflare.com"
+        val socket = Socket()
+        pending = socket
+        val deadline = timer.schedule({ try { socket.close() } catch (_: Exception) { } }, 12, TimeUnit.SECONDS)
+        try {
+            socket.soTimeout = 10000
+            socket.connect(InetSocketAddress("127.0.0.1", 10807), 1500)
+            socksConnect(socket, host)
+            val tls = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(socket, host, 443, true) as SSLSocket
+            tls.use {
+                it.sslParameters = it.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
+                it.soTimeout = 10000
+                it.startHandshake()
+                it.outputStream.write(("GET /__down?bytes=${TunnelProbe.TEST_BYTES} HTTP/1.1\r\n" +
+                    "Host: $host\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n").toByteArray(Charsets.US_ASCII))
+                it.outputStream.flush()
+                val input = BufferedInputStream(it.inputStream)
+                val header = ArrayList<Byte>()
+                while (header.size < 16384) {
+                    val value = input.read()
+                    if (value < 0) throw IOException("HTTP headers")
+                    header.add(value.toByte())
+                    val n = header.size
+                    if (n >= 4 && header[n - 4] == 13.toByte() && header[n - 3] == 10.toByte() &&
+                        header[n - 2] == 13.toByte() && header[n - 1] == 10.toByte()) break
+                }
+                val status = String(header.toByteArray(), Charsets.ISO_8859_1).lineSequence().firstOrNull() ?: ""
+                if (!Regex("HTTP/1\\.[01] 200(?: .*|\\r)?").matches(status.trimEnd())) throw IOException("HTTP status")
+                val started = android.os.SystemClock.elapsedRealtime()
+                var bytes = 0
+                val buffer = ByteArray(8192)
+                while (bytes < TunnelProbe.TEST_BYTES) {
+                    check(token == generation)
+                    val count = input.read(buffer, 0, minOf(buffer.size, TunnelProbe.TEST_BYTES - bytes))
+                    if (count < 0) break
+                    bytes += count
+                }
+                val elapsed = maxOf(1L, android.os.SystemClock.elapsedRealtime() - started)
+                if (bytes != TunnelProbe.TEST_BYTES) throw IOException("Incomplete download")
+                val speed = bytes * 1000L / elapsed
+                return mapOf("delay" to elapsed, "quality" to (speed >= TunnelProbe.MIN_BYTES_PER_SECOND),
+                    "bytesPerSecond" to speed,
+                    "detail" to if (speed >= TunnelProbe.MIN_BYTES_PER_SECOND)
+                        "Xray: HTTPS и 256 КиБ через SOCKS подтверждены · ${speed / 1024} КиБ/с"
+                    else "Xray работает, скорость ${speed / 1024} КиБ/с; соединение сохранено как резервное")
+            }
+        } finally {
+            deadline.cancel(false)
+            try { socket.close() } catch (_: Exception) { }
+            if (pending === socket) pending = null
+        }
     }
     fun measure(context: android.content.Context): Map<String, Any> {
         val token = generation
@@ -76,9 +130,9 @@ object ProxyProbe {
                     if (!Regex("HTTP/1\\.[01] $status(?: .*|\\r)?").matches(line.toString().trimEnd())) throw IOException("HTTP status")
                 }
                 if (token != generation) break
-                val tunnel = TunnelProbe.measure(context).toMutableMap()
-                tunnel["detail"] = "${if (numeric) "HTTPS по IP без DNS подтверждён" else "HTTPS через прокси подтверждён"}; ${tunnel["detail"]}"
-                return tunnel
+                // Xray can exclude this app process from its Android TUN to
+                // avoid a routing loop. Verify and measure its local SOCKS path.
+                return download(token)
             } catch (e: Exception) {
                 failures.add("$host: $stage (${ProbeFailure.describe(e)}, ${android.os.SystemClock.elapsedRealtime() - start} мс)")
             } finally {
@@ -89,6 +143,6 @@ object ProxyProbe {
         }
         return mapOf("delay" to -1L, "detail" to failures.joinToString("; "))
     }
-    fun cancel() { generation++; TunnelProbe.cancel(); try { pending?.close() } catch (_: Exception) { }; pending = null }
+    fun cancel() { generation++; try { pending?.close() } catch (_: Exception) { }; pending = null }
 }
 
