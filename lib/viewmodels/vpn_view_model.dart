@@ -228,7 +228,7 @@ class VpnViewModel extends ChangeNotifier {
           autoAttemptReports.add('${speeds.length} замер(а): ${speeds.map((n) => '${(n / 1024).round()} КиБ/с').join(', ')}');
         }
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
-        if (!deep && usable && sameNetwork) {
+        if (!deep && (success || usable) && sameNetwork) {
           autoStatus = success
             ? 'ИИ выбрал соединение с подтверждённым HTTPS · опыт: ${_selector.samples}'
             : 'ИИ сохранил первый рабочий VPN; скорость ниже цели. Глубокий подбор может найти быстрее.';
