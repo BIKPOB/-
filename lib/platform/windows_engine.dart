@@ -138,6 +138,10 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities {
       _emit(ConnectionState.connecting, 'Windows: проверка DNS, HTTPS и скорости через VPN');
       final result = await _probe.measure(info['address'] as String);
       if (token != _epoch) return;
+      if ((result['delay'] as num? ?? -1) < 0) {
+        _emit(ConnectionState.error, result['detail'] as String);
+        return;
+      }
       _emit(ConnectionState.connected, result['detail'] as String,
         quality: result['quality'] == true, speed: result['bytesPerSecond'] as int?);
     } catch (e) {

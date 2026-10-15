@@ -29,6 +29,7 @@ class BaselineMonitor {
   int _epoch = 0;
   bool _running = false;
   NetworkBaseline? latest;
+  String status = 'свежий прямой замер пока недоступен';
   Future<void> pause(bool value) async {
     if (value) { _epoch++; _client?.close(force: true); }
     if (Platform.isAndroid) await channel.invokeMethod<void>('pause', value);
@@ -39,7 +40,10 @@ class BaselineMonitor {
       if (m != null && m['bytesPerSecond'] != null) latest = NetworkBaseline.fromJson(m);
       return latest;
     }
-    if (!Platform.isWindows || _running || context.ambiguous || context.vpnPresent || context.type == 'offline') return latest;
+    if (context.vpnPresent) { status = 'прямой замер отложен: активен виртуальный сетевой адаптер или VPN'; return latest; }
+    if (context.ambiguous) { status = 'прямой замер отложен: несколько равноприоритетных сетей'; return latest; }
+    if (context.type == 'offline') { status = 'нет доступной сети'; return latest; }
+    if (!Platform.isWindows || _running) return latest;
     _running = true;
     final epoch = _epoch;
     try {
@@ -53,11 +57,15 @@ class BaselineMonitor {
       final interval = Duration(minutes: limited ? 120 : 30);
       final last = DateTime.fromMillisecondsSinceEpoch((saved['attempt'] as num?)?.toInt() ?? 0);
       if (now.difference(last) < const Duration(minutes: 5) ||
-          (saved['attemptSession'] == context.session && now.difference(last) < interval)) { return latest; }
+          (latest?.fresh(context, now) == true && saved['attemptSession'] == context.session && now.difference(last) < interval)) {
+        status = 'ожидание следующего прямого замера (после неудачи — не раньше 5 минут)';
+        return latest;
+      }
       final day = now.toUtc().toIso8601String().substring(0, 10);
       final used = saved['day'] == day ? (saved['used'] as num?)?.toInt() ?? 0 : 0;
       final size = limited ? 1048576 : 4194304;
-      if (used + size > (limited ? 8 : 32) * 1048576 || epoch != _epoch) return latest;
+      if (used + size > (limited ? 8 : 32) * 1048576) { status = 'достигнут суточный лимит трафика прямых замеров'; return latest; }
+      if (epoch != _epoch) return latest;
       // Reserve the complete payload before starting; failed/interrupted tests count too.
       saved.addAll({'day': day, 'used': used + size, 'attempt': now.millisecondsSinceEpoch, 'attemptSession': context.session});
       await file.writeAsString(jsonEncode(saved), flush: true);
@@ -89,6 +97,8 @@ class BaselineMonitor {
         saved['sample'] = latest!.toJson();
         await file.writeAsString(jsonEncode(saved), flush: true);
       } finally { deadline.cancel(); client.close(force: true); _client = null; }
+    } catch (error) {
+      status = 'прямой HTTPS-замер не завершён: ${error.runtimeType}; повтор не раньше 5 минут';
     } finally { _running = false; }
     return latest;
   }

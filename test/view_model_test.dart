@@ -70,6 +70,19 @@ class MeasuredEngine extends ControlledEngine {
     controller.add(EngineEvent(ConnectionState.connected, 'measured', true, currentSpeed));
   }
 }
+class RestoreEngine extends MeasuredEngine {
+  RestoreEngine({this.permanent = false});
+  final bool permanent;
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++; chosen.add(server.host);
+    currentSpeed = server.host == '8.8.8.8' ? 900000 : 200000;
+    if (connects > 2 && (permanent || connects <= 4)) {
+      controller.add(const EngineEvent(ConnectionState.error, 'restore fixture failure'));
+    } else {
+      controller.add(EngineEvent(ConnectionState.connected, 'measured', true, currentSpeed));
+    }
+  }
+}
 class RetryEngine extends ControlledEngine {
   final chosen = <String>[];
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
@@ -240,7 +253,7 @@ void main() {
     await engine.dispose();
   });
 
-  test('deep selection compares successful candidates and reconnects the faster one', () async {
+  test('deep selection keeps the fastest live finalist without reconnecting', () async {
     final engine = MeasuredEngine();
     const channel = MethodChannel('quietvpn/xray-state');
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel,
@@ -253,7 +266,8 @@ void main() {
       autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
     try {
       await vm.initialize(); await vm.autoConnect(deep: true);
-      expect(engine.connects, 3);
+      expect(engine.connects, 2);
+      expect(engine.disconnects, 1);
       expect(engine.chosen.last, '9.9.9.9');
       expect(vm.learningSamples, 2);
       expect(vm.learningJournal.length, 2);
@@ -264,6 +278,44 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
     }
   });
+  for (final permanent in [false, true]) {
+    test('finalist restoration reports failures and retries: permanent=$permanent', () async {
+      final engine = RestoreEngine(permanent: permanent);
+      const channel = MethodChannel('quietvpn/xray-state');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+        (call) async => {'delay': 100, 'quality': true, 'bytesPerSecond': engine.currentSpeed});
+      final other = VpnServer.fromJson({...server.toJson(), 'id': 'other', 'host': '9.9.9.9',
+        'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.9')});
+      final store = MemoryProfiles();
+      final vm = VpnViewModel(engine, store,
+        ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+        catalogLoader: () async => PublicCatalogResult([other], false, 0), networkReader: () async => 'wifi',
+        autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+      try {
+        await vm.initialize(); await vm.autoConnect(deep: true);
+        expect(engine.connects, permanent ? 6 : 5);
+        expect(store.attempts, contains('Восстановление 1'));
+        expect(store.attempts, contains('restore fixture failure'));
+        if (permanent) {
+          expect(vm.state, ConnectionState.error);
+          expect(vm.connectionVerified, false);
+          expect(vm.measuredBytesPerSecond, isNull);
+          expect(vm.autoStatus, contains('повторное подключение не прошло'));
+        } else {
+          expect(vm.state, ConnectionState.connected);
+          expect(engine.chosen.last, '8.8.8.8');
+          expect(vm.connectionVerified, true);
+          await vm.disconnect();
+          expect(vm.connectionVerified, false);
+          expect(vm.measuredBytesPerSecond, isNull);
+          expect(vm.connectionStage, isNull);
+        }
+      } finally {
+        vm.dispose(); await engine.dispose();
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+      }
+    });
+  }
   test('cancellation during repeated measurement neither trains nor reconnects', () async {
     final engine = MeasuredEngine(), probe = Completer<Map<String, dynamic>>();
     final probing = Completer<void>();

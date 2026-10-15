@@ -74,7 +74,7 @@ class VpnViewModel extends ChangeNotifier {
             baselineStatus = '${result!.label} · цель VPN ${(result.target * 8 / 1000000).toStringAsFixed(1)} Мбит/с (60%)';
           } else {
             baseline = null;
-            baselineStatus = 'Ваша сеть: ${current.label} · свежий прямой замер пока недоступен';
+            baselineStatus = 'Ваша сеть: ${current.label} · ${_baselineMonitor.status}';
           }
         }
       } catch (_) { baselineStatus = 'Прямой замер временно недоступен; наблюдение продолжается'; }
@@ -272,6 +272,17 @@ class VpnViewModel extends ChangeNotifier {
             : 'ИИ сохранил первый рабочий VPN; скорость ниже цели. Глубокий подбор может найти быстрее.';
           return;
         }
+        // Keep the best live tunnel when comparison is complete: reconnecting
+        // a public endpoint can fail even immediately after a successful sample.
+        final comparisonDone = finalists.length >= 2 || server == ordered.last || searchClock.elapsed >= budget;
+        if (deep && usable && !context.ambiguous && comparisonDone &&
+            finalists.every((candidate) => candidate.utility <= utility)) {
+          connectionVerified = success;
+          measuredBytesPerSecond = medianSpeed;
+          autoStatus = success ? 'Сохранён лучший из ${finalists.length} измеренных вариантов без переподключения'
+            : 'Сохранён рабочий резервный VPN; скорость ниже целевой.';
+          return;
+        }
         final failure = message;
         if (_nativeNeedsStop) await disconnect();
         message = failure;
@@ -286,8 +297,12 @@ class VpnViewModel extends ChangeNotifier {
       }
       if (finalists.isNotEmpty) {
         finalists.sort((a, b) => b.utility.compareTo(a.utility));
-        for (final finalist in finalists) {
-          if (cancelled() || !context.sameConnection(await _network())) return;
+        var restoreAttempt = 0;
+        // One bounded retry per finalist, after trying the other known-good paths.
+        for (final finalist in [...finalists, ...finalists]) {
+          restoreAttempt++;
+          if (cancelled()) return;
+          if (!context.sameConnection(await _network())) { autoStatus = 'Сеть изменилась — восстановление VPN остановлено'; return; }
           autoStatus = 'Повторное подключение лучшего из ${finalists.length} проверенных вариантов'; _notify();
           await importProfile(finalist.server.profile, finalist.server.name, 'ИИ · финал', updateFilter: false);
           if (cancelled()) return;
@@ -297,6 +312,7 @@ class VpnViewModel extends ChangeNotifier {
             await Future<void>.delayed(const Duration(milliseconds: 200));
           }
           if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
+          autoAttemptReports.add('Восстановление $restoreAttempt · ${finalist.server.protocol} · ${message ?? connectionStage ?? 'Нет подробностей'}');
           if (state == ConnectionState.connected && (connectionVerified || (measuredBytesPerSecond ?? 0) > 0) && context.sameConnection(await _network())) {
             if (_selectionTarget != null) connectionVerified = (measuredBytesPerSecond ?? 0) >= targetBytesPerSecond;
             autoStatus = connectionVerified
@@ -307,7 +323,9 @@ class VpnViewModel extends ChangeNotifier {
           if (_nativeNeedsStop) return;
         }
       }
-      autoStatus = 'Проверено $attempt вариантов: соединение с подходящей загрузкой не найдено. Результаты всех попыток — в диагностике.';
+      autoStatus = finalists.isNotEmpty
+        ? 'Найдено ${finalists.length} рабочих вариантов, но повторное подключение не прошло проверку. Причины восстановления — в диагностике.'
+        : 'Проверено $attempt вариантов: соединение с подходящей загрузкой не найдено. Результаты всех попыток — в диагностике.';
     } catch (_) { autoStatus = 'Подбор не завершён. Проверьте сеть и диагностику.'; }
     finally {
       try { await store.saveAttempts('${DateTime.now().toIso8601String()}\n${autoAttemptReports.join('\n\n')}'); } catch (_) { }
@@ -511,6 +529,7 @@ class VpnViewModel extends ChangeNotifier {
           _scheduleTraffic(); _notify();
         } else if (!_verifying && state != ConnectionState.connected) { unawaited(_verifyInternet()); }
       case ConnectionState.connecting:
+        connectionVerified = false; measuredBytesPerSecond = null;
         _nativeConnected = false;
         connectionStage = event.message ?? connectionStage;
         message = connectionStage; traffic.reset(); _trafficTimer?.cancel();
@@ -533,7 +552,7 @@ class VpnViewModel extends ChangeNotifier {
         }
         _nativeNeedsStop = false; activeServer = null;
         _connectionEpoch++; _connectTimeout?.cancel(); _connectTimeout = null;
-        state = ConnectionState.disconnected;
+        state = ConnectionState.disconnected; _clearConfirmation();
         _notify();
       case ConnectionState.error:
         unawaited(_fail(event.message ?? 'Ошибка VPN'));
@@ -569,26 +588,32 @@ class VpnViewModel extends ChangeNotifier {
       }
     }
   }
+  void _clearConfirmation() {
+    connectionVerified = false; measuredBytesPerSecond = null; connectionStage = null;
+  }
   Future<void> _fail(String reason) async {
     if (_stopping || _disposed) return;
     if (busy) { _pendingFailure = reason; return; }
+    _clearConfirmation();
     traffic.reset(); _trafficTimer?.cancel();
     _stopping = true; _nativeConnected = false; _connectionEpoch++; _connectTimeout?.cancel(); _connectTimeout = null;
     try {
       if (_nativeNeedsStop) await engine.disconnect();
       _nativeNeedsStop = false; activeServer = null;
+      if (!autoSelecting) await _baselineMonitor.pause(false);
       message = reason;
     } catch (_) { message = '$reason Отключение не подтверждено — повторите его.'; }
     finally { _stopping = false; state = ConnectionState.error; _notify(); }
   }
   Future<void> disconnect() async {
     if (busy || _stopping) return;
+    _clearConfirmation();
     traffic.reset(); _trafficTimer?.cancel();
     busy = true; _stopping = true; _nativeConnected = false; _connectionEpoch++;
     _connectTimeout?.cancel(); _connectTimeout = null; _notify();
     try {
       await engine.disconnect(); _nativeNeedsStop = false; activeServer = null;
-      await _baselineMonitor.pause(false);
+      if (!autoSelecting) await _baselineMonitor.pause(false);
       state = ConnectionState.disconnected; message = null;
     } catch (_) { state = ConnectionState.error; message = 'Отключение не подтверждено. Повторите или используйте настройки системы.'; }
     finally { busy = false; _stopping = false; _scheduleBackgroundPreflight(immediate: true); _notify(); }
