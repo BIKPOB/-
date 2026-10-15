@@ -2,9 +2,9 @@
 
 ## Скачать готовое приложение
 
-- **[Android: APK 0.9.2](https://github.com/BIKPOB/-/releases/download/v0.9.2/quiet-vpn-0.9.2.apk)** — Android 8+, ARM64 / ARMv7.
-- **[Windows: установщик EXE 0.9.2](https://github.com/BIKPOB/-/releases/download/v0.9.2/quiet-vpn-0.9.2-windows-x64-setup.exe)** — Windows 10/11 x64.
-- [Релиз, примечания и контрольные суммы](https://github.com/BIKPOB/-/releases/tag/v0.9.2).
+- **[Android: APK 0.9.4](https://github.com/BIKPOB/-/releases/download/v0.9.4/quiet-vpn-0.9.4.apk)** — Android 8+, ARM64 / ARMv7.
+- **[Windows: установщик EXE 0.9.4](https://github.com/BIKPOB/-/releases/download/v0.9.4/quiet-vpn-0.9.4-windows-x64-setup.exe)** — Windows 10/11 x64.
+- [Релиз, примечания и контрольные суммы](https://github.com/BIKPOB/-/releases/tag/v0.9.4).
 
 В разделе **Assets** выбирайте `.apk` для телефона или `windows-x64-setup.exe` для компьютера. Архивы **Source code** содержат исходники, устанавливать их не нужно.
 
@@ -13,6 +13,12 @@ Windows требует права администратора для VPN. Ус�
 Flutter MVVM клиент для WireGuard/AmneziaWG, VLESS и Shadowsocks. Сохранены импорт профилей, публичные каталоги, быстрый и глубокий ИИ-подбор, локальное обучение, диагностика, проверка загрузки и счётчики трафика. Выбор приложений в обход VPN доступен только на Android.
 
 Релиз публикуется после успешных сборок Android и Windows из одного коммита, тестов и сверки контрольных сумм. [Результаты Actions](https://github.com/BIKPOB/-/actions). Сборочные тесты не гарантируют доступность публичных серверов через конкретного оператора.
+
+## Исправления 0.9.4
+
+Пока VPN выключен и приложение открыто, до 24 адресов проверяются в фоне. Свежие задержки и история реальной скорости используются при ранжировании. Android проверяет VLESS/Shadowsocks и загрузку 256 КиБ непосредственно через SOCKS Xray, что убирает ложный таймаут из-за исключения процесса приложения из TUN. Быстрый режим оставляет первый рабочий VPN; глубокий сравнивает до двух рабочих вариантов.
+
+[Подробности подбора 0.9.4](docs/selection-0.9.4.md).
 
 ## Исправления 0.9.2
 
