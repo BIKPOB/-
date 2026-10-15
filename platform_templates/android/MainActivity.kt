@@ -100,7 +100,12 @@ class MainActivity : FlutterActivity() {
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/baseline")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "pause" -> { NetworkBaselineStore.pause(call.arguments == true); result.success(null) }
+                    "pause" -> {
+                        val pause = call.arguments == true
+                        NetworkBaselineStore.pause(pause)
+                        if (pause) NetworkBaselineStore.whenIdle { runOnUiThread { result.success(null) } }
+                        else result.success(null)
+                    }
                     "tick" -> {
                         NetworkBaselineStore.request(applicationContext)
                         result.success(NetworkBaselineStore.read(applicationContext))

@@ -23,10 +23,14 @@ object NetworkBaselineStore {
     @Volatile private var paused = false
     @Volatile private var epoch = 0
     private fun prefs(c: Context) = c.getSharedPreferences("network-baseline", Context.MODE_PRIVATE)
+    fun whenIdle(done: () -> Unit) { worker.execute { done() } }
     fun cancel() { epoch++; pending?.disconnect() }
     fun pause(value: Boolean) { paused = value; if (value) { epoch++; pending?.disconnect() } }
     fun read(c: Context): Map<String, Any>? = try {
-        val j = JSONObject(prefs(c).getString("sample", "") ?: "")
+        val p = prefs(c)
+        val boot = android.provider.Settings.Global.getInt(c.contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)
+        check(boot >= 0 && p.getInt("sampleBoot", -2) == boot)
+        val j = JSONObject(p.getString("sample", "") ?: "")
         j.keys().asSequence().associateWith { j.get(it) }
     } catch (_: Exception) { null }
     fun schedule(c: Context) {
@@ -88,18 +92,20 @@ object NetworkBaselineStore {
                 else -> "other" }
             val result = JSONObject().put("session", network.networkHandle.toString()).put("type", type)
                 .put("time", now).put("bytesPerSecond", bytes * 1000L / elapsed).put("latencyMs", latency)
-            p.edit().putString("sample", result.toString()).commit()
+            p.edit().putString("sample", result.toString())
+                .putInt("sampleBoot", android.provider.Settings.Global.getInt(c.contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)).commit()
         } catch (_: Exception) { /* Keep last sample; freshness is checked at use. */ }
         finally { deadline.cancel(false); request.disconnect(); if (pending === request) pending = null }
     }
 }
 
 class NetworkBaselineJob : JobService() {
-    @Volatile private var stopped = false
+    private var stopped = java.util.concurrent.atomic.AtomicBoolean(false)
     override fun onStartJob(params: JobParameters): Boolean {
-        stopped = false
-        NetworkBaselineStore.request(applicationContext) { if (!stopped) jobFinished(params, false) }
+        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+        stopped = cancelled
+        NetworkBaselineStore.request(applicationContext) { if (!cancelled.get()) jobFinished(params, false) }
         return true
     }
-    override fun onStopJob(params: JobParameters): Boolean { stopped = true; NetworkBaselineStore.cancel(); return true }
+    override fun onStopJob(params: JobParameters): Boolean { stopped.set(true); NetworkBaselineStore.cancel(); return true }
 }

@@ -53,7 +53,7 @@ class BaselineMonitor {
       final interval = Duration(minutes: limited ? 120 : 30);
       final last = DateTime.fromMillisecondsSinceEpoch((saved['attempt'] as num?)?.toInt() ?? 0);
       if (now.difference(last) < const Duration(minutes: 5) ||
-          (saved['attemptSession'] == context.session && now.difference(last) < interval)) return latest;
+          (saved['attemptSession'] == context.session && now.difference(last) < interval)) { return latest; }
       final day = now.toUtc().toIso8601String().substring(0, 10);
       final used = saved['day'] == day ? (saved['used'] as num?)?.toInt() ?? 0 : 0;
       final size = limited ? 1048576 : 4194304;
