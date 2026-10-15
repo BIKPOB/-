@@ -33,7 +33,7 @@ switch ($Operation) {
   try { $session=([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($identity)))).Replace('-','') } finally { $hash.Dispose() }
   # Be conservative: an active virtual adapter may route the speed sample through another VPN.
   $virtual=@(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and !$_.HardwareInterface })
-  @{type=$type;session=$session;ambiguous=($virtual.Count -gt 0 -or ($routes.Count -gt 1 -and $routes[0].RouteMetric -eq $routes[1].RouteMetric))} | ConvertTo-Json -Compress
+  @{type=$type;session=$session;vpnPresent=($virtual.Count -gt 0);ambiguous=($routes.Count -gt 1 -and $routes[0].RouteMetric -eq $routes[1].RouteMetric)} | ConvertTo-Json -Compress
  }
  'tunnel' {
   $a=Get-NetAdapter -Name $Alias -ErrorAction SilentlyContinue

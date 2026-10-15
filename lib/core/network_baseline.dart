@@ -39,7 +39,7 @@ class BaselineMonitor {
       if (m != null && m['bytesPerSecond'] != null) latest = NetworkBaseline.fromJson(m);
       return latest;
     }
-    if (!Platform.isWindows || _running || context.ambiguous || context.type == 'offline') return latest;
+    if (!Platform.isWindows || _running || context.ambiguous || context.vpnPresent || context.type == 'offline') return latest;
     _running = true;
     final epoch = _epoch;
     try {
@@ -83,7 +83,7 @@ class BaselineMonitor {
         if (bytes != size || elapsed < 20 || epoch != _epoch) return latest;
         if (readNetwork != null) {
           final after = await readNetwork();
-          if (after.ambiguous || !context.sameConnection(after) || epoch != _epoch) return latest;
+          if (after.ambiguous || after.vpnPresent || !context.sameConnection(after) || epoch != _epoch) return latest;
         }
         latest = NetworkBaseline(context.session, context.type, now, bytes * 1000 ~/ elapsed, latency);
         saved['sample'] = latest!.toJson();

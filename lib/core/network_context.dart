@@ -1,9 +1,9 @@
 /// A transient snapshot. Android's link estimates are not measured VPN speed.
 class NetworkContext {
   const NetworkContext({this.type = 'other', this.session = '', this.signal,
-    this.ambiguous = false, this.extended = false, this.phoneGranted = false, this.wifiMhz, this.radio, this.mobileSignal, this.operator, this.downKbps, this.upKbps, this.metered, this.roaming, this.validated});
+    this.ambiguous = false, this.vpnPresent = false, this.extended = false, this.phoneGranted = false, this.wifiMhz, this.radio, this.mobileSignal, this.operator, this.downKbps, this.upKbps, this.metered, this.roaming, this.validated});
   final String type, session;
-  final bool ambiguous, extended, phoneGranted;
+  final bool ambiguous, vpnPresent, extended, phoneGranted;
   final int? wifiMhz, radio, mobileSignal;
   final String? operator;
   String get environmentKey => '$type|${operator ?? "?"}|${radio ?? 0}|${wifiBand ?? 0}';
@@ -16,7 +16,7 @@ class NetworkContext {
   factory NetworkContext.fromMap(Map<dynamic, dynamic> m) => NetworkContext(
     extended: m['extended'] == true, phoneGranted: m['phoneGranted'] == true,
     wifiMhz: m['wifiMhz'] as int?, radio: m['radio'] as int?, mobileSignal: m['mobileSignal'] as int?, operator: m['operator'] as String?,
-    ambiguous: m['ambiguous'] == true, type: m['type'] as String? ?? 'other', session: m['session'] as String? ?? '',
+    vpnPresent: m['vpnPresent'] == true, ambiguous: m['ambiguous'] == true, type: m['type'] as String? ?? 'other', session: m['session'] as String? ?? '',
     signal: m['signal'] as int?, downKbps: m['downKbps'] as int?, upKbps: m['upKbps'] as int?,
     metered: m['metered'] as bool?, roaming: m['roaming'] as bool?, validated: m['validated'] as bool?);
   bool sameConnection(NetworkContext other) => type == other.type && session == other.session;
