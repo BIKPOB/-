@@ -68,16 +68,38 @@ class PublicCatalog {
       b[0] == 192 && b[1] == 168 || b[0] == 100 && b[1] >= 64 && b[1] <= 127);
   }
 
+  /// Round-robin sources; upstream 'verified' is never a local quality result.
+  static List<VpnServer> diverse(List<VpnServer> input, {int? limit}) {
+    final groups = <String, List<VpnServer>>{};
+    for (final server in input) { groups.putIfAbsent(server.source, () => []).add(server); }
+    final result = <VpnServer>[];
+    final profiles = <String>{};
+    var index = 0;
+    while (groups.values.any((group) => index < group.length)) {
+      for (final group in groups.values) {
+        if (index >= group.length) continue;
+        final server = group[index];
+        if (!profiles.add(server.profile)) continue;
+        result.add(server);
+        if (limit != null && result.length >= limit) return result;
+      }
+      index++;
+    }
+    return result;
+  }
+
   Future<PublicCatalogResult> load() async {
     final parts = await Future.wait([
+      _loadSource('https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/verified/configs.txt',
+        null, '0xRadikal/Free-v2ray-Configs verified', ''),
       _loadSource(urls.first, 'assets/public-proxies.txt', source, '10.10.2026'),
       _loadSource('https://raw.githubusercontent.com/NiREvil/vless/refs/heads/main/sub/v2rayng-wg.txt',
         'assets/public-wireguard.txt', 'NiREvil/vless', '11.10.2026'),
     ]);
-    return PublicCatalogResult(parts.expand((p) => p.servers).toList(), parts.any((p) => p.bundled),
+    return PublicCatalogResult(diverse(parts.expand((p) => p.servers).toList()), parts.any((p) => p.bundled),
       parts.fold(0, (n, p) => n + p.skipped), status: parts.map((p) => p.status).join('\n'));
   }
-  Future<PublicCatalogResult> _loadSource(String url, String asset, String name, String date) async {
+  Future<PublicCatalogResult> _loadSource(String url, String? asset, String name, String date) async {
     {
 
       final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
@@ -117,6 +139,7 @@ class PublicCatalog {
         } catch (_) { /* Preserve the previous validated snapshot when a candidate is invalid. */ }
       }
     } catch (_) { /* Native cache is optional on other platforms. */ }
+    if (asset == null) return PublicCatalogResult([], false, 0, status: '$name: источник недоступен, сохранённой базы нет');
     try {
       final parsed = parse(await rootBundle.loadString(asset), bundled: true, sourceName: name);
       return PublicCatalogResult(parsed.servers, true, parsed.skipped, status: '$name: резервная база $date');

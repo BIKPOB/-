@@ -4,6 +4,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:quiet_vpn/data/public_catalog.dart';
 const uuid = '12345678-1234-1234-1234-123456789abc';
 void main() {
+  test('source diversity survives a large first source and removes duplicates', () {
+    final first = PublicCatalog.parse(List.generate(20, (i) =>
+      'vless://$uuid@node$i.example.com:443').join('\n'), sourceName: 'first').servers;
+    final second = PublicCatalog.parse('vless://$uuid@new.example.com:443\n'
+      'vless://$uuid@node0.example.com:443', sourceName: 'second').servers;
+    final result = PublicCatalog.diverse([...first, ...second], limit: 4);
+    expect(result.length, 4);
+    expect(result[1].source, 'second');
+    expect(result.map((s) => s.profile).toSet().length, 4);
+    expect(PublicCatalog.diverse([...first, ...second]).length, 21);
+  });
   test('bundled WireGuard subscription yields native profiles', () {
     final result = PublicCatalog.parse(File('assets/public-wireguard.txt').readAsStringSync(), sourceName: 'NiREvil/vless');
     expect(result.servers, isNotEmpty);

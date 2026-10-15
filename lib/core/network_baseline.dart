@@ -40,7 +40,7 @@ class BaselineMonitor {
       if (m != null && m['bytesPerSecond'] != null) latest = NetworkBaseline.fromJson(m);
       return latest;
     }
-    if (context.vpnPresent) { status = 'прямой замер отложен: активен виртуальный сетевой адаптер или VPN'; return latest; }
+    if (context.vpnPresent) { status = 'прямой замер отложен: внешние маршруты через виртуальный адаптер/VPN'; return latest; }
     if (context.ambiguous) { status = 'прямой замер отложен: несколько равноприоритетных сетей'; return latest; }
     if (context.type == 'offline') { status = 'нет доступной сети'; return latest; }
     if (!Platform.isWindows || _running) return latest;
@@ -71,6 +71,7 @@ class BaselineMonitor {
       await file.writeAsString(jsonEncode(saved), flush: true);
       if (epoch != _epoch) return latest;
       final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
+      client.findProxy = (_) => 'DIRECT';
       _client = client;
       final deadline = Timer(const Duration(seconds: 12), () => client.close(force: true));
       try {

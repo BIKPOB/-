@@ -1,5 +1,6 @@
 param([string]$Bundle='build/windows/x64/runner/Release')
 $ErrorActionPreference='Stop'
+& "$PSScriptRoot/test_network.ps1"
 $engines=Join-Path (Resolve-Path $Bundle) 'engines'
 $probe=Join-Path $engines 'network.ps1'
 & $probe -Operation check

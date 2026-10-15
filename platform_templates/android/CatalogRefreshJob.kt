@@ -20,7 +20,8 @@ object CatalogCache {
     const val MAX_BYTES = 2 * 1024 * 1024
     val sources = mapOf(
         "Au1rxx/free-vpn-subscriptions" to "https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/v2ray-base64.txt",
-        "NiREvil/vless" to "https://raw.githubusercontent.com/NiREvil/vless/refs/heads/main/sub/v2rayng-wg.txt"
+        "NiREvil/vless" to "https://raw.githubusercontent.com/NiREvil/vless/refs/heads/main/sub/v2rayng-wg.txt",
+        "0xRadikal/Free-v2ray-Configs verified" to "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/verified/configs.txt"
     )
     private fun cache(context: Context, source: String, validated: Boolean): AtomicFile {
         val index = sources.keys.indexOf(source)

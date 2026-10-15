@@ -2,6 +2,28 @@ param([ValidateSet('network','tunnel','prepare','cleanup','check')][string]$Oper
       [string]$Path, [ValidateSet('QuietVPN-Xray','QuietVPN-AWG')][string]$Alias='QuietVPN-Xray')
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
+# Local-only Hyper-V/WSL adapters do not carry the direct Internet sample.
+# Unknown/malformed prefixes remain conservative and block measurement.
+function Test-LocalOnlyPrefix([string]$Prefix) {
+ try {
+  $parts=$Prefix.Split('/')
+  if($parts.Count -ne 2){ return $false }
+  $ip=[Net.IPAddress]::Parse($parts[0]); $bits=[int]$parts[1]; $b=$ip.GetAddressBytes()
+  if($b.Length -eq 4) {
+   if($bits -lt 0 -or $bits -gt 32){return $false}
+   return (($bits -ge 8 -and $b[0] -in @(0,10,127)) -or
+    ($bits -ge 12 -and $b[0] -eq 172 -and $b[1] -ge 16 -and $b[1] -le 31) -or
+    ($bits -ge 16 -and (($b[0] -eq 192 -and $b[1] -eq 168) -or ($b[0] -eq 169 -and $b[1] -eq 254))) -or
+    ($bits -ge 4 -and $b[0] -ge 224 -and $b[0] -le 239) -or
+    ($bits -eq 32 -and $ip.ToString() -eq '255.255.255.255'))
+  }
+  if($bits -lt 0 -or $bits -gt 128){return $false}
+  return (($bits -ge 7 -and ($b[0] -band 254) -eq 252) -or
+   ($bits -ge 10 -and $b[0] -eq 254 -and ($b[1] -band 192) -eq 128) -or
+   ($bits -ge 8 -and $b[0] -eq 255) -or ($bits -eq 128 -and $ip.Equals([Net.IPAddress]::IPv6Loopback)))
+ } catch { return $false }
+}
+function Get-CombinedMetric($Route) { return ([long]$Route.RouteMetric + [long]$Route.InterfaceMetric) }
 switch ($Operation) {
  'check' {
   $principal=[Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -21,7 +43,7 @@ switch ($Operation) {
  }
  'network' {
   $physical=@(Get-NetAdapter -Physical | Where-Object Status -eq 'Up')
-  $routes=@(Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -in $physical.ifIndex } | Sort-Object RouteMetric)
+  $routes=@(Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -in $physical.ifIndex } | Sort-Object { Get-CombinedMetric $_ })
   $a=if($routes.Count){$physical | Where-Object ifIndex -eq $routes[0].InterfaceIndex | Select-Object -First 1}else{$physical | Select-Object -First 1}
   if(!$a){ @{type='offline';session=''} | ConvertTo-Json -Compress; break }
   $medium=[int]$a.NdisPhysicalMedium
@@ -31,9 +53,12 @@ switch ($Operation) {
   $identity=([string]$a.InterfaceGuid)+'|'+([string]$profile.Name)
   $hash=[System.Security.Cryptography.SHA256]::Create()
   try { $session=([BitConverter]::ToString($hash.ComputeHash([Text.Encoding]::UTF8.GetBytes($identity)))).Replace('-','') } finally { $hash.Dispose() }
-  # Be conservative: an active virtual adapter may route the speed sample through another VPN.
+  # Inspect routes, not merely the presence of an Up virtual adapter.
   $virtual=@(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and !$_.HardwareInterface })
-  @{type=$type;session=$session;vpnPresent=($virtual.Count -gt 0);ambiguous=($routes.Count -gt 1 -and $routes[0].RouteMetric -eq $routes[1].RouteMetric)} | ConvertTo-Json -Compress
+  $external=@(Get-NetRoute -ErrorAction Stop | Where-Object { $_.InterfaceIndex -in $virtual.ifIndex -and !(Test-LocalOnlyPrefix $_.DestinationPrefix) })
+  $linkMbps=[int]([double]$a.ReceiveLinkSpeed / 1000000)
+  if($linkMbps -le 0){$linkMbps=$null}
+  @{type=$type;session=$session;linkMbps=$linkMbps;vpnPresent=($external.Count -gt 0);ambiguous=($routes.Count -eq 0 -or ($routes.Count -gt 1 -and (Get-CombinedMetric $routes[0]) -eq (Get-CombinedMetric $routes[1])))} | ConvertTo-Json -Compress
  }
  'tunnel' {
   $a=Get-NetAdapter -Name $Alias -ErrorAction SilentlyContinue

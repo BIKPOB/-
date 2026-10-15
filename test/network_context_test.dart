@@ -4,6 +4,14 @@ import 'package:quiet_vpn/core/network_context.dart';
 import 'package:quiet_vpn/core/adaptive_selector.dart';
 
 void main() {
+  test('Ethernet link rate is labelled separately and never used as measured speed', () {
+    final network = NetworkContext.fromMap({'type': 'ethernet', 'session': 'same', 'linkMbps': 1000});
+    expect(network.label, contains('не скорость интернета'));
+    expect(network.linkMbps, 1000);
+    expect(network.downKbps, isNull);
+    expect(network.features, const NetworkContext(type: 'ethernet').features);
+    expect(network.sameConnection(const NetworkContext(type: 'ethernet', session: 'same')), true);
+  });
   test('signal fluctuation keeps session, changing Wi-Fi cancels session', () {
     const a = NetworkContext(type: 'wifi', session: '1', signal: -60);
     expect(a.sameConnection(const NetworkContext(type: 'wifi', session: '1', signal: -85)), isTrue);

@@ -171,7 +171,9 @@ class VpnViewModel extends ChangeNotifier {
         final group = pool.where((s) => s.protocol == protocol).toList()
           ..sort((a, b) => rank(a, b, null));
         var count = 0;
-        for (final server in group) {
+        final diverse = [for (final tier in [1, 0, -1])
+          ...PublicCatalog.diverse(group.where((server) => priority(server) == tier).toList())];
+        for (final server in diverse) {
           if (count >= 8) break;
           if (hosts.add(sha256.convert(utf8.encode(server.profile)).toString())) { candidates.add(server); count++; }
         }
@@ -437,7 +439,7 @@ class VpnViewModel extends ChangeNotifier {
               final priority = _selector.recentPriority(b, context).compareTo(_selector.recentPriority(a, context));
               return priority != 0 ? priority : _selector.recentSpeed(b, context).compareTo(_selector.recentSpeed(a, context));
             });
-          candidates.addAll(group.take(8));
+          candidates.addAll(PublicCatalog.diverse(group, limit: 8));
         }
         backgroundStatus = 'Фоновая проверка ${candidates.length} адресов…'; _notify();
         final measured = await _backgroundMonitor.sample(candidates);
