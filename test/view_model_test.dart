@@ -117,9 +117,15 @@ class FailedEngine extends ControlledEngine {
     controller.add(const EngineEvent(ConnectionState.error, 'unconfirmed transport'));
   }
 }
+class BaseNetworkErrorEngine extends ControlledEngine {
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++;
+    throw PlatformException(code: 'BASE_NETWORK', message: 'Нет однозначной базовой сети');
+  }
+}
 void main() {
-  test('failed preflight is retried once and never launches a VPN', () async {
-    final engine = ControlledEngine();
+  test('failed preflight is retried but still permits a real tunnel attempt', () async {
+    final engine = FailedEngine();
     var probes = 0;
     final vm = VpnViewModel(engine, MemoryProfiles(),
       ServerMonitor(probe: (_) async => const HealthResult(Reachability.notMeasured)),
@@ -131,11 +137,30 @@ void main() {
     try {
       await vm.initialize(); await vm.autoConnect();
       expect(probes, 2);
-      expect(engine.connects, 0);
-      expect(vm.autoAttemptReports.join('\n'), contains('запуск туннеля пропущен'));
+      expect(engine.connects, 1);
+      expect(vm.autoAttemptReports.join('\n'), contains('оставлены в резерве'));
     } finally { vm.dispose(); await engine.dispose(); }
   });
 
+  test('local network error stops selection without penalizing any server', () async {
+    final engine = BaseNetworkErrorEngine();
+    final store = MemoryProfiles();
+    final other = VpnServer.fromJson({...server.toJson(), 'id': 'other',
+      'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.9'), 'host': '9.9.9.9'});
+    final vm = VpnViewModel(engine, store,
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () async => PublicCatalogResult([other], false, 0),
+      networkReader: () async => 'wifi',
+      autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize(); await vm.autoConnect();
+      expect(engine.connects, 1);
+      expect(store.selector, isNull);
+      expect(vm.autoStatus, contains('ошибка выбора базовой сети'));
+      expect(vm.autoAttemptReports.join('\n'), contains('Туннель не запускался'));
+      expect(vm.autoAttemptReports.join('\n'), isNot(contains('после двух')));
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   TestWidgetsFlutterBinding.ensureInitialized();
   test('preflight considers a good endpoint beyond the old eight-profile cutoff', () async {
     final engine = MeasuredEngine();

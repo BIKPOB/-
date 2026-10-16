@@ -15,20 +15,9 @@ import android.content.pm.PackageManager
 object NetworkSnapshot {
     fun read(context: Context, extended: Boolean = false): Map<String, Any?> {
         val cm = context.getSystemService(ConnectivityManager::class.java)
-        val active = cm.activeNetwork
-        val activeCaps = active?.let { cm.getNetworkCapabilities(it) }
         val physical = cm.allNetworks.mapNotNull { n -> cm.getNetworkCapabilities(n)?.let { n to it } }
             .filter { it.second.hasCapability(NC.NET_CAPABILITY_INTERNET) && !it.second.hasTransport(NC.TRANSPORT_VPN) }
-        // VPN capabilities expose underlying transport types, not public network handles.
-        // When multiple physical networks match, report ambiguity instead of inventing a default.
-        val candidates = if (activeCaps?.hasTransport(NC.TRANSPORT_VPN) == true) physical.filter {
-            (it.second.hasTransport(NC.TRANSPORT_WIFI) && activeCaps.hasTransport(NC.TRANSPORT_WIFI)) ||
-            (it.second.hasTransport(NC.TRANSPORT_CELLULAR) && activeCaps.hasTransport(NC.TRANSPORT_CELLULAR)) ||
-            (it.second.hasTransport(NC.TRANSPORT_ETHERNET) && activeCaps.hasTransport(NC.TRANSPORT_ETHERNET))
-        } else physical
-        val chosen = physical.firstOrNull { it.first == active }
-            ?: candidates.singleOrNull()
-            ?: if (candidates.isEmpty()) physical.singleOrNull() else null
+        val chosen = try { BaseNetwork.select(cm) } catch (_: BaseNetworkException) { null }
         if (chosen == null) return mapOf(
             "type" to if (physical.isEmpty()) "offline" else "other",
             "session" to physical.map { it.first.networkHandle }.sorted().joinToString(","),

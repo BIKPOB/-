@@ -11,13 +11,12 @@ class AdaptiveSelector {
   static List<VpnServer> shortlist(List<VpnServer> ranked, {int limit = 6,
       Map<String, HealthResult>? health}) {
     if (health != null) {
-      // TCP availability is a preflight only, never proof of VPN quality.
-      // Unknown UDP remains eligible after responsive TCP; failed TCP does not
-      // re-enter the plan merely to satisfy protocol/source diversity.
+      // TCP availability only ranks candidates; it cannot veto a real tunnel.
       final result = <VpnServer>[];
-      for (final reachable in [true, false]) {
-        final group = ranked.where((s) => health[s.id]?.state != Reachability.unreachable &&
-          (health[s.id]?.state == Reachability.reachable) == reachable).toList();
+      int tier(VpnServer s) => health[s.id]?.state == Reachability.reachable ? 1
+        : health[s.id]?.state == Reachability.unreachable ? -1 : 0;
+      for (final value in [1, 0, -1]) {
+        final group = ranked.where((s) => tier(s) == value).toList();
         result.addAll(shortlist(group, limit: limit - result.length));
         if (result.length >= limit) break;
       }

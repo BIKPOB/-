@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'models.dart';
+import 'package:flutter/services.dart';
 
 typedef Probe = Future<HealthResult> Function(VpnServer server);
 typedef Ping = Future<int?> Function(String host);
@@ -28,6 +29,15 @@ class ServerMonitor {
   }
   Future<Map<String, HealthResult>> _sample(List<VpnServer> candidates, int generation,
       void Function(String, HealthResult)? onResult) async {
+    // Dart sockets follow the default route. Never grade endpoints through a
+    // leftover/other VPN; native startup binds DNS and sockets to BaseNetwork.
+    if (Platform.isAndroid && tcpOnly && _probe == null) {
+      var safe = false;
+      try { safe = await const MethodChannel('quietvpn/xray-state')
+        .invokeMethod<bool>('preflightRouteSafe').timeout(const Duration(seconds: 2)) == true; } catch (_) { }
+      if (!safe) return {for (final s in candidates) s.id:
+        const HealthResult(Reachability.notMeasured, null, 'Маршрут TCP-проверки не подтверждён')};
+    }
     final results = <String, HealthResult>{};
     // Bound parallel sockets/processes, sharing ICMP for profiles on one host.
     final pings = <String, Future<int?>>{};

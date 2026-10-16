@@ -36,7 +36,11 @@ class MainActivity : FlutterActivity() {
             }
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/xray-state")
             .setMethodCallHandler { call, result ->
-                if (call.method == "stage") {
+                if (call.method == "preflightRouteSafe") {
+                    val cm = getSystemService(android.net.ConnectivityManager::class.java)
+                    val caps = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+                    result.success(caps != null && !caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN))
+                } else if (call.method == "stage") {
                     val state = dev.amirzr.flutter_v2ray_client.v2ray.V2rayController.getConnectionState().name
                     result.success(state.removePrefix("V2RAY_"))
                 } else if (call.method == "resolveEndpoint") {
@@ -46,9 +50,15 @@ class MainActivity : FlutterActivity() {
                         try {
                             val address = EndpointProbe.resolve(applicationContext, host, port)
                             runOnUiThread { result.success(address) }
+                        } catch (e: BaseNetworkException) {
+                            XrayDiagnostics.endpointReport = "Подготовка подключения остановлена: ${e.reason}; Xray не запускался"
+                            runOnUiThread { result.error("BASE_NETWORK", e.reason, null) }
+                        } catch (_: SecurityException) {
+                            XrayDiagnostics.endpointReport = "Android запретил доступ к базовой сети; Xray не запускался"
+                            runOnUiThread { result.error("BASE_NETWORK", "Android запретил доступ к базовой сети. Проверьте системные настройки VPN.", null) }
                         } catch (e: Exception) {
-                            XrayDiagnostics.endpointReport += ": ${e.javaClass.simpleName}"
-                            runOnUiThread { result.error("network", "Базовая сеть или DNS сервера недоступны", null) }
+                            XrayDiagnostics.endpointReport = "Разрешение адреса VPN-сервера: ${e.javaClass.simpleName}; Xray не запускался"
+                            runOnUiThread { result.error("ENDPOINT_DNS", "Не удалось разрешить адрес VPN-сервера (${e.javaClass.simpleName})", null) }
                         }
                     }
                 } else if (call.method == "prepareDiagnostics") {

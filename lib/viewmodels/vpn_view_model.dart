@@ -211,7 +211,7 @@ class VpnViewModel extends ChangeNotifier {
         try { await store.saveSelector(_selector.encode()); } catch (_) { }
         if (cancelled()) return;
       }
-      if (skippedTcp > 0) autoAttemptReports.add('TCP: $skippedTcp адресов не ответили при повторной проверке; запуск туннеля пропущен. Это не доказывает блокировку.');
+      if (skippedTcp > 0) autoAttemptReports.add('TCP: $skippedTcp адресов не ответили при повторной проверке; оставлены в резерве для проверки туннеля. Это не доказывает блокировку.');
       candidates.sort((a, b) => rank(a, b, latency));
       final mixed = [for (final tier in [1, 0, -1])
         ...PublicCatalog.diverse(candidates.where((s) => priority(s) == tier).toList())];
@@ -239,6 +239,11 @@ class VpnViewModel extends ChangeNotifier {
         await importProfile(server.profile, server.name, 'ИИ-подбор · ${server.source}', updateFilter: false);
         if (cancelled()) return;
         await connect(null);
+        if (_localNetworkFailure) {
+          autoStatus = 'Подбор остановлен: ошибка выбора базовой сети, серверы не оценивались';
+          autoAttemptReports.add('Подготовка подключения: ${message ?? "базовая сеть недоступна"}. Туннель не запускался; результат не записан как отказ сервера.');
+          return;
+        }
         final deadline = DateTime.now().add(const Duration(seconds: 70));
         while (!cancelled() && (state == ConnectionState.connecting || _stopping) && DateTime.now().isBefore(deadline)) {
           await Future<void>.delayed(const Duration(milliseconds: 200));
@@ -338,6 +343,11 @@ class VpnViewModel extends ChangeNotifier {
           await importProfile(finalist.server.profile, finalist.server.name, 'ИИ · финал', updateFilter: false);
           if (cancelled()) return;
           await connect(null);
+          if (_localNetworkFailure) {
+            autoStatus = 'Восстановление остановлено: ошибка выбора базовой сети';
+            autoAttemptReports.add('Подготовка восстановления: ${message ?? "базовая сеть недоступна"}. Туннель не запускался.');
+            return;
+          }
           final deadline = DateTime.now().add(const Duration(seconds: 70));
           while (!cancelled() && (state == ConnectionState.connecting || _stopping) && DateTime.now().isBefore(deadline)) {
             await Future<void>.delayed(const Duration(milliseconds: 200));
@@ -363,6 +373,7 @@ class VpnViewModel extends ChangeNotifier {
       autoSelecting = false; if (!_disposed) { _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate: true); _notify(); } }
   }
   bool _foreground = true, _disposed = false, _nativeNeedsStop = false, _stopping = false;
+  bool _localNetworkFailure = false;
   bool _verifying = false;
   bool _nativeConnected = false;
   String? _pendingFailure;
@@ -529,7 +540,7 @@ class VpnViewModel extends ChangeNotifier {
     final server = selected;
     if (!ready || busy || _stopping || _nativeNeedsStop || server == null) return;
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
-    backgroundStatus = null; busy = true; message = null; _notify();
+    backgroundStatus = null; busy = true; message = null; _localNetworkFailure = false; _notify();
     try {
       await _baselineMonitor.pause(true);
       final parsed = ProfilePolicy.parse(server.profile);
@@ -550,6 +561,7 @@ class VpnViewModel extends ChangeNotifier {
       _notify();
       await engine.connect(server, auth);
     } catch (error) {
+      _localNetworkFailure = error is PlatformException && error.code == 'BASE_NETWORK';
       await _fail(error is StateError ? error.message.toString()
         : error is PlatformException ? (error.message ?? 'Не удалось запустить VPN')
         : 'Не удалось запустить VPN');

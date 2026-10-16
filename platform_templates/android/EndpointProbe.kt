@@ -10,9 +10,7 @@ object EndpointProbe {
     /** Diagnostic only: TCP success does not authenticate a VPN server. */
     fun resolve(context: Context, host: String, port: Int): String {
         val cm = context.getSystemService(ConnectivityManager::class.java)
-        val network = cm.activeNetwork ?: error("Нет базовой сети")
-        val caps = cm.getNetworkCapabilities(network) ?: error("Нет параметров сети")
-        check(!caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) { "Предыдущий VPN ещё активен" }
+        val (network, caps) = BaseNetwork.select(cm)
         val type = when {
             caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
             caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "мобильная"

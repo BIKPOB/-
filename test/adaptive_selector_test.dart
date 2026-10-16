@@ -16,7 +16,7 @@ void main() {
     expect(selector.recentPriority(server, network, now: now.add(const Duration(minutes: 10))), 0);
     expect(selector.samples, 0);
   });
-  test('preflight removes failed TCP without excluding unknown UDP', () {
+  test('preflight ranks live TCP first but retains failed TCP as tunnel fallback', () {
     VpnServer candidate(String id, String protocol) => VpnServer(id: id, name: id,
       country: '', countryCode: '', host: 'example.com', port: 443,
       transport: protocol == 'wireguard' ? 'udp' : 'tcp', profile: id,
@@ -32,9 +32,9 @@ void main() {
       udp.id: const HealthResult(Reachability.notMeasured),
     };
     expect(AdaptiveSelector.shortlist(ranked, health: health).map((s) => s.id),
-      ['live', 'udp', 'unknown']);
+      ['live', 'udp', 'unknown', 'failed']);
     expect(AdaptiveSelector.shortlist(ranked, limit: 1, health: health), [live]);
-    expect(AdaptiveSelector.shortlist([failed], health: health), isEmpty);
+    expect(AdaptiveSelector.shortlist([failed], health: health), [failed]);
   });
   test('retry preference is bounded, network-specific, persisted and does not train', () {
     const wifi = NetworkContext(type: 'wifi');
