@@ -15,6 +15,8 @@ class PublicCatalogResult {
 }
 
 class PublicCatalog {
+  PublicCatalog({Future<PublicCatalogResult> Function()? refresh}) : _refreshOverride = refresh;
+  final Future<PublicCatalogResult> Function()? _refreshOverride;
   static const _cache = MethodChannel('quietvpn/catalog-cache');
   static const source = 'Au1rxx/free-vpn-subscriptions';
   static const maxBytes = 2 * 1024 * 1024;
@@ -42,7 +44,7 @@ class PublicCatalog {
         final id = sha256.convert(utf8.encode(parsed.text)).toString();
         if (!seen.add(id)) continue;
         final count = counts[parsed.protocol] ?? 0;
-        if (count >= 100) continue;
+        if (count >= 300) continue;
         counts[parsed.protocol] = count + 1;
         servers.add(VpnServer(id: 'public-$id', name: '${parsed.protocol == 'wireguard' ? 'WireGuard' : parsed.protocol == 'vless' ? 'VLESS' : 'Shadowsocks'} · ${parsed.host}:${parsed.port} · ${id.substring(0, 4)}',
           country: 'Публичный сервер', countryCode: '--', host: parsed.host, port: parsed.port,
@@ -88,8 +90,24 @@ class PublicCatalog {
     return result;
   }
 
-  Future<PublicCatalogResult> load() async {
+  PublicCatalogResult? _recent;
+  DateTime? _loadedAt;
+  Future<PublicCatalogResult>? _pendingLoad;
+  Future<PublicCatalogResult> load() {
+    final age = _loadedAt == null ? null : DateTime.now().difference(_loadedAt!);
+    if (_recent != null && age != null && !age.isNegative && age < const Duration(minutes: 5)) {
+      return Future.value(_recent);
+    }
+    return _pendingLoad ??= (_refreshOverride?.call() ?? _refresh()).then((result) {
+      _recent = result; _loadedAt = DateTime.now(); return result;
+    }).whenComplete(() { _pendingLoad = null; });
+  }
+  Future<PublicCatalogResult> _refresh() async {
     final parts = await Future.wait([
+      _loadSource('https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt',
+        null, 'igareck RU VLESS', ''),
+      _loadSource('https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_SS_WEAK_DPI_RUS.txt',
+        null, 'igareck RU Shadowsocks', ''),
       _loadSource('https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/verified/configs.txt',
         null, '0xRadikal/Free-v2ray-Configs verified', ''),
       _loadSource(urls.first, 'assets/public-proxies.txt', source, '10.10.2026'),

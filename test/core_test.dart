@@ -5,6 +5,36 @@ import 'package:quiet_vpn/core/models.dart';
 import 'package:quiet_vpn/core/server_monitor.dart';
 const fixture = '';
 void main() {
+  test('large sweeps cap parallel work without dropping endpoints', () async {
+    var live = 0, peak = 0;
+    final monitor = ServerMonitor(concurrency: 3, probe: (_) async {
+      live++; if (live > peak) peak = live;
+      await Future<void>.delayed(const Duration(milliseconds: 2)); live--;
+      return const HealthResult(Reachability.reachable, 1);
+    });
+    final servers = List.generate(30, (i) => VpnServer(id: '$i', name: '', country: '',
+      countryCode: '', host: '8.8.8.8', port: 443, transport: 'tcp', profile: '', source: 'test'));
+    expect((await monitor.sample(servers)).length, 30);
+    expect(peak, 3);
+  });
+  test('fast preflight checks the port and never substitutes an ICMP response', () async {
+    final listening = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final sub = listening.listen((socket) => socket.destroy());
+    final closed = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final closedPort = closed.port; await closed.close();
+    var pings = 0;
+    final monitor = ServerMonitor(tcpOnly: true, ping: (_) async { pings++; return 1; });
+    VpnServer node(String id, int port, String transport) => VpnServer(id: id, name: '', country: '',
+      countryCode: '', host: '127.0.0.1', port: port, transport: transport, profile: '', source: 'test');
+    try {
+      final results = await monitor.sample([node('open', listening.port, 'tcp'),
+        node('closed', closedPort, 'tcp'), node('udp', closedPort, 'udp')]);
+      expect(pings, 0);
+      expect(results['open']?.method, 'TCP');
+      expect(results['closed']?.state, Reachability.unreachable);
+      expect(results['udp']?.state, Reachability.notMeasured);
+    } finally { monitor.cancel(); await sub.cancel(); await listening.close(); }
+  });
   test('all endpoints start together and one failed probe is isolated', () async {
     var live = 0, peak = 0, calls = 0;
     final monitor = ServerMonitor(probe: (server) async {

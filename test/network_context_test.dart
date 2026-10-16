@@ -4,6 +4,11 @@ import 'package:quiet_vpn/core/network_context.dart';
 import 'package:quiet_vpn/core/adaptive_selector.dart';
 
 void main() {
+  test('different Ethernet connections do not share learned server priority', () {
+    const a = NetworkContext(type: 'ethernet', session: 'provider-a');
+    const b = NetworkContext(type: 'ethernet', session: 'provider-b');
+    expect(a.environmentKey, isNot(b.environmentKey));
+  });
   test('Ethernet link rate is labelled separately and never used as measured speed', () {
     final network = NetworkContext.fromMap({'type': 'ethernet', 'session': 'same', 'linkMbps': 1000});
     expect(network.label, contains('не скорость интернета'));

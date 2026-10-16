@@ -24,8 +24,8 @@ class VpnViewModel extends ChangeNotifier {
     Future<PublicCatalogResult> Function()? catalogLoader,
     Future<String> Function()? networkReader, ServerMonitor? autoMonitor, ServerMonitor? backgroundMonitor,
   }) : _catalogLoader = catalogLoader ?? PublicCatalog().load,
-       _networkReader = networkReader, _autoMonitor = autoMonitor ?? ServerMonitor(),
-       _backgroundMonitor = backgroundMonitor ?? ServerMonitor();
+       _networkReader = networkReader, _autoMonitor = autoMonitor ?? ServerMonitor(tcpOnly: true),
+       _backgroundMonitor = backgroundMonitor ?? ServerMonitor(tcpOnly: true);
   final Future<PublicCatalogResult> Function() _catalogLoader;
   final Future<String> Function()? _networkReader;
   final VpnEngine engine;
@@ -156,6 +156,10 @@ class VpnViewModel extends ChangeNotifier {
       int rank(VpnServer a, VpnServer b, Map<String, HealthResult>? latency) {
         final recent = priority(b).compareTo(priority(a));
         if (recent != 0) return recent;
+        int reachability(VpnServer server) => latency?[server.id]?.state == Reachability.reachable ? 1
+          : latency?[server.id]?.state == Reachability.unreachable ? -1 : 0;
+        final reachable = reachability(b).compareTo(reachability(a));
+        if (reachable != 0) return reachable;
         final speed = _selector.recentSpeed(b, context).compareTo(_selector.recentSpeed(a, context));
         if (speed != 0) return speed;
         final score = _selector.score(b, network, latency?[b.id]?.milliseconds, context: context)
@@ -164,7 +168,7 @@ class VpnViewModel extends ChangeNotifier {
         // Untested UDP is not known-bad, but avoid spending the first 20s on it.
         return (a.protocol == 'wireguard' ? 1 : 0).compareTo(b.protocol == 'wireguard' ? 1 : 0);
       }
-      // A small diverse shortlist avoids launching hundreds of ping processes.
+      // Broader source exploration uses bounded TCP probes, not one ping process per profile.
       final candidates = <VpnServer>[];
       final hosts = <String>{};
       for (final protocol in ['wireguard', 'vless', 'shadowsocks']) {
@@ -174,7 +178,7 @@ class VpnViewModel extends ChangeNotifier {
         final diverse = [for (final tier in [1, 0, -1])
           ...PublicCatalog.diverse(group.where((server) => priority(server) == tier).toList())];
         for (final server in diverse) {
-          if (count >= 8) break;
+          if (count >= (protocol == 'wireguard' ? 8 : 24)) break;
           if (hosts.add(sha256.convert(utf8.encode(server.profile)).toString())) { candidates.add(server); count++; }
         }
       }
@@ -189,7 +193,9 @@ class VpnViewModel extends ChangeNotifier {
       if (missing.isNotEmpty) latency.addAll(await _autoMonitor.sample(missing));
       if (cancelled()) return;
       candidates.sort((a, b) => rank(a, b, latency));
-      final ordered = AdaptiveSelector.shortlist(candidates, limit: deep ? 8 : 6);
+      final mixed = [for (final tier in [1, 0, -1])
+        ...PublicCatalog.diverse(candidates.where((s) => priority(s) == tier).toList())];
+      final ordered = AdaptiveSelector.shortlist(mixed, limit: deep ? 8 : 6);
       // Preserve protocol diversity within each retry tier, but do not force a
       // recent failure ahead of an untried or recently verified profile.
       final tiered = [for (final tier in [1, 0, -1])
@@ -206,8 +212,9 @@ class VpnViewModel extends ChangeNotifier {
       for (final server in ordered) {
         if (cancelled()) return;
         if (searchClock.elapsed >= budget || (deep && finalists.where((candidate) => !_desktop || candidate.qualified).length >= 2)) break;
-        if ((protocolFailures[server.protocol] ?? 0) >= 2) {
-          autoAttemptReports.add('${server.protocol}: пропуск после двух неподтверждённых попыток в этом подборе');
+        final failureGroup = '${server.source}|${server.protocol}';
+        if ((protocolFailures[failureGroup] ?? 0) >= 2) {
+          autoAttemptReports.add('${server.protocol} (${server.source}): пропуск после двух неподтверждённых попыток в этом подборе');
           continue;
         }
         if (!context.sameConnection(await _network())) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
@@ -256,14 +263,14 @@ class VpnViewModel extends ChangeNotifier {
         final usable = state == ConnectionState.connected && !repeatFailed &&
             medianSpeed != null && medianSpeed > 0 && sameNetwork;
         if (sameNetwork) {
-          protocolFailures[server.protocol] = usable || success ? 0 : (protocolFailures[server.protocol] ?? 0) + 1;
+          protocolFailures[failureGroup] = usable || success ? 0 : (protocolFailures[failureGroup] ?? 0) + 1;
         }
         // Short repeated downloads measure consistency, not long-session stability.
         final utility = medianSpeed == null ? 0.0 :
           (.75 * (medianSpeed / (medianSpeed + 524288)) +
            .25 * (speeds.first / max(1, speeds.last))).toDouble();
         final attemptResult = success ? 'успех' : usable ? 'работает, ниже цели' : 'не подтверждено';
-        autoAttemptReports.add('Попытка $attempt · ${server.protocol} · $attemptResult\n${message ?? connectionStage ?? 'Нет подробностей'}');
+        autoAttemptReports.add('Попытка $attempt · ${server.protocol} · $attemptResult · ${server.source}\n${message ?? connectionStage ?? 'Нет подробностей'}');
         if (sameNetwork && !context.ambiguous && !duringVpn.ambiguous) {
           await _remember(server, context, latency[server.id]?.milliseconds,
             success ? 'verified' : usable ? 'usable' : medianSpeed != null ? 'slow_or_unstable' : 'unconfirmed',
@@ -439,7 +446,7 @@ class VpnViewModel extends ChangeNotifier {
               final priority = _selector.recentPriority(b, context).compareTo(_selector.recentPriority(a, context));
               return priority != 0 ? priority : _selector.recentSpeed(b, context).compareTo(_selector.recentSpeed(a, context));
             });
-          candidates.addAll(PublicCatalog.diverse(group, limit: 8));
+          candidates.addAll(PublicCatalog.diverse(group, limit: protocol == 'wireguard' ? 8 : 24));
         }
         backgroundStatus = 'Фоновая проверка ${candidates.length} адресов…'; _notify();
         final measured = await _backgroundMonitor.sample(candidates);

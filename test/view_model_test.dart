@@ -119,6 +119,24 @@ class FailedEngine extends ControlledEngine {
 }
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('preflight considers a good endpoint beyond the old eight-profile cutoff', () async {
+    final engine = MeasuredEngine();
+    final pool = [for (var n = 1; n <= 9; n++) VpnServer.fromJson({...server.toJson(),
+      'id': 'node-$n', 'host': '9.9.9.$n', 'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.$n')})];
+    var probes = 0;
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () async => PublicCatalogResult(pool, false, 0), networkReader: () async => 'wifi',
+      autoMonitor: ServerMonitor(probe: (s) async {
+        probes++; return HealthResult(Reachability.reachable, s.host == '9.9.9.9' ? 1 : 1000);
+      }));
+    try {
+      await vm.initialize(); await vm.autoConnect();
+      expect(probes, 10);
+      expect(engine.chosen.first, '9.9.9.9');
+      await vm.disconnect();
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   for (final deep in [false, true]) {
     test('desktop skips two working slow endpoints and finds a fast one: deep=$deep', () async {
       final engine = DesktopSpeedEngine();

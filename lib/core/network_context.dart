@@ -6,7 +6,7 @@ class NetworkContext {
   final bool ambiguous, vpnPresent, extended, phoneGranted;
   final int? wifiMhz, radio, mobileSignal;
   final String? operator;
-  String get environmentKey => '$type|${operator ?? "?"}|${radio ?? 0}|${wifiBand ?? 0}';
+  String get environmentKey => '$type|${operator ?? "?"}|${radio ?? 0}|${wifiBand ?? 0}${session.isEmpty ? '' : '|$session'}';
   int? get wifiBand => wifiMhz == null ? null : wifiMhz! >= 5925 ? 6 : wifiMhz! >= 4900 ? 5 : 2;
   String get radioLabel => radio == 20 ? '5G NR' : radio == 13 ? 'LTE' :
     [3, 5, 6, 8, 9, 10, 12, 14, 15].contains(radio) ? '3G' :

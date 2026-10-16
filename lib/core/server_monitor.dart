@@ -7,7 +7,10 @@ typedef Probe = Future<HealthResult> Function(VpnServer server);
 typedef Ping = Future<int?> Function(String host);
 
 class ServerMonitor {
-  ServerMonitor({Probe? probe, Ping? ping}) : _probe = probe, _ping = ping;
+  ServerMonitor({Probe? probe, Ping? ping, this.tcpOnly = false, this.concurrency = 24})
+    : assert(concurrency > 0), _probe = probe, _ping = ping;
+  final bool tcpOnly;
+  final int concurrency;
   final Probe? _probe;
   final Ping? _ping;
   final Set<Socket> _sockets = {};
@@ -26,27 +29,35 @@ class ServerMonitor {
   Future<Map<String, HealthResult>> _sample(List<VpnServer> candidates, int generation,
       void Function(String, HealthResult)? onResult) async {
     final results = <String, HealthResult>{};
-    // Every endpoint starts in this sweep. Share ICMP for profiles on one host.
+    // Bound parallel sockets/processes, sharing ICMP for profiles on one host.
     final pings = <String, Future<int?>>{};
-    await Future.wait(candidates.map((server) async {
-      HealthResult result;
-      try {
-        if (_probe != null) {
-          result = await _probe(server);
-        } else {
-          final ms = await pings.putIfAbsent(server.host,
-            () => (_ping?.call(server.host) ?? _icmp(server.host, generation)));
-          if (generation != _generation) return;
-          result = ms != null
-            ? HealthResult(Reachability.reachable, ms, 'ICMP')
-            : await _tcp(server, generation);
+    var next = 0;
+    Future<void> worker() async {
+      while (next < candidates.length && generation == _generation) {
+        final server = candidates[next++];
+        HealthResult result;
+        try {
+          if (_probe != null) {
+            result = await _probe(server);
+          } else if (tcpOnly) {
+            result = server.transport == 'tcp' ? await _tcp(server, generation)
+              : const HealthResult(Reachability.notMeasured, null, 'UDP: требуется проверка туннеля');
+          } else {
+            final ms = await pings.putIfAbsent(server.host,
+              () => (_ping?.call(server.host) ?? _icmp(server.host, generation)));
+            if (generation != _generation) return;
+            result = ms != null
+              ? HealthResult(Reachability.reachable, ms, 'ICMP')
+              : await _tcp(server, generation);
+          }
+        } catch (_) { result = const HealthResult(Reachability.notMeasured); }
+        if (generation == _generation) {
+          results[server.id] = result;
+          onResult?.call(server.id, result);
         }
-      } catch (_) { result = const HealthResult(Reachability.notMeasured); }
-      if (generation == _generation) {
-        results[server.id] = result;
-        onResult?.call(server.id, result);
       }
-    }));
+    }
+    await Future.wait(List.generate(candidates.length < concurrency ? candidates.length : concurrency, (_) => worker()));
     return results;
   }
   static int? parsePing(String output) {

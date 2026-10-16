@@ -21,7 +21,9 @@ object CatalogCache {
     val sources = mapOf(
         "Au1rxx/free-vpn-subscriptions" to "https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/v2ray-base64.txt",
         "NiREvil/vless" to "https://raw.githubusercontent.com/NiREvil/vless/refs/heads/main/sub/v2rayng-wg.txt",
-        "0xRadikal/Free-v2ray-Configs verified" to "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/verified/configs.txt"
+        "0xRadikal/Free-v2ray-Configs verified" to "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/verified/configs.txt",
+        "igareck RU VLESS" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt",
+        "igareck RU Shadowsocks" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_SS_WEAK_DPI_RUS.txt"
     )
     private fun cache(context: Context, source: String, validated: Boolean): AtomicFile {
         val index = sources.keys.indexOf(source)
