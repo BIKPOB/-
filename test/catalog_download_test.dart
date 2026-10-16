@@ -26,6 +26,8 @@ void main() {
   test('mirrors apply only to exact igareck repository', () {
     const original = 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt';
     expect(CatalogDownload.addresses(original), [original.replaceFirst('raw.githubusercontent.com', 'raw.githack.com'), original]);
+    const mobile = 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt';
+    expect(CatalogDownload.addresses(mobile), [mobile.replaceFirst('raw.githubusercontent.com', 'raw.githack.com'), mobile]);
     expect(CatalogDownload.addresses('https://example.com/file.txt'), ['https://example.com/file.txt']);
   });
 }

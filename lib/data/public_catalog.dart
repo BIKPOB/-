@@ -106,6 +106,8 @@ class PublicCatalog {
   }
   Future<PublicCatalogResult> _refresh() async {
     final parts = await Future.wait([
+      _loadSource('https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt',
+        null, 'igareck RU Mobile-150', ''),
       _loadSource('https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt',
         null, 'igareck RU VLESS', ''),
       _loadSource('https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_SS_WEAK_DPI_RUS.txt',

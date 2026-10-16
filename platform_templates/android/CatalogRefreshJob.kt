@@ -23,7 +23,8 @@ object CatalogCache {
         "NiREvil/vless" to "https://raw.githubusercontent.com/NiREvil/vless/refs/heads/main/sub/v2rayng-wg.txt",
         "0xRadikal/Free-v2ray-Configs verified" to "https://raw.githubusercontent.com/0xRadikal/Free-v2ray-Configs/main/verified/configs.txt",
         "igareck RU VLESS" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt",
-        "igareck RU Shadowsocks" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_SS_WEAK_DPI_RUS.txt"
+        "igareck RU Shadowsocks" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_SS_WEAK_DPI_RUS.txt",
+        "igareck RU Mobile-150" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt"
     )
     fun addresses(original: String): List<String> =
         if (original.startsWith("https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/"))
