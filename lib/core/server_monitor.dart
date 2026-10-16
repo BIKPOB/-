@@ -35,8 +35,10 @@ class ServerMonitor {
       var safe = false;
       try { safe = await const MethodChannel('quietvpn/xray-state')
         .invokeMethod<bool>('preflightRouteSafe').timeout(const Duration(seconds: 2)) == true; } catch (_) { }
-      if (!safe) return {for (final s in candidates) s.id:
-        const HealthResult(Reachability.notMeasured, null, 'Маршрут TCP-проверки не подтверждён')};
+      if (!safe) {
+        return {for (final s in candidates) s.id:
+          const HealthResult(Reachability.notMeasured, null, 'Маршрут TCP-проверки не подтверждён')};
+      }
     }
     final results = <String, HealthResult>{};
     // Bound parallel sockets/processes, sharing ICMP for profiles on one host.

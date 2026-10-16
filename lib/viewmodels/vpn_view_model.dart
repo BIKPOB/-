@@ -192,8 +192,8 @@ class VpnViewModel extends ChangeNotifier {
       final missing = candidates.where((server) => !latency.containsKey(server.id)).toList();
       if (missing.isNotEmpty) latency.addAll(await _autoMonitor.sample(missing));
       if (cancelled()) return;
-      // Recheck negatives once, including cached negatives, before skipping a
-      // full tunnel launch. Do not persist this as a failed protocol handshake.
+      // Recheck negatives once, including cached negatives, before lowering
+      // their scheduling priority. Do not persist this as a failed protocol handshake.
       final unavailable = candidates.where((s) => latency[s.id]?.state == Reachability.unreachable).toList();
       if (unavailable.isNotEmpty) {
         latency.addAll(await _autoMonitor.sample(unavailable));
