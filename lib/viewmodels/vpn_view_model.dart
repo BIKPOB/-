@@ -392,7 +392,21 @@ class VpnViewModel extends ChangeNotifier {
     for (final server in servers) { if (server.id == selectedId) return server; }
     return null;
   }
-  void _notify() { if (!_disposed) notifyListeners(); }
+  String? _qualityNoticeKey;
+  void _notify() {
+    if (_disposed) return;
+    if (Platform.isAndroid) {
+      final active = !autoSelecting && !_stopping && state == ConnectionState.connected;
+      final speed = active ? measuredBytesPerSecond ?? 0 : 0;
+      final key = '$active|$speed|$targetBytesPerSecond|$_connectionEpoch';
+      if (key != _qualityNoticeKey) {
+        _qualityNoticeKey = key;
+        unawaited(const MethodChannel('quietvpn/quality-notification').invokeMethod<void>('update',
+          {'active': active, 'speed': speed, 'target': targetBytesPerSecond}).catchError((Object _) { }));
+      }
+    }
+    notifyListeners();
+  }
 
   Future<void> initialize() async {
     _subscription = engine.events.listen(_onEvent);

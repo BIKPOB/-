@@ -31,7 +31,7 @@ class TrafficRate {
 /** Updates the service's existing notification; never resurrects a stopped VPN. */
 class TrafficNotification(private val context: Context) {
     private val rate = TrafficRate()
-    fun reset() = rate.reset()
+    fun reset() { rate.reset(); QualityNotification.clear(context) }
     fun update(counters: Map<String, Long>?) {
         val text = if (counters == null) { rate.reset(); "↓ —   ↑ —" }
             else rate.sample(counters["received"] ?: 0L, counters["sent"] ?: 0L, SystemClock.elapsedRealtime())

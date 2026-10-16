@@ -9,6 +9,14 @@ class MainActivity : FlutterActivity() {
     private val probeWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     override fun configureFlutterEngine(engine: io.flutter.embedding.engine.FlutterEngine) {
         super.configureFlutterEngine(engine)
+        io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/quality-notification")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "update") { result.notImplemented(); return@setMethodCallHandler }
+                QualityNotification.update(applicationContext, call.argument<Boolean>("active") == true,
+                    call.argument<Number>("speed")?.toLong() ?: 0L,
+                    call.argument<Number>("target")?.toLong() ?: 0L)
+                result.success(null)
+            }
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/diagnostics")
             .setMethodCallHandler { call, result ->
                 if (call.method == "report") {

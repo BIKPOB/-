@@ -29,6 +29,8 @@ def notification_method(channel, notification_id, label):
 
 def patch_xray(source):
     if '// Quiet VPN: foreground before' in source:
+        if '.cancel(5353)' not in source:
+            source = source.replace('        stopForeground(true);', '        getSystemService(android.app.NotificationManager.class).cancel(5353);\n        stopForeground(true);')
         return source
     source = replace_once(source, '        super.onCreate();\n        V2rayCoreManager.getInstance().setUpListener(this);',
         '        super.onCreate();\n        quietStartForeground();\n        V2rayCoreManager.getInstance().setUpListener(this);')
@@ -42,11 +44,15 @@ def patch_xray(source):
     source = source.replace('this.onDestroy();', 'stopSelf();')
     source = replace_once(source, '            AppConfigs.V2RAY_CONFIG = null;',
         '            AppConfigs.V2RAY_CONFIG = null;\n            stopSelf();')
+    source = source.replace('        stopForeground(true);',
+        '        getSystemService(android.app.NotificationManager.class).cancel(5353);\n        stopForeground(true);')
     return source.replace('return START_STICKY;', 'return START_NOT_STICKY;')
 
 
 def patch_awg(source):
     if '// Quiet VPN: foreground before' in source:
+        if '.cancel(5353)' not in source:
+            source = replace_once(source, '            vpnService = vpnService.newIncompleteFuture();', '            getSystemService(android.app.NotificationManager.class).cancel(5353);\n            vpnService = vpnService.newIncompleteFuture();')
         return source
     old = 'context.startService(new Intent(context, VpnService.class));'
     source = replace_once(source, old,
@@ -58,4 +64,6 @@ def patch_awg(source):
         '            quietStartForeground();\n            vpnService.complete(this);\n            if (intent == null')
     source = replace_once(source, '        public void setOwner(final GoBackend owner) {',
         notification_method('quietvpn_wg', 5252, 'WireGuard / AmneziaWG') + '\n        public void setOwner(final GoBackend owner) {')
+    source = replace_once(source, '            vpnService = vpnService.newIncompleteFuture();',
+        '            getSystemService(android.app.NotificationManager.class).cancel(5353);\n            vpnService = vpnService.newIncompleteFuture();')
     return replace_once(source, 'return super.onStartCommand(intent, flags, startId);', 'return START_NOT_STICKY;')
