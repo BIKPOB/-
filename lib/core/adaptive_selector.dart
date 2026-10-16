@@ -68,7 +68,7 @@ class AdaptiveSelector {
       final age = clock.difference(stamp);
       if (age.isNegative) return 0;
       if ((entry['outcome'] == 'verified' || entry['outcome'] == 'usable') && age < const Duration(hours: 24)) return 1;
-      if ((entry['outcome'] == 'unconfirmed' || entry['outcome'] == 'slow_or_unstable') &&
+      if ((entry['outcome'] == 'unconfirmed' || entry['outcome'] == 'slow_or_unstable' || entry['outcome'] == 'preflight_unreachable') &&
           age < const Duration(minutes: 10)) { return -1; }
       return 0;
     }

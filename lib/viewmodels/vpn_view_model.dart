@@ -199,7 +199,18 @@ class VpnViewModel extends ChangeNotifier {
         latency.addAll(await _autoMonitor.sample(unavailable));
         if (cancelled()) return;
       }
-      final skippedTcp = candidates.where((s) => latency[s.id]?.state == Reachability.unreachable).length;
+      if (!context.sameConnection(await _network())) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
+      if (cancelled()) return;
+      final failedPreflight = candidates.where((s) => latency[s.id]?.state == Reachability.unreachable).toList();
+      final skippedTcp = failedPreflight.length;
+      for (final server in failedPreflight) {
+        _selector.record(server, context, 'preflight_unreachable');
+      }
+      // Ten-minute scheduling cooldown, not neural training or a permanent ban.
+      if (failedPreflight.isNotEmpty) {
+        try { await store.saveSelector(_selector.encode()); } catch (_) { }
+        if (cancelled()) return;
+      }
       if (skippedTcp > 0) autoAttemptReports.add('TCP: $skippedTcp адресов не ответили при повторной проверке; запуск туннеля пропущен. Это не доказывает блокировку.');
       candidates.sort((a, b) => rank(a, b, latency));
       final mixed = [for (final tier in [1, 0, -1])

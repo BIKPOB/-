@@ -5,6 +5,17 @@ import 'package:quiet_vpn/core/network_context.dart';
 const server = VpnServer(id: 'test', name: 'test', country: '', countryCode: '', host: 'example.com',
   port: 443, transport: 'tcp', profile: 'secret-profile', source: 'test', protocol: 'vless');
 void main() {
+  test('negative preflight only defers this network for ten minutes', () {
+    final selector = AdaptiveSelector();
+    const network = NetworkContext(type: 'mobile');
+    final now = DateTime.now().toUtc();
+    selector.record(server, network, 'preflight_unreachable');
+    selector.journal.last['time'] = now.toIso8601String();
+    expect(selector.recentPriority(server, network, now: now), -1);
+    expect(selector.recentPriority(server, const NetworkContext(type: 'wifi'), now: now), 0);
+    expect(selector.recentPriority(server, network, now: now.add(const Duration(minutes: 10))), 0);
+    expect(selector.samples, 0);
+  });
   test('preflight removes failed TCP without excluding unknown UDP', () {
     VpnServer candidate(String id, String protocol) => VpnServer(id: id, name: id,
       country: '', countryCode: '', host: 'example.com', port: 443,
