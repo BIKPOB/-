@@ -192,15 +192,19 @@ class VpnViewModel extends ChangeNotifier {
       final missing = candidates.where((server) => !latency.containsKey(server.id)).toList();
       if (missing.isNotEmpty) latency.addAll(await _autoMonitor.sample(missing));
       if (cancelled()) return;
+      // Recheck negatives once, including cached negatives, before skipping a
+      // full tunnel launch. Do not persist this as a failed protocol handshake.
+      final unavailable = candidates.where((s) => latency[s.id]?.state == Reachability.unreachable).toList();
+      if (unavailable.isNotEmpty) {
+        latency.addAll(await _autoMonitor.sample(unavailable));
+        if (cancelled()) return;
+      }
+      final skippedTcp = candidates.where((s) => latency[s.id]?.state == Reachability.unreachable).length;
+      if (skippedTcp > 0) autoAttemptReports.add('TCP: $skippedTcp адресов не ответили при повторной проверке; запуск туннеля пропущен. Это не доказывает блокировку.');
       candidates.sort((a, b) => rank(a, b, latency));
       final mixed = [for (final tier in [1, 0, -1])
         ...PublicCatalog.diverse(candidates.where((s) => priority(s) == tier).toList())];
-      final ordered = AdaptiveSelector.shortlist(mixed, limit: deep ? 8 : 6);
-      // Preserve protocol diversity within each retry tier, but do not force a
-      // recent failure ahead of an untried or recently verified profile.
-      final tiered = [for (final tier in [1, 0, -1])
-        ...ordered.where((s) => priority(s) == tier)];
-      ordered..clear()..addAll(tiered);
+      final ordered = AdaptiveSelector.shortlist(mixed, limit: deep ? 8 : 6, health: latency);
       final finalists = <({VpnServer server, double utility, int speed, bool qualified})>[];
       autoPlan = '${_selectionTarget == null && !_desktop ? '' : 'Цель скорости: ${(targetBytesPerSecond * 8 / 1000000).toStringAsFixed(1)} Мбит/с · '}${deep ? 'Глубокий' : 'Быстрый'} подбор · план: ${ordered.map((s) => s.protocol).join(' → ')}';
       autoAttemptReports.add('База: ${catalog.status}\n'

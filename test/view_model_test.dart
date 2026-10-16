@@ -118,6 +118,24 @@ class FailedEngine extends ControlledEngine {
   }
 }
 void main() {
+  test('failed preflight is retried once and never launches a VPN', () async {
+    final engine = ControlledEngine();
+    var probes = 0;
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.notMeasured)),
+      catalogLoader: () async => const PublicCatalogResult([], false, 0),
+      networkReader: () async => 'wifi',
+      autoMonitor: ServerMonitor(probe: (_) async {
+        probes++; return const HealthResult(Reachability.unreachable);
+      }));
+    try {
+      await vm.initialize(); await vm.autoConnect();
+      expect(probes, 2);
+      expect(engine.connects, 0);
+      expect(vm.autoAttemptReports.join('\n'), contains('запуск туннеля пропущен'));
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+
   TestWidgetsFlutterBinding.ensureInitialized();
   test('preflight considers a good endpoint beyond the old eight-profile cutoff', () async {
     final engine = MeasuredEngine();

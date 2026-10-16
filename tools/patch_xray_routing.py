@@ -1,6 +1,7 @@
 """Fix pinned dependency routing without changing its upstream files in git."""
 import json
 import shutil
+from foreground_patch import patch_xray
 from pathlib import Path
 from urllib.parse import urlparse, unquote
 root = Path(__file__).resolve().parents[1]
@@ -18,7 +19,7 @@ if '// Quiet VPN owns DNS routing' not in s:
     s = s[:start] + '            // Quiet VPN owns DNS routing; never inject missing direct outbound.\n\n' + s[end:]
     p.write_text(s)
 p = java/'services/V2rayVPNService.java'
-s = p.read_text().replace('private static final int VPN_MTU = 1500;', 'private static final int VPN_MTU = 1280;')
+s = patch_xray(p.read_text()).replace('private static final int VPN_MTU = 1500;', 'private static final int VPN_MTU = 1280;')
 s = s.replace('builder.addDisallowedApplication(getPackageName());', '// Quiet VPN must traverse TUN for end-to-end checks; core sockets use protect().')
 p.write_text(s)
 p = java/'core/V2rayCoreManager.java'

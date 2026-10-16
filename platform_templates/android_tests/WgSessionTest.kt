@@ -97,8 +97,11 @@ PersistentKeepalive = 25
     @Test fun wireGuardServiceStartsForegroundNotification() {
         val service = Robolectric.buildService(GoBackend.VpnService::class.java).create()
         try {
-            service.get().onStartCommand(Intent(service.get(), GoBackend.VpnService::class.java), 0, 1)
             val manager = service.get().getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            // Must already be foreground before onStartCommand / native startup.
+            assertTrue(manager.activeNotifications.any { it.id == 5252 })
+            service.get().stopForeground(true)
+            service.get().onStartCommand(Intent(service.get(), GoBackend.VpnService::class.java), 0, 1)
             assertTrue(manager.activeNotifications.any { it.id == 5252 })
         } finally { service.destroy() }
     }

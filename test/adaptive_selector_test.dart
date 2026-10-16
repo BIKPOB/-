@@ -5,6 +5,26 @@ import 'package:quiet_vpn/core/network_context.dart';
 const server = VpnServer(id: 'test', name: 'test', country: '', countryCode: '', host: 'example.com',
   port: 443, transport: 'tcp', profile: 'secret-profile', source: 'test', protocol: 'vless');
 void main() {
+  test('preflight removes failed TCP without excluding unknown UDP', () {
+    VpnServer candidate(String id, String protocol) => VpnServer(id: id, name: id,
+      country: '', countryCode: '', host: 'example.com', port: 443,
+      transport: protocol == 'wireguard' ? 'udp' : 'tcp', profile: id,
+      source: id, protocol: protocol);
+    final failed = candidate('failed', 'shadowsocks');
+    final udp = candidate('udp', 'wireguard');
+    final live = candidate('live', 'vless');
+    final unknown = candidate('unknown', 'vless');
+    final ranked = [failed, udp, unknown, live];
+    final health = {
+      failed.id: const HealthResult(Reachability.unreachable),
+      live.id: const HealthResult(Reachability.reachable, 30),
+      udp.id: const HealthResult(Reachability.notMeasured),
+    };
+    expect(AdaptiveSelector.shortlist(ranked, health: health).map((s) => s.id),
+      ['live', 'udp', 'unknown']);
+    expect(AdaptiveSelector.shortlist(ranked, limit: 1, health: health), [live]);
+    expect(AdaptiveSelector.shortlist([failed], health: health), isEmpty);
+  });
   test('retry preference is bounded, network-specific, persisted and does not train', () {
     const wifi = NetworkContext(type: 'wifi');
     const mobile = NetworkContext(type: 'mobile');

@@ -8,7 +8,21 @@ import 'network_context.dart';
 /// Starts untrained; learns only from verified connections, not ICMP responses.
 class AdaptiveSelector {
   /// Input is already ranked. Round-robin keeps one protocol from using all slots.
-  static List<VpnServer> shortlist(List<VpnServer> ranked, {int limit = 6}) {
+  static List<VpnServer> shortlist(List<VpnServer> ranked, {int limit = 6,
+      Map<String, HealthResult>? health}) {
+    if (health != null) {
+      // TCP availability is a preflight only, never proof of VPN quality.
+      // Unknown UDP remains eligible after responsive TCP; failed TCP does not
+      // re-enter the plan merely to satisfy protocol/source diversity.
+      final result = <VpnServer>[];
+      for (final reachable in [true, false]) {
+        final group = ranked.where((s) => health[s.id]?.state != Reachability.unreachable &&
+          (health[s.id]?.state == Reachability.reachable) == reachable).toList();
+        result.addAll(shortlist(group, limit: limit - result.length));
+        if (result.length >= limit) break;
+      }
+      return result;
+    }
     final groups = <String, List<VpnServer>>{};
     for (final server in ranked) {
       groups.putIfAbsent(server.protocol, () => []).add(server);

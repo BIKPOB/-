@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:crypto/crypto.dart';
@@ -118,6 +119,7 @@ class PublicCatalog {
       parts.fold(0, (n, p) => n + p.skipped), status: parts.map((p) => p.status).join('\n'));
   }
   Future<PublicCatalogResult> _loadSource(String url, String? asset, String name, String date) async {
+    var failure = 'ошибка загрузки';
     {
 
       final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
@@ -126,7 +128,7 @@ class PublicCatalog {
           final request = await client.getUrl(Uri.parse(url));
           request.followRedirects = false;
           final response = await request.close();
-          if (response.statusCode != 200) throw const FormatException('Источник недоступен');
+          if (response.statusCode != 200) throw HttpException('HTTP ${response.statusCode}');
           final bytes = <int>[];
           await for (final chunk in response) {
             if (bytes.length + chunk.length > maxBytes) throw const FormatException('Каталог слишком большой');
@@ -140,8 +142,11 @@ class PublicCatalog {
           } catch (_) { }
           return PublicCatalogResult(parsed.servers, false, parsed.skipped, status: '$name: обновлено');
         })().timeout(const Duration(seconds: 12));
-      } catch (_) {
-        // A failed refresh must not remove the bundled fallback.
+      } on TimeoutException { failure = 'таймаут загрузки';
+      } on SocketException { failure = 'ошибка сети/DNS';
+      } on HttpException catch (error) { failure = error.message;
+      } on FormatException { failure = 'некорректная база или нет совместимых профилей';
+      } catch (_) { failure = 'ошибка загрузки';
       } finally { client.close(force: true); }
     }
     try {
@@ -153,11 +158,11 @@ class PublicCatalog {
           final parsed = parse(text, sourceName: name);
           final updated = DateTime.fromMillisecondsSinceEpoch((snapshot['updated'] as num).toInt()).toLocal();
           return PublicCatalogResult(parsed.servers, false, parsed.skipped,
-            status: '$name: сохранённое обновление ${updated.toString().substring(0, 16)}');
+            status: '$name: сохранённое обновление ${updated.toString().substring(0, 16)} · обновить не удалось: $failure');
         } catch (_) { /* Preserve the previous validated snapshot when a candidate is invalid. */ }
       }
     } catch (_) { /* Native cache is optional on other platforms. */ }
-    if (asset == null) return PublicCatalogResult([], false, 0, status: '$name: источник недоступен, сохранённой базы нет');
+    if (asset == null) return PublicCatalogResult([], false, 0, status: '$name: $failure; сохранённой базы нет');
     try {
       final parsed = parse(await rootBundle.loadString(asset), bundled: true, sourceName: name);
       return PublicCatalogResult(parsed.servers, true, parsed.skipped, status: '$name: резервная база $date');
