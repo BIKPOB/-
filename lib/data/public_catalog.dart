@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../core/models.dart';
 import '../core/profile_policy.dart';
 import 'windows_catalog_cache.dart';
+import 'catalog_download.dart';
 
 class PublicCatalogResult {
   const PublicCatalogResult(this.servers, this.bundled, this.skipped, {this.status = ''});
@@ -122,32 +123,22 @@ class PublicCatalog {
     var failure = 'ошибка загрузки';
     {
 
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
       try {
-        return await (() async {
-          final request = await client.getUrl(Uri.parse(url));
-          request.followRedirects = false;
-          final response = await request.close();
-          if (response.statusCode != 200) throw HttpException('HTTP ${response.statusCode}');
-          final bytes = <int>[];
-          await for (final chunk in response) {
-            if (bytes.length + chunk.length > maxBytes) throw const FormatException('Каталог слишком большой');
-            bytes.addAll(chunk);
-          }
-          final text = utf8.decode(bytes);
+          final downloaded = await CatalogDownload.load(url,
+            (text) { parse(text, sourceName: name); }, maxBytes: maxBytes);
+          final text = downloaded.text;
           final parsed = parse(text, sourceName: name);
           try {
             if (Platform.isWindows) { await WindowsCatalogCache.save(name, text); }
             else { await _cache.invokeMethod<void>('save', {'source': name, 'text': text}); }
           } catch (_) { }
-          return PublicCatalogResult(parsed.servers, false, parsed.skipped, status: '$name: обновлено');
-        })().timeout(const Duration(seconds: 12));
+          return PublicCatalogResult(parsed.servers, false, parsed.skipped, status: '$name: обновлено · ${Uri.parse(downloaded.address).host}');
       } on TimeoutException { failure = 'таймаут загрузки';
       } on SocketException { failure = 'ошибка сети/DNS';
       } on HttpException catch (error) { failure = error.message;
       } on FormatException { failure = 'некорректная база или нет совместимых профилей';
       } catch (_) { failure = 'ошибка загрузки';
-      } finally { client.close(force: true); }
+      }
     }
     try {
       final snapshots = Platform.isWindows ? await WindowsCatalogCache.read(name)

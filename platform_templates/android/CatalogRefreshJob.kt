@@ -25,6 +25,10 @@ object CatalogCache {
         "igareck RU VLESS" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt",
         "igareck RU Shadowsocks" to "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_SS_WEAK_DPI_RUS.txt"
     )
+    fun addresses(original: String): List<String> =
+        if (original.startsWith("https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/"))
+            listOf(original.replace("raw.githubusercontent.com", "raw.githack.com"), original)
+        else listOf(original)
     private fun cache(context: Context, source: String, validated: Boolean): AtomicFile {
         val index = sources.keys.indexOf(source)
         require(index >= 0)
@@ -67,7 +71,9 @@ class CatalogRefreshJob : JobService() {
         cancelled = stopped
         task = worker.submit {
             var failed = false
-            for ((source, address) in CatalogCache.sources) {
+            for ((source, original) in CatalogCache.sources) {
+                var loaded = false
+                for (address in CatalogCache.addresses(original)) {
                 if (stopped.get()) break
                 val request = URL(address).openConnection() as HttpsURLConnection
                 connection = request
@@ -89,9 +95,17 @@ class CatalogRefreshJob : JobService() {
                     }
                     check(!stopped.get())
                     // Candidate is parsed and validated in Dart before display/use.
-                    CatalogCache.save(this, source, bytes.toString("UTF-8"), false)
-                } catch (_: Exception) { failed = true }
+                    val text = bytes.toString("UTF-8")
+                    if (source.startsWith("igareck")) check(text.lineSequence().any {
+                        it.startsWith("vless://") || it.startsWith("ss://")
+                    })
+                    CatalogCache.save(this, source, text, false)
+                    loaded = true
+                } catch (_: Exception) { /* Try the publisher's other address. */ }
                 finally { request.disconnect(); connection = null }
+                if (loaded) break
+                }
+                if (!loaded) failed = true
             }
             if (!stopped.get()) jobFinished(params, failed)
         }

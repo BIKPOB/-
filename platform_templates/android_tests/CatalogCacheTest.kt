@@ -12,6 +12,13 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
 class CatalogCacheTest {
+    @Test fun publisherMirrorKeepsOriginalAsFallback() {
+        val original = CatalogCache.sources.getValue("igareck RU VLESS")
+        assertEquals(listOf(original.replace("raw.githubusercontent.com", "raw.githack.com"), original),
+            CatalogCache.addresses(original))
+        val other = CatalogCache.sources.getValue("NiREvil/vless")
+        assertEquals(listOf(other), CatalogCache.addresses(other))
+    }
     @Test fun candidateDoesNotOverwriteValidatedSnapshot() {
         val context: Context = RuntimeEnvironment.getApplication()
         val source = "NiREvil/vless"
