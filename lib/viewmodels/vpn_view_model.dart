@@ -130,7 +130,7 @@ class VpnViewModel extends ChangeNotifier {
   bool get _desktop => engine is DesktopCapabilities;
   bool get _requiresSpeed => _desktop || engine is CandidateHost;
   int get targetBytesPerSecond => _requiresSpeed ? SpeedPolicy.desktopTarget(_selectionTarget) : _selectionTarget ?? 131072;
-  void _scheduleBaseline({bool immediate = false}) {
+  void _scheduleBaseline({bool immediate = false, bool forceAnalysis = false}) {
     _baselineTimer?.cancel();
     if (_disposed || !ready || (!Platform.isWindows && !_foreground)) return;
     _baselineTimer = Timer(Duration(seconds: immediate ? 1 : 30), () async {
@@ -139,7 +139,7 @@ class VpnViewModel extends ChangeNotifier {
           final context = await _network();
           if (_disposed || autoSelecting || _nativeNeedsStop || busy) return;
           networkContext = context;
-          if(engine is CandidateHost) await _analyzeNetwork(context);
+          if(engine is CandidateHost) await _analyzeNetwork(context,force:forceAnalysis);
           if (_disposed || autoSelecting || _nativeNeedsStop || busy) return;
           await _baselineMonitor.pause(false);
           final result = await _baselineMonitor.tick(context, readNetwork: _network);
@@ -813,7 +813,11 @@ class VpnViewModel extends ChangeNotifier {
       if (!autoSelecting) await _baselineMonitor.pause(false);
       state = ConnectionState.disconnected; message = null;
     } catch (_) { state = ConnectionState.error; message = 'Отключение не подтверждено. Повторите или используйте настройки системы.'; }
-    finally { busy = false; _stopping = false; _scheduleBackgroundPreflight(immediate: true); _notify(); }
+    finally {
+      busy = false; _stopping = false; _scheduleBackgroundPreflight(immediate: true);
+      if(!autoSelecting && !_nativeNeedsStop) _scheduleBaseline(immediate:true,forceAnalysis:true);
+      _notify();
+    }
   }
   @override void dispose() {
     _networkAnalyzer.cancel();unawaited(_candidateLab?.cancel());
