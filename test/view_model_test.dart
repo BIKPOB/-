@@ -1,4 +1,5 @@
 import 'package:quiet_vpn/platform/desktop_capabilities.dart';
+import 'package:quiet_vpn/platform/candidate_host.dart';
 import 'package:quiet_vpn/core/network_context.dart';
 import 'package:quiet_vpn/core/network_baseline.dart';
 import 'dart:async';
@@ -71,6 +72,11 @@ class MeasuredEngine extends ControlledEngine {
     currentSpeed = server.host == '9.9.9.9' ? 900000 : 200000;
     controller.add(EngineEvent(ConnectionState.connected, 'measured', true, currentSpeed));
   }
+}
+class ProxyLabEngine extends MeasuredEngine implements CandidateHost {
+  @override Future<String> resolveCandidate(String host) async => host;
+  @override Future<void> startCandidates(String configuration) async {throw StateError('Not used in manual test');}
+  @override Future<void> stopCandidates() async {}
 }
 class DesktopSpeedEngine extends MeasuredEngine implements DesktopCapabilities {
   @override Future<NetworkContext> readNetwork() async => const NetworkContext(type: 'ethernet');
@@ -200,6 +206,18 @@ void main() {
       } finally { vm.dispose(); await engine.dispose(); }
     });
   }
+  test('Android proxy-lab engine also requires measured 5 Mbit minimum', () async {
+    final engine=ProxyLabEngine();
+    final vm=VpnViewModel(engine,MemoryProfiles(),ServerMonitor(probe:(_) async=>const HealthResult(Reachability.reachable,1)));
+    try {
+      await vm.initialize();await vm.connect(null);
+      await Future<void>.delayed(const Duration(milliseconds:10));
+      expect(vm.targetBytesPerSecond,625000);
+      expect(vm.measuredBytesPerSecond,200000);
+      expect(vm.connectionVerified,false);
+      await vm.disconnect();
+    } finally {vm.dispose();await engine.dispose();}
+  });
   test('desktop manual connection cannot mark 1.6 Mbit as good quality', () async {
     final engine = DesktopSpeedEngine();
     final vm = VpnViewModel(engine, MemoryProfiles(),
