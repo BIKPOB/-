@@ -77,8 +77,11 @@ class ProxyProfile {
       final key = q['pbk'] ?? '', sid = q['sid'] ?? '';
       if (base64Url.decode(base64Url.normalize(key)).length != 32 || (q['sni'] ?? '').isEmpty ||
           !RegExp(r'^(?:[0-9a-fA-F]{2}){0,8}$').hasMatch(sid)) { throw const FormatException('Для REALITY нужны SNI, корректный public key и short ID'); }
+      if (!(q['spx'] ?? '/').startsWith('/') || network == 'ws') {
+        throw const FormatException('REALITY: нужен путь с / и транспорт TCP, gRPC или XHTTP');
+      }
       stream['realitySettings'] = {'serverName': q['sni'], 'fingerprint': q['fp'] ?? 'chrome',
-        'publicKey': key, 'shortId': sid, 'spiderX': q['spx'] ?? '/'};
+        'publicKey': key.replaceAll('=', ''), 'shortId': sid, 'spiderX': q['spx'] ?? '/'};
     }
     if (network == 'ws') stream['wsSettings'] = {'path': q['path'] ?? '/', 'headers': {if(q['host'] != null) 'Host': q['host']}};
     if (network == 'grpc') stream['grpcSettings'] = {'serviceName': q['serviceName'] ?? '', 'multiMode': q['mode'] == 'multi'};

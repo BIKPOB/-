@@ -13,6 +13,7 @@ import '../core/server_monitor.dart';
 import '../data/profile_store.dart';
 import '../data/public_catalog.dart';
 import '../core/adaptive_selector.dart';
+import '../core/connection_strategy.dart';
 import '../core/network_context.dart';
 import '../core/network_baseline.dart';
 import '../core/speed_policy.dart';
@@ -147,7 +148,8 @@ class VpnViewModel extends ChangeNotifier {
       if (network == 'offline') { autoStatus = 'Нет доступной сети'; return; }
       final catalog = await _catalogLoader();
       if (cancelled()) return;
-      final pool = [..._imports, ...catalog.servers];
+      final pool = [..._imports, ...catalog.servers].where((s) =>
+        !_desktop || s.protocol != 'vless' || ConnectionStrategy.protectedVless(s)).toList();
       int priority(VpnServer server) {
         final speed = _selector.recentSpeed(server, context);
         if (_desktop && speed > 0 && speed < targetBytesPerSecond) return -1;
@@ -215,7 +217,7 @@ class VpnViewModel extends ChangeNotifier {
       candidates.sort((a, b) => rank(a, b, latency));
       final mixed = [for (final tier in [1, 0, -1])
         ...PublicCatalog.diverse(candidates.where((s) => priority(s) == tier).toList())];
-      final ordered = AdaptiveSelector.shortlist(mixed, limit: deep ? 8 : 6, health: latency);
+      final ordered = ConnectionStrategy.select(mixed, limit: deep ? 8 : 6, priority: priority);
       final finalists = <({VpnServer server, double utility, int speed, bool qualified})>[];
       autoPlan = '${_selectionTarget == null && !_desktop ? '' : 'Цель скорости: ${(targetBytesPerSecond * 8 / 1000000).toStringAsFixed(1)} Мбит/с · '}${deep ? 'Глубокий' : 'Быстрый'} подбор · план: ${ordered.map((s) => s.protocol).join(' → ')}';
       autoAttemptReports.add('База: ${catalog.status}\n'
@@ -478,7 +480,8 @@ class VpnViewModel extends ChangeNotifier {
         if (token != _backgroundEpoch || context.type == 'offline' || autoSelecting || _nativeNeedsStop) return;
         final catalog = await _catalogLoader();
         if (token != _backgroundEpoch || autoSelecting || _nativeNeedsStop) return;
-        final pool = [..._imports, ...catalog.servers];
+        final pool = [..._imports, ...catalog.servers].where((s) =>
+        !_desktop || s.protocol != 'vless' || ConnectionStrategy.protectedVless(s)).toList();
         final candidates = <VpnServer>[];
         for (final protocol in ['wireguard', 'vless', 'shadowsocks']) {
           final group = pool.where((server) => server.protocol == protocol).toList()

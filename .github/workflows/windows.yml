@@ -49,6 +49,8 @@ jobs:
           $env:CGO_ENABLED='0'
           go build -trimpath -ldflags='-s -w' -o xray.exe ./main
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Validate generated VPN configurations with pinned Xray
+        run: dart run tools/windows/config_check.dart "$pwd/xray-source/xray.exe"
       - name: Build Windows app
         run: |
           flutter build windows --release

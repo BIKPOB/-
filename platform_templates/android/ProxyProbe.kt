@@ -109,7 +109,7 @@ object ProxyProbe {
                 stage = "локальное согласование SOCKS"
                 val numeric = host == "1.1.1.1"
                 socksConnect(socket, host, if (numeric) byteArrayOf(1, 1, 1, 1) else null)
-                stage = if (numeric) "HTTPS по IP через Xray без DNS" else "HTTPS по имени через Xray"
+                stage = if (numeric) "TLS handshake по IP через Xray без DNS" else "TLS handshake по имени через Xray"
                 val tls = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(socket, host, 443, true) as SSLSocket
                 tls.use {
                     it.sslParameters = it.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }

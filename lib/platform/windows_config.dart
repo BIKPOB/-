@@ -4,7 +4,12 @@ import '../core/proxy_profile.dart';
 class WindowsConfig {
   static const adapter = 'QuietVPN-Xray';
   static Map<String, dynamic> xray(String profile, String endpoint) {
-    final config = jsonDecode(ProxyProfile.parse(profile)
+    final parsed = ProxyProfile.parse(profile);
+    if (parsed.protocol == 'vless' &&
+        parsed.outbound['streamSettings']['security'] == 'none') {
+      throw const FormatException('Windows Xray: VLESS без TLS/REALITY не поддерживается для публичных серверов');
+    }
+    final config = jsonDecode(parsed
       .configurationWithDiagnostics(endpointAddress: endpoint)) as Map<String, dynamic>;
     config['log'] = {'loglevel': 'info', 'access': 'none'};
     config['inbounds'] = [

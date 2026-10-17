@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 import '../core/models.dart';
@@ -10,6 +11,7 @@ import '../core/traffic.dart';
 import 'desktop_capabilities.dart';
 import 'vpn_engine.dart';
 import 'windows_config.dart';
+import '../core/xray_failure.dart';
 import 'windows_probe.dart';
 
 class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities {
@@ -20,9 +22,14 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities {
   bool _active = false, _stopping = false;
   int _epoch = 0, _logBytes = 0;
   final _errors = <String>{};
+  String _logTail = '';
   void _capture(List<int> bytes) {
     _logBytes += bytes.length;
     final text = utf8.decode(bytes, allowMalformed: true).toLowerCase();
+    final combined = _logTail + text;
+    final reason = XrayFailure.explain(combined);
+    if (reason != null) _errors.add(reason);
+    _logTail = combined.substring(max(0, combined.length - 512));
     const categories = {'failed to build': 'Ошибка конфигурации', 'failed to load': 'Ошибка загрузки конфигурации', 'failed to start': 'Ошибка запуска Xray', 'failed': 'Xray сообщил об ошибке запуска/соединения', 'invalid': 'Некорректные параметры/ответ', 'unsupported': 'Неподдерживаемый параметр', 'timeout': 'Таймаут', 'deadline exceeded': 'Таймаут операции', 'connection refused': 'Сервер отказал', 'connection reset': 'Соединение сброшено', 'no such host': 'DNS не разрешён', 'certificate': 'Ошибка сертификата', 'bad handshake': 'Ошибка согласования', 'eof': 'Соединение закрыто'};
     for (final entry in categories.entries) { if (text.contains(entry.key)) _errors.add(entry.value); }
   }
@@ -88,12 +95,28 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities {
     throw StateError('Отключение службы WireGuard не подтверждено');
   }
 
+  Future<void> _validateConfig(Map<String, dynamic> config) async {
+    final p = await Process.start(_file('xray.exe'), ['run', '-test', '-config', 'stdin:'],
+      workingDirectory: '$_root\\engines', runInShell: false);
+    final out = p.stdout.transform(const Utf8Decoder(allowMalformed: true)).join();
+    final err = p.stderr.transform(const Utf8Decoder(allowMalformed: true)).join();
+    try {
+      p.stdin.write(jsonEncode(config));
+      await p.stdin.flush(); await p.stdin.close();
+      final code = await p.exitCode.timeout(const Duration(seconds: 8));
+      final logs = '${await out}\n${await err}';
+      if (code != 0) {
+        throw StateError('Xray: проверка конфигурации до запуска VPN: ${XrayFailure.explain(logs) ?? "конфигурация отклонена"} (код $code)');
+      }
+    } finally { p.kill(); }
+  }
+
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
     if (_active || _stopping) throw StateError('Сначала отключите VPN');
     final profile = ProfilePolicy.parse(server.profile);
     await _verifyBundle();
     final token = ++_epoch;
-    _protocol = profile.protocol; _active = true; _logBytes = 0; _errors.clear();
+    _protocol = profile.protocol; _active = true; _logBytes = 0; _errors.clear(); _logTail = '';
     _emit(ConnectionState.connecting, 'Windows: запуск ${profile.protocol}');
     try {
       if (profile.protocol == 'wireguard') {
@@ -108,6 +131,8 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities {
         final addresses = await InternetAddress.lookup(profile.host).timeout(const Duration(seconds: 8));
         if (addresses.isEmpty) throw StateError('DNS сервера недоступен');
         final config = WindowsConfig.xray(profile.text, addresses.first.address);
+        await _validateConfig(config);
+        if (token != _epoch) return;
         final p = await Process.start(_file('xray.exe'), ['run', '-config', 'stdin:'],
           workingDirectory: '$_root\\engines', runInShell: false);
         _xray = p;

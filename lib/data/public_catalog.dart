@@ -139,7 +139,7 @@ class PublicCatalog {
       } on SocketException { failure = 'ошибка сети/DNS';
       } on HttpException catch (error) { failure = error.message;
       } on FormatException { failure = 'некорректная база или нет совместимых профилей';
-      } catch (_) { failure = 'ошибка загрузки';
+      } catch (error) { failure = 'ошибка загрузки (${error.runtimeType})';
       }
     }
     try {
