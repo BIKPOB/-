@@ -73,8 +73,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $setupPath = Join-Path $pwd "dist-windows/quiet-vpn-$installerVersion-windows-x64-setup.exe"
           if (!(Test-Path $setupPath)) { throw 'Installer filename does not match the application version' }
-          $binaryVersion = (Get-Item $setupPath).VersionInfo.FileVersion
-          if ($binaryVersion -notmatch ('^' + [regex]::Escape($installerVersion) + '(\.0)?$')) { throw "Wrong installer binary version: $binaryVersion" }
+          $versionInfo = (Get-Item $setupPath).VersionInfo
+          $binaryVersion = '{0}.{1}.{2}' -f $versionInfo.FileMajorPart, $versionInfo.FileMinorPart, $versionInfo.FileBuildPart
+          if ($binaryVersion -ne $installerVersion -or $versionInfo.FilePrivatePart -ne 0) { throw "Wrong installer binary version: $binaryVersion" }
           Copy-Item pubspec.lock dist-windows/DEPENDENCIES.lock
           git rev-parse HEAD | Set-Content dist-windows/SOURCE_COMMIT.txt -Encoding ascii
           Get-ChildItem dist-windows -Filter *.exe | ForEach-Object {"$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"} | Set-Content dist-windows/SHA256SUMS-Windows.txt -Encoding ascii
