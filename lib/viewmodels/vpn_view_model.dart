@@ -239,6 +239,8 @@ class VpnViewModel extends ChangeNotifier {
       if (cancelled()) return;
       final pool = [..._imports, ...catalog.servers].where((s) =>
         !_desktop || s.protocol != 'vless' || ConnectionStrategy.protectedVless(s)).toList();
+      autoAttemptReports.add('База: ${catalog.status}\n'
+        '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}');
       int priority(VpnServer server) {
         final speed = _selector.recentSpeed(server, context);
         if (_requiresSpeed && speed > 0 && speed < targetBytesPerSecond) return -1;
@@ -332,10 +334,12 @@ class VpnViewModel extends ChangeNotifier {
           '${analysis?.preferLiteralEndpoint==true?"IP-адреса серверов получают приоритет из-за неподтверждённого системного DNS":"имена и IP сохраняются в подборе"}; '
           'замеров скорости ${deep || analysis?.extraSpeedSample==true?3:2}');
         final findings=await lab.run(proxyPool,deep:deep,metered:context.metered!=false,target:targetBytesPerSecond,analysis:analysis,policy:_policy,
-          routeValid:validRoute, status:(value){autoStatus=value;_notify();});
+          routeValid:validRoute, status:(value){autoStatus=value;_notify();},
+          onResult:(finding){
+            autoAttemptReports.add('Прокси-проверка: ${finding.report}');_notify();
+          });
         if(cancelled()) return;
         for(final f in findings) {
-          autoAttemptReports.add('Прокси-проверка: ${f.report}');
           if(f.usable) {
             await _remember(f.server,context,f.latencyMs,
               'proxy_verified',speed:f.speed,reward:.2+.8*(f.speed/(f.speed+targetBytesPerSecond))*f.consistency);
@@ -354,8 +358,7 @@ class VpnViewModel extends ChangeNotifier {
       }
       final finalists = <({VpnServer server, double utility, int speed, bool qualified})>[];
       autoPlan = '${_selectionTarget == null && !_requiresSpeed ? '' : 'Цель скорости: ${(targetBytesPerSecond * 8 / 1000000).toStringAsFixed(1)} Мбит/с · '}${deep ? 'Глубокий' : 'Быстрый'} подбор · план: ${ordered.map((s) => s.protocol).join(' → ')}';
-      autoAttemptReports.add('База: ${catalog.status}\n'
-        '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}\n$autoPlan');
+      autoAttemptReports.add(autoPlan);
       final searchClock = overallClock;
       final budget = Duration(seconds: deep ? 240 : 120);
       final protocolFailures = <String, int>{};
@@ -630,6 +633,8 @@ class VpnViewModel extends ChangeNotifier {
         if (token != _backgroundEpoch || autoSelecting || _nativeNeedsStop) return;
         final pool = [..._imports, ...catalog.servers].where((s) =>
         !_desktop || s.protocol != 'vless' || ConnectionStrategy.protectedVless(s)).toList();
+      autoAttemptReports.add('База: ${catalog.status}\n'
+        '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}');
         final candidates = <VpnServer>[];
         for (final protocol in ['wireguard', 'vless', 'shadowsocks']) {
           final group = pool.where((server) => server.protocol == protocol).toList()

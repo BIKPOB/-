@@ -38,10 +38,14 @@ class NetworkAnalysis {
 /// Owns every client/socket, so cancellation closes outstanding requests.
 class NetworkAnalyzer {
   final _clients = <HttpClient>{};
+  final _aborts = <Completer<int>>{};
   final _udp = <RawDatagramSocket>{};
   int _epoch = 0;
   void cancel() {
     _epoch++;
+    for(final abort in _aborts.toList()) {
+      if(!abort.isCompleted) abort.completeError(const HttpException('Cancelled'));
+    }
     for(final c in _clients.toList()) { c.close(force:true); }
     for(final s in _udp.toList()) { s.close(); }
   }
@@ -51,9 +55,16 @@ class NetworkAnalyzer {
     final client=HttpClient()..connectionTimeout=timeout..autoUncompress=false;
     client.findProxy=(_) => proxyPort == null ? 'DIRECT' : 'PROXY 127.0.0.1:$proxyPort';
     _clients.add(client);
-    final timer=Timer(timeout,()=>client.close(force:true));
+    final abort=Completer<int>();
+    _aborts.add(abort);
+    // HttpClient.close(force:true) does not finish a stalled TLS upgrade after
+    // HTTP CONNECT. Bound the awaited future itself, including cancellation.
+    final timer=Timer(timeout,(){
+      if(!abort.isCompleted) abort.completeError(TimeoutException('HTTPS deadline',timeout));
+      client.close(force:true);
+    });
     final watch=Stopwatch()..start();
-    try {
+    Future<int> transfer() async {
       final request=await client.getUrl(uri);
       request.followRedirects=false;
       request.headers.set('Accept-Encoding','identity');
@@ -69,7 +80,9 @@ class NetworkAnalyzer {
       if(token != _epoch || (bytes > 0 && received != bytes)) throw const HttpException('Incomplete response');
       final elapsed=max(1,watch.elapsedMilliseconds);
       return bytes == 0 ? elapsed : received*1000~/elapsed;
-    } finally { timer.cancel();client.close(force:true);_clients.remove(client); }
+    }
+    try {return await Future.any([transfer(),abort.future]);}
+    finally {timer.cancel();client.close(force:true);_clients.remove(client);_aborts.remove(abort);}
   }
   Future<bool> _dnsUdp() async {
     final token=_epoch;

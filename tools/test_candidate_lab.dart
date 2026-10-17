@@ -55,7 +55,65 @@ class GateProbe extends NetworkAnalyzer {
   }
   @override void cancel() {if(!gate.isCompleted)gate.completeError(StateError('Cancelled fixture'));super.cancel();}
 }
+// A real TCP proxy that accepts CONNECT but never completes TLS. Closing
+// HttpClient alone used to leave the request future pending indefinitely.
+class StalledProxyHost implements CandidateHost {
+  final listeners=<ServerSocket>[];
+  final peers=<Socket>[];
+  final connected=Completer<void>();
+  final bool acknowledge;
+  StalledProxyHost({this.acknowledge=true});
+  @override Future<String> resolveCandidate(String host) async => '203.0.113.1';
+  @override Future<void> startCandidates(String configuration) async {
+    for(final entry in jsonDecode(configuration)['inbounds'] as List) {
+      final listener=await ServerSocket.bind(InternetAddress.loopbackIPv4,entry['port'] as int);
+      listeners.add(listener);
+      listener.listen((peer) {
+        peers.add(peer);var sent=false;
+        peer.listen((_) {
+          if(!sent) {
+            sent=true;
+            if(acknowledge) peer.write('HTTP/1.1 200 Connection established\r\n\r\n');
+            if(!connected.isCompleted) connected.complete();
+          }
+        },onError:(Object _){});
+      });
+    }
+  }
+  @override Future<void> stopCandidates() async {
+    for(final peer in peers.toList()) {peer.destroy();}peers.clear();
+    for(final listener in listeners.toList()) {await listener.close();}listeners.clear();
+  }
+}
+class ShortDeadlineProbe extends NetworkAnalyzer {
+  @override Future<int> https(Uri uri,{int? proxyPort,int bytes=0,int maxBytes=4096,
+    Duration timeout=const Duration(seconds:6)}) => super.https(uri,proxyPort:proxyPort,
+      bytes:bytes,maxBytes:maxBytes,timeout:const Duration(milliseconds:150));
+}
+Future<void> stalledTlsRegression() async {
+  for(final acknowledge in [false,true]) {
+    final host=StalledProxyHost(acknowledge:acknowledge);
+    final reports=<CandidateResult>[],statuses=<String>[];
+    final results=await CandidateLab(host,probe:ShortDeadlineProbe()).run(
+      [for(var i=1;i<=6;i++) fixture(i)],deep:false,metered:true,
+      routeValid:() async=>true,status:statuses.add,onResult:reports.add)
+      .timeout(const Duration(seconds:5));
+    check(results.length==6 && results.every((r)=>!r.usable),'Stalled CONNECT/TLS skipped candidates');
+    check(reports.length==6 && statuses.where((s)=>s.startsWith('Параллельная')).length==2,
+      'No live results or no advancement to the next group');
+    check(host.listeners.isEmpty && host.peers.isEmpty,'Stalled proxy resources survived cleanup');
+  }
+  final host=StalledProxyHost(),probe=NetworkAnalyzer();
+  final lab=CandidateLab(host,probe:probe);
+  final pending=lab.run([fixture(1)],deep:false,metered:true,routeValid:()async=>true,status:(_){});
+  await host.connected.future.timeout(const Duration(seconds:2));
+  // Allow CONNECT to upgrade into the intentionally stalled TLS handshake.
+  await Future<void>.delayed(const Duration(milliseconds:30));
+  await lab.cancel().timeout(const Duration(seconds:2));
+  check((await pending).isEmpty && host.listeners.isEmpty,'Cancel left TLS search pending');
+}
 Future<void> main() async {
+  await stalledTlsRegression();
   final candidates=[fixture(1),fixture(2),fixture(3)];
   final host=Host(),bad=Host()..badFirst=true;
   final probe=Probe(host);

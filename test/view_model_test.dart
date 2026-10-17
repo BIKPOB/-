@@ -30,6 +30,9 @@ class MemoryProfiles extends ProfileStore {
   @override Future<void> save(List<VpnServer> servers) async {}
   @override Future<Credentials?> credentials(String id) async => null;
 }
+class EmptyProfiles extends MemoryProfiles {
+  @override Future<List<VpnServer>> load() async => [];
+}
 class ControlledEngine implements VpnEngine {
   final controller = StreamController<EngineEvent>.broadcast();
   final started = Completer<void>();
@@ -347,6 +350,25 @@ void main() {
         await vm.disconnect();
       } finally { vm.dispose(); await engine.dispose(); }
     }
+  });
+  testWidgets('automatic search with no imports never asks for a manual server', (tester) async {
+    final engine=AutoEngine(),catalog=Completer<PublicCatalogResult>();
+    final vm=VpnViewModel(engine,EmptyProfiles(),
+      ServerMonitor(probe:(_) async=>const HealthResult(Reachability.reachable,1)),
+      catalogLoader:()=>catalog.future,networkReader:()async=>'wifi');
+    await tester.pumpWidget(MaterialApp(home:HomePage(vm)));
+    await tester.pump();
+    final search=vm.autoConnect();await tester.pump();
+    expect(vm.autoSelecting,true);
+    expect(find.text('Сервер выбирается автоматически из публичных баз'),findsOneWidget);
+    expect(find.text('Выберите сервер'),findsNothing);
+    expect(find.text('Автоподбор или свой сервер'),findsNothing);
+    expect(find.byType(LinearProgressIndicator),findsOneWidget);
+    expect(tester.widget<FloatingActionButton>(find.byType(FloatingActionButton)).onPressed,isNull);
+    await vm.cancelAutoSelection();
+    catalog.complete(const PublicCatalogResult([],false,0));
+    await tester.pump();await search;
+    await tester.pumpWidget(const SizedBox.shrink());await engine.dispose();
   });
   testWidgets('notification shade preserves search; actually hiding the app cancels it', (tester) async {
     final engine = AutoEngine(), catalog = Completer<PublicCatalogResult>();

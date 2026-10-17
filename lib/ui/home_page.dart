@@ -98,12 +98,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
       IconButton(tooltip: 'Проверить пинг', onPressed: vm.refreshLatency, icon: const Icon(Icons.refresh)),
       IconButton(tooltip: 'Обучение', onPressed: _learning, icon: const Icon(Icons.psychology_outlined)),
       IconButton(tooltip: 'Диагностика', onPressed: _diagnostics, icon: const Icon(Icons.bug_report_outlined)),
-    ]), floatingActionButton: FloatingActionButton.extended(onPressed: _add, icon: const Icon(Icons.add), label: const Text('Добавить сервер')),
+    ]), floatingActionButton: FloatingActionButton.extended(onPressed: vm.autoSelecting || vm.busy ? null : _add, icon: const Icon(Icons.add), label: const Text('Добавить сервер')),
     body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 820), child: ListView(padding: const EdgeInsets.fromLTRB(16,16,16,100), children: [
       Card(child: Padding(padding: const EdgeInsets.all(20), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Text(switch(vm.state) { ConnectionState.connected => vm.connectionVerified ? 'Подключено · проверено' : 'Туннель включён · есть ограничения', ConnectionState.connecting => 'Подключение…',
           ConnectionState.error => 'Не удалось подключиться', _ => 'VPN выключен' }, style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 8), Text(vm.activeServer?.name ?? vm.selected?.name ?? 'Добавьте первый сервер'),
+        const SizedBox(height: 8), Text(vm.autoSelecting ? 'Сервер выбирается автоматически из публичных баз' : vm.activeServer?.name ?? vm.selected?.name ?? 'Запустите ИИ-подбор или добавьте свой сервер'),
         Text('↓ ${formatTrafficRate(vm.traffic.download)}   ↑ ${formatTrafficRate(vm.traffic.upload)}'),
         if (vm.message != null) Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text(vm.message!)),
         FilledButton.icon(onPressed: vm.autoSelecting || vm.busy || !vm.ready || (!vm.canDisconnect && vm.selected == null) ? null : () async {
@@ -126,17 +126,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
         if (vm.autoStatus != null) Text(vm.networkContext.label),
         if (vm.autoStatus != null) Text(vm.autoStatus!),
         if (vm.autoPlan.isNotEmpty) Text(vm.autoPlan),
-        if (vm.busy || vm.state == ConnectionState.connecting) const LinearProgressIndicator(),
+        if (vm.autoSelecting || vm.busy || vm.state == ConnectionState.connecting) const LinearProgressIndicator(),
       ]))),
       const SizedBox(height: 16), Text('Мои серверы', style: Theme.of(context).textTheme.titleLarge),
       Wrap(spacing: 6, children: [ChoiceChip(label: const Text('Все'), selected: vm.protocolFilter == null, onSelected: (_) => vm.filterProtocol(null)),
         for (final p in protocols.entries) ChoiceChip(label: Text(p.value), selected: vm.protocolFilter == p.key, onSelected: (_) => vm.filterProtocol(p.key))]),
       const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('Пинг всех адресов проверяется одновременно. ICMP — ответ узла, TCP — ответ порта; это не подтверждение работы VPN.')),
-      if (items.isEmpty) Card(child: Padding(padding: const EdgeInsets.all(24), child: Column(children: [
+      if (items.isEmpty && !vm.autoSelecting) Card(child: Padding(padding: const EdgeInsets.all(24), child: Column(children: [
         const Icon(Icons.vpn_key_outlined, size: 48), const SizedBox(height: 12),
-        const Text('Выберите сервер', style: TextStyle(fontSize: 20)),
-        const Text('Откройте публичную базу WireGuard/VLESS/Shadowsocks или импортируйте собственный ключ.'),
-        const SizedBox(height: 12), FilledButton(onPressed: _add, child: const Text('Выбрать протокол')),
+        const Text('Автоподбор или свой сервер', style: TextStyle(fontSize: 20)),
+        const Text('ИИ-подбор выше сам загрузит базу и проверит серверы. Для ручного подключения можно импортировать свой ключ.'),
+        const SizedBox(height: 12), FilledButton(onPressed: vm.busy ? null : _add, child: const Text('Добавить свой сервер')),
       ]))),
       for (final server in items) Card(child: ListTile(selected: vm.selectedId == server.id, onTap: () => vm.select(server.id),
         leading: Icon(vm.activeServer?.id == server.id ? Icons.vpn_lock : Icons.dns_outlined),
