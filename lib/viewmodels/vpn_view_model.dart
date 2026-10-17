@@ -247,6 +247,10 @@ class VpnViewModel extends ChangeNotifier {
       int rank(VpnServer a, VpnServer b, Map<String, HealthResult>? latency) {
         final recent = priority(b).compareTo(priority(a));
         if (recent != 0) return recent;
+        if(networkAnalysis?.fresh(context,DateTime.now())==true && networkAnalysis!.preferLiteralEndpoint) {
+          final literal=(InternetAddress.tryParse(b.host)!=null?1:0).compareTo(InternetAddress.tryParse(a.host)!=null?1:0);
+          if(literal!=0) return literal;
+        }
         int reachability(VpnServer server) => latency?[server.id]?.state == Reachability.reachable ? 1
           : latency?[server.id]?.state == Reachability.unreachable ? -1 : 0;
         final reachable = reachability(b).compareTo(reachability(a));
@@ -310,12 +314,25 @@ class VpnViewModel extends ChangeNotifier {
       if(engine is CandidateHost) {
         final lab=_candidateLab ??= CandidateLab(engine as CandidateHost);
         final proxyPool=_transportDiversity(mixed.where((s)=>s.protocol!='wireguard').toList());
-        final findings=await lab.run(proxyPool,deep:deep,metered:context.metered!=false,target:targetBytesPerSecond,policy:_policy,
-          routeValid:() async {
-            if(cancelled()) return false;
-            final current=await _network();
-            return !current.vpnPresent && !current.ambiguous && context.sameConnection(current);
-          }, status:(value){autoStatus=value;_notify();});
+        Future<NetworkContext>? routeRead;
+        NetworkContext? routeSnapshot;
+        DateTime? routeReadAt;
+        Future<bool> validRoute() async {
+          if(cancelled()) return false;
+          if(routeSnapshot==null || routeReadAt==null || DateTime.now().difference(routeReadAt!)>=const Duration(milliseconds:500)) {
+            final pending=routeRead ??= _network();
+            try {routeSnapshot=await pending;routeReadAt=DateTime.now();}
+            finally {if(identical(routeRead,pending)) routeRead=null;}
+          }
+          final current=routeSnapshot!;
+          return !cancelled() && !current.vpnPresent && !current.ambiguous && context.sameConnection(current);
+        }
+        final analysis=networkAnalysis?.fresh(context,DateTime.now())==true?networkAnalysis:null;
+        autoAttemptReports.add('Профиль сети: таймаут HTTPS через прокси ${analysis?.candidateTimeout.inSeconds??6} с; '
+          '${analysis?.preferLiteralEndpoint==true?"IP-адреса серверов получают приоритет из-за неподтверждённого системного DNS":"имена и IP сохраняются в подборе"}; '
+          'замеров скорости ${deep || analysis?.extraSpeedSample==true?3:2}');
+        final findings=await lab.run(proxyPool,deep:deep,metered:context.metered!=false,target:targetBytesPerSecond,analysis:analysis,policy:_policy,
+          routeValid:validRoute, status:(value){autoStatus=value;_notify();});
         if(cancelled()) return;
         for(final f in findings) {
           autoAttemptReports.add('Прокси-проверка: ${f.report}');

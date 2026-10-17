@@ -15,6 +15,13 @@ class NetworkAnalysis {
   bool fresh(NetworkContext context, DateTime now) => key == context.environmentKey &&
     !context.ambiguous && now.difference(time) >= Duration.zero &&
     now.difference(time) < const Duration(minutes: 15);
+  bool get preferLiteralEndpoint => dnsMs == null && ipHttps;
+  bool get extraSpeedSample => httpsMs.length>=2 && jitterMs>max(500,httpsMs.reduce(min));
+  Duration get candidateTimeout {
+    if(httpsMs.isEmpty) return const Duration(seconds:10);
+    final estimate=httpsMs.reduce(max)*3+jitterMs*2+2000;
+    return Duration(milliseconds:estimate.clamp(6000,10000));
+  }
   int get jitterMs => httpsMs.length < 2 ? 0 : httpsMs.reduce(max) - httpsMs.reduce(min);
   String get label => 'Анализ без VPN: DNS ${dnsMs == null ? "не подтверждён" : "$dnsMs мс"}; '
     'HTTPS ${httpsMs.length}/3${httpsMs.isEmpty ? "" : " · разброс $jitterMs мс"}; '

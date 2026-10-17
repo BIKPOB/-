@@ -62,7 +62,7 @@ class CandidateLab {
     if(pending!=null) await pending;
   }
   Future<List<CandidateResult>> run(List<VpnServer> candidates,{required bool deep,
-      required bool metered, int target=131072, SelectionPolicy policy=const SelectionPolicy(), required Future<bool> Function() routeValid,
+      required bool metered, int target=131072, NetworkAnalysis? analysis, SelectionPolicy policy=const SelectionPolicy(), required Future<bool> Function() routeValid,
       required void Function(String) status}) async {
     final token=++_epoch;
     final done=Completer<void>();_pending=done.future;
@@ -83,6 +83,8 @@ class CandidateLab {
     try {
       if(!await routeValid()) throw StateError('Маршрут изменился до проверки');
       final pool=candidates.where((s)=>s.protocol!='wireguard').take(deep?policy.deepCandidates:policy.fastCandidates).toList();
+      final timeout=analysis?.candidateTimeout??const Duration(seconds:6);
+      final rounds=deep || analysis?.extraSpeedSample==true?3:2;
       var speedTests=0, qualified=0;
       final maxSpeedTests=deep?6:3;
       // Each small group is torn down before starting the next group. Invalid
@@ -115,12 +117,12 @@ class CandidateLab {
             try {
               // Domain request traverses HTTP CONNECT and resolves at the proxy,
               // not via the application's direct resolver.
-              final latency=await _probe.https(Uri.parse('https://www.gstatic.com/generate_204'),proxyPort:e.port);
+              final latency=await _probe.https(Uri.parse('https://www.gstatic.com/generate_204'),proxyPort:e.port,timeout:timeout);
               if(live()) passing.add((server:e.server,port:e.port,latency:latency));
             } catch(first) {
               if(!live()) return;
               try {
-                final latency=await _probe.https(Uri.parse('https://cp.cloudflare.com/generate_204'),proxyPort:e.port);
+                final latency=await _probe.https(Uri.parse('https://cp.cloudflare.com/generate_204'),proxyPort:e.port,timeout:timeout);
                 if(live()) passing.add((server:e.server,port:e.port,latency:latency));
               } catch(second) {if(live()) results.add(CandidateResult(e.server,null,[], 'HTTPS через прокси: ${first.runtimeType}/${second.runtimeType}'));}
             }
@@ -133,7 +135,7 @@ class CandidateLab {
             status('Сравнение скорости · ${e.server.protocol} · ${e.server.source}');
             final speeds=<int>[];
             String? error;
-            for(var round=0;round<(deep?3:2)&&live();round++) {
+            for(var round=0;round<rounds&&live();round++) {
               try {
                 final size=metered?1048576:4194304;
                 speeds.add(await _probe.https(Uri.https('speed.cloudflare.com','/__down',{'bytes':'$size'}),

@@ -81,6 +81,9 @@ Future<void> main() async {
   const b=NetworkContext(type:'wifi',session:'boot2:2',historyKey:'local-network-a');
   check(a.environmentKey==b.environmentKey && !a.sameConnection(b),'History and live cancellation identities mixed');
   final report=NetworkAnalysis('private-local-key',DateTime.now(),20,[100,150,110],true,false,[]);
+  final unreliable=NetworkAnalysis('test',DateTime.now(),null,[400,1500,500],true,false,[]);
+  check(unreliable.preferLiteralEndpoint && unreliable.extraSpeedSample && unreliable.candidateTimeout.inSeconds==8,
+    'Direct network results did not adjust probe policy');
   check(report.jitterMs==50 && !report.report.contains('private-local-key'),'Profile privacy/jitter failed');
   final policy=SelectionPolicy.parse(File('assets/connection-policy.json').readAsStringSync());
   check(policy.fastCandidates==12 && policy.deepSeconds==100,'Bundled policy mismatch');
