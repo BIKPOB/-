@@ -5,8 +5,9 @@ import '../core/models.dart';
 import '../core/proxy_profile.dart';
 import '../core/traffic.dart';
 import 'vpn_engine.dart';
+import 'candidate_host.dart';
 
-class AndroidEngine implements VpnEngine, TrafficSource {
+class AndroidEngine implements VpnEngine, TrafficSource, CandidateHost {
   static const _wg = MethodChannel('quietvpn/wg');
   static const _xray = MethodChannel('flutter_v2ray_client');
   static const _stage = MethodChannel('quietvpn/xray-state');
@@ -74,7 +75,24 @@ class AndroidEngine implements VpnEngine, TrafficSource {
       }
     } finally { _checking = false; }
   }
+  String? _labConfiguration;
+  static const _lab = MethodChannel('quietvpn/candidate-lab');
+  @override Future<String> resolveCandidate(String host) async =>
+    (await _lab.invokeMethod<String>('resolve', {'host':host})) ?? (throw StateError('Нет адреса'));
+  @override Future<void> startCandidates(String configuration) async {
+    if (_starting || _xrayState != 'DISCONNECTED') throw StateError('VPN уже активен');
+    _labConfiguration=configuration;
+    await _lab.invokeMethod<void>('start', {'config':configuration});
+    await CandidatePorts.wait(configuration);
+  }
+  @override Future<void> stopCandidates() async {
+    await _lab.invokeMethod<void>('stop');
+    final config=_labConfiguration;
+    if(config!=null) await CandidatePorts.closed(config);
+    _labConfiguration=null;
+  }
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    await stopCandidates();
     _epoch++; _verified = false; _counters = null; _active = server.protocol; _starting = true;
     await Permission.notification.request();
     if (_active == 'wireguard') {
@@ -124,6 +142,7 @@ class AndroidEngine implements VpnEngine, TrafficSource {
     return data == null ? null : TrafficCounters(data['received'] as int, data['sent'] as int);
   }
   @override Future<void> dispose() async {
+    await stopCandidates();
     _disposed = true; _epoch++;
     for (final subscription in _subscriptions) { await subscription.cancel(); }
     await _events.close();

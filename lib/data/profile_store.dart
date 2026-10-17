@@ -5,6 +5,8 @@ import '../core/profile_policy.dart';
 
 class ProfileStore {
   final _storage = const FlutterSecureStorage();
+  Future<String?> loadNetworkLab() => _storage.read(key: 'network.lab.v1');
+  Future<void> saveNetworkLab(String value) => _storage.write(key: 'network.lab.v1', value:value);
   Future<String?> loadAttempts() => _storage.read(key: 'attempts.v1');
   Future<void> saveAttempts(String value) => _storage.write(key: 'attempts.v1', value: value);
   Future<String?> loadSelector() => _storage.read(key: 'selector.v2');

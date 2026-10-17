@@ -51,6 +51,8 @@ jobs:
         run: flutter analyze
       - name: Test Flutter core
         run: flutter test
+      - name: Test bounded network lab and cancellation
+        run: dart run tools/test_candidate_lab.dart
       - name: Build mobile APK
         run: flutter build apk --release --target-platform android-arm64,android-arm
       - name: Test native WireGuard and browser integration

@@ -14,6 +14,10 @@ import '../data/profile_store.dart';
 import '../data/public_catalog.dart';
 import '../core/adaptive_selector.dart';
 import '../core/connection_strategy.dart';
+import '../core/network_analysis.dart';
+import '../core/candidate_lab.dart';
+import '../core/selection_policy.dart';
+import '../platform/candidate_host.dart';
 import '../core/network_context.dart';
 import '../core/network_baseline.dart';
 import '../core/speed_policy.dart';
@@ -57,6 +61,72 @@ class VpnViewModel extends ChangeNotifier {
   NetworkBaseline? baseline;
   String baselineStatus = 'Наблюдение за вашей сетью: ожидание замера без VPN';
   int? _selectionTarget;
+  final _networkAnalyzer = NetworkAnalyzer();
+  CandidateLab? _candidateLab;
+  NetworkAnalysis? networkAnalysis;
+  bool analyzingNetwork = false;
+  String analysisStatus = 'Анализ сети: ожидание прямого маршрута';
+  Map<String,dynamic> _labStorage = {};
+  Future<void>? _analysisPending;
+  SelectionPolicy _policy = const SelectionPolicy();
+  String get networkAnalysisReport => networkAnalysis?.fresh(networkContext,DateTime.now())==true ? networkAnalysis!.report : analysisStatus;
+  Future<void> _saveLab() async {
+    try { await store.saveNetworkLab(jsonEncode(_labStorage)); } catch (_) { }
+  }
+  Future<void> analyzeNetwork({bool force=false}) async {
+    if(engine is! CandidateHost || _nativeNeedsStop || _disposed || (!_foreground && !Platform.isWindows)) return;
+    final context=await _network();networkContext=context;
+    await _analyzeNetwork(context,force:force);
+  }
+  Future<void> _analyzeNetwork(NetworkContext context,{bool force=false}) async {
+    if(_analysisPending!=null) { await _analysisPending; return; }
+    if(context.vpnPresent || context.ambiguous || context.type=='offline') {
+      analysisStatus='Анализ отложен: нет однозначного прямого маршрута без VPN';return;
+    }
+    if(!force && networkAnalysis?.fresh(context,DateTime.now())==true) return;
+    final done=Completer<void>();_analysisPending=done.future;analyzingNetwork=true;_notify();
+    try {
+      final now=DateTime.now();final day=now.toUtc().toIso8601String().substring(0,10);
+      final used=_labStorage['analysisDay']==day?(_labStorage['analysisCount'] as num?)?.toInt()??0:0;
+      if(used >= (context.metered==false?48:12)) {analysisStatus='Достигнут суточный лимит коротких анализов сети';return;}
+      _labStorage.addAll({'analysisDay':day,'analysisCount':used+1});await _saveLab();
+      analysisStatus='Проверка системного DNS, DNS/UDP, HTTPS по IP и трёх HTTPS-ответов';_notify();
+      final value=await _networkAnalyzer.analyze(context);
+      final after=await _network();
+      if(_disposed || after.vpnPresent || !context.sameConnection(after) || after.ambiguous) {
+        analysisStatus='Сеть изменилась: прямые измерения отклонены';return;
+      }
+      networkAnalysis=value;analysisStatus=value.label;
+      final entries=(_labStorage['analyses'] as List? ?? []).whereType<Map>()
+        .where((m)=>m['key']!=value.key).take(7).toList();
+      _labStorage['analyses']=[value.toJson(),...entries];await _saveLab();
+    } catch(e) {analysisStatus='Анализ сети не завершён: ${e.runtimeType}';}
+    finally {analyzingNetwork=false;done.complete();_analysisPending=null;if(!_disposed)_notify();}
+  }
+  Future<void> _refreshPolicy() async {
+    final last=DateTime.fromMillisecondsSinceEpoch((_labStorage['policyTime'] as num?)?.toInt()??0);
+    if(DateTime.now().difference(last)<const Duration(hours:6)) return;
+    _labStorage['policyTime']=DateTime.now().millisecondsSinceEpoch;
+    try {
+      final text=await SelectionPolicy.fetch();final next=SelectionPolicy.parse(text);
+      if(next.version>=_policy.version) {_policy=next;_labStorage['policy']=text;}
+    } catch(_) { /* Offline rules remain available. */ }
+    await _saveLab();
+  }
+  static List<VpnServer> _transportDiversity(List<VpnServer> ranked) {
+    final groups=<String,List<VpnServer>>{};
+    for(final s in ranked) {
+      final q=Uri.tryParse(s.profile)?.queryParameters;
+      final key='${s.protocol}|${q?['type']??"tcp"}|${q?['security']??"none"}';
+      groups.putIfAbsent(key,()=>[]).add(s);
+    }
+    final result=<VpnServer>[];
+    for(var round=0;;round++) {
+      var added=false;
+      for(final group in groups.values) {if(round<group.length){result.add(group[round]);added=true;}}
+      if(!added) return result;
+    }
+  }
   bool get _desktop => engine is DesktopCapabilities;
   int get targetBytesPerSecond => _desktop ? SpeedPolicy.desktopTarget(_selectionTarget) : _selectionTarget ?? 131072;
   void _scheduleBaseline({bool immediate = false}) {
@@ -68,6 +138,8 @@ class VpnViewModel extends ChangeNotifier {
           final context = await _network();
           if (_disposed || autoSelecting || _nativeNeedsStop || busy) return;
           networkContext = context;
+          if(engine is CandidateHost) await _analyzeNetwork(context);
+          if (_disposed || autoSelecting || _nativeNeedsStop || busy) return;
           await _baselineMonitor.pause(false);
           final result = await _baselineMonitor.tick(context, readNetwork: _network);
           if (_disposed) return;
@@ -101,6 +173,7 @@ class VpnViewModel extends ChangeNotifier {
       if (context.type == 'mobile' && Platform.isAndroid) await Permission.phone.request();
       extendedNetwork = true;
       networkContext = await _network();
+      await analyzeNetwork();
     } finally { requestingNetworkPermission = false; _notify(); }
   }
   Future<void> resetLearning() async {
@@ -126,7 +199,9 @@ class VpnViewModel extends ChangeNotifier {
     } catch (_) { return const NetworkContext(); }
   }
   Future<void> cancelAutoSelection({String reason = 'Подбор остановлен пользователем'}) async {
-    _autoEpoch++; _autoMonitor.cancel(); autoStatus = reason; _notify();
+    _autoEpoch++; _autoMonitor.cancel(); _networkAnalyzer.cancel();
+    await _candidateLab?.cancel();
+    autoStatus = reason; _notify();
     if (!busy && _nativeNeedsStop) await disconnect();
   }
   Future<void> autoConnect({bool deep = false}) async {
@@ -137,15 +212,28 @@ class VpnViewModel extends ChangeNotifier {
     autoStatus = 'Локальная нейросеть: обновление базы'; _notify();
     _poll?.cancel(); _probeEpoch++; monitor.cancel();
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
+    final overallClock=Stopwatch()..start();
     bool cancelled() => token != _autoEpoch || _disposed;
     try {
       final context = await _network();
       networkContext = context;
       _selectionTarget = baseline?.fresh(context, DateTime.now()) == true ? baseline!.target : null;
       await _baselineMonitor.pause(true);
+      if(engine is CandidateHost) {
+        await _analyzeNetwork(context);
+        if(cancelled()) return;
+        await _refreshPolicy();
+        if(cancelled()) return;
+        autoAttemptReports.add(networkAnalysis?.fresh(context,DateTime.now())==true ? networkAnalysis!.report : analysisStatus);
+        autoAttemptReports.add('Правила РФ v${_policy.version}: до ${deep?_policy.deepCandidates:_policy.fastCandidates} прокси-кандидатов, бюджет ${deep?_policy.deepSeconds:_policy.fastSeconds} с; скорость измеряется последовательно');
+      }
       final network = context.type;
       if (cancelled()) return;
       if (network == 'offline') { autoStatus = 'Нет доступной сети'; return; }
+      if(engine is CandidateHost && (context.vpnPresent || context.ambiguous)) {
+        autoStatus=context.vpnPresent ? 'Прямая проверка отложена: обнаружен другой VPN или внешний маршрут через виртуальный адаптер. Отключите его перед подбором.' : 'Подбор остановлен: базовая сеть неоднозначна';
+        return;
+      }
       final catalog = await _catalogLoader();
       if (cancelled()) return;
       final pool = [..._imports, ...catalog.servers].where((s) =>
@@ -192,12 +280,12 @@ class VpnViewModel extends ChangeNotifier {
           if (_backgroundHealth[server.id] case final value?) server.id: value,
       };
       final missing = candidates.where((server) => !latency.containsKey(server.id)).toList();
-      if (missing.isNotEmpty) latency.addAll(await _autoMonitor.sample(missing));
+      if (engine is! CandidateHost && missing.isNotEmpty) latency.addAll(await _autoMonitor.sample(missing));
       if (cancelled()) return;
       // Recheck negatives once, including cached negatives, before lowering
       // their scheduling priority. Do not persist this as a failed protocol handshake.
       final unavailable = candidates.where((s) => latency[s.id]?.state == Reachability.unreachable).toList();
-      if (unavailable.isNotEmpty) {
+      if (engine is! CandidateHost && unavailable.isNotEmpty) {
         latency.addAll(await _autoMonitor.sample(unavailable));
         if (cancelled()) return;
       }
@@ -217,13 +305,39 @@ class VpnViewModel extends ChangeNotifier {
       candidates.sort((a, b) => rank(a, b, latency));
       final mixed = [for (final tier in [1, 0, -1])
         ...PublicCatalog.diverse(candidates.where((s) => priority(s) == tier).toList())];
-      final ordered = ConnectionStrategy.select(mixed, limit: deep ? 8 : 6, priority: priority);
+      var ordered = ConnectionStrategy.select(mixed, limit: deep ? 8 : 6, priority: priority);
+      if(engine is CandidateHost) {
+        final lab=_candidateLab ??= CandidateLab(engine as CandidateHost);
+        final proxyPool=_transportDiversity(mixed.where((s)=>s.protocol!='wireguard').toList());
+        final findings=await lab.run(proxyPool,deep:deep,metered:context.metered!=false,target:targetBytesPerSecond,policy:_policy,
+          routeValid:() async {
+            if(cancelled()) return false;
+            final current=await _network();
+            return !current.vpnPresent && !current.ambiguous && context.sameConnection(current);
+          }, status:(value){autoStatus=value;_notify();});
+        if(cancelled()) return;
+        for(final f in findings) {
+          autoAttemptReports.add('Прокси-проверка: ${f.report}');
+          if(f.usable) await _remember(f.server,context,f.latencyMs,
+            'proxy_verified',speed:f.speed,reward:.2+.8*(f.speed/(f.speed+targetBytesPerSecond))*f.consistency);
+          else if(f.error?.startsWith('HTTPS через прокси:')==true) {
+            await _remember(f.server,context,null,'proxy_unconfirmed');
+          }
+        }
+        final usable=findings.where((f)=>f.usable).toList();
+        ordered=[...usable.map((f)=>f.server),
+          if(usable.isEmpty) ...mixed.where((s)=>s.protocol=='wireguard').take(1)];
+        if(ordered.isEmpty) {
+          autoStatus='Прокси-проверка не нашла подтверждённого HTTPS и загрузки. VPN не включён; подробности в диагностике.';
+          return;
+        }
+      }
       final finalists = <({VpnServer server, double utility, int speed, bool qualified})>[];
       autoPlan = '${_selectionTarget == null && !_desktop ? '' : 'Цель скорости: ${(targetBytesPerSecond * 8 / 1000000).toStringAsFixed(1)} Мбит/с · '}${deep ? 'Глубокий' : 'Быстрый'} подбор · план: ${ordered.map((s) => s.protocol).join(' → ')}';
       autoAttemptReports.add('База: ${catalog.status}\n'
         '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}\n$autoPlan');
-      final searchClock = Stopwatch()..start();
-      final budget = Duration(seconds: deep ? 300 : 150);
+      final searchClock = overallClock;
+      final budget = Duration(seconds: deep ? 240 : 120);
       final protocolFailures = <String, int>{};
       var attempt = 0;
       for (final server in ordered) {
@@ -246,7 +360,8 @@ class VpnViewModel extends ChangeNotifier {
           autoAttemptReports.add('Подготовка подключения: ${message ?? "базовая сеть недоступна"}. Туннель не запускался; результат не записан как отказ сервера.');
           return;
         }
-        final deadline = DateTime.now().add(const Duration(seconds: 70));
+        final remaining=max(1,budget.inMilliseconds-searchClock.elapsedMilliseconds);
+        final deadline = DateTime.now().add(Duration(milliseconds:min(70000,remaining)));
         while (!cancelled() && (state == ConnectionState.connecting || _stopping) && DateTime.now().isBefore(deadline)) {
           await Future<void>.delayed(const Duration(milliseconds: 200));
         }
@@ -369,7 +484,7 @@ class VpnViewModel extends ChangeNotifier {
       autoStatus = finalists.isNotEmpty
         ? 'Найдено ${finalists.length} рабочих вариантов, но повторное подключение не прошло проверку. Причины восстановления — в диагностике.'
         : 'Проверено $attempt вариантов: соединение с подходящей загрузкой не найдено. Результаты всех попыток — в диагностике.';
-    } catch (_) { autoStatus = 'Подбор не завершён. Проверьте сеть и диагностику.'; }
+    } catch (error) { if(!cancelled()) autoStatus = 'Подбор остановлен: ${error is StateError ? error.message : error.runtimeType}. Подробности в диагностике.'; }
     finally {
       try { await store.saveAttempts('${DateTime.now().toIso8601String()}\n${autoAttemptReports.join('\n\n')}'); } catch (_) { }
       autoSelecting = false; if (!_disposed) { _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate: true); _notify(); } }
@@ -430,6 +545,16 @@ class VpnViewModel extends ChangeNotifier {
         final previous = await store.loadAttempts();
         if (previous != null && previous.isNotEmpty) autoAttemptReports.add('Предыдущий подбор (сохранённый отчёт):\n$previous');
       } catch (_) { }
+      try {
+        final raw=await store.loadNetworkLab();
+        if(raw!=null) _labStorage=Map<String,dynamic>.from(jsonDecode(raw) as Map);
+        if(_labStorage['policy'] is String) _policy=SelectionPolicy.parse(_labStorage['policy'] as String);
+        final context=await _network();
+        for(final entry in _labStorage['analyses'] as List? ?? []) {
+          final a=NetworkAnalysis.fromJson(Map<String,dynamic>.from(entry as Map));
+          if(a.fresh(context,DateTime.now())) {networkAnalysis=a;analysisStatus=a.label;break;}
+        }
+      } catch(_) { }
       await engine.initialize(); ready = true;
     } catch (_) { message = 'Не удалось инициализировать VPN или защищённое хранилище. На Windows проверьте установку и запуск от администратора.'; state = ConnectionState.error; }
     if (servers.isNotEmpty) selectedId = servers.first.id;
@@ -454,6 +579,7 @@ class VpnViewModel extends ChangeNotifier {
     _baselineTimer?.cancel();
     if (visible) _scheduleBaseline(immediate: true);
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
+    if (!visible) _networkAnalyzer.cancel();
     if (!visible && autoSelecting && !requestingNetworkPermission) {
       unawaited(cancelAutoSelection(reason: 'Подбор остановлен: приложение ушло в фон'));
     }
@@ -545,6 +671,9 @@ class VpnViewModel extends ChangeNotifier {
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     backgroundStatus = null; busy = true; message = null; _localNetworkFailure = false; _notify();
     try {
+      _networkAnalyzer.cancel();
+      await _analysisPending;
+      await _candidateLab?.cancel();
       await _baselineMonitor.pause(true);
       final parsed = ProfilePolicy.parse(server.profile);
       final auth = credentials ?? await store.credentials(server.id);
@@ -679,6 +808,7 @@ class VpnViewModel extends ChangeNotifier {
     finally { busy = false; _stopping = false; _scheduleBackgroundPreflight(immediate: true); _notify(); }
   }
   @override void dispose() {
+    _networkAnalyzer.cancel();unawaited(_candidateLab?.cancel());
     _baselineTimer?.cancel(); _baselineMonitor.dispose();
     _disposed = true; _autoEpoch++; _autoMonitor.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     _backgroundTimer?.cancel(); _trafficTimer?.cancel(); _poll?.cancel(); _connectTimeout?.cancel();

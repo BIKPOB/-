@@ -11,6 +11,7 @@ uri = urlparse(package['rootUri'])
 base = Path(unquote(uri.path)) if uri.scheme == 'file' else (config.parent / unquote(package['rootUri'])).resolve()
 java = base / 'android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray'
 shutil.copyfile(root/'platform_templates/xray/QuietSocketDiagnostics.java', java/'core/QuietSocketDiagnostics.java')
+shutil.copyfile(root/'platform_templates/xray/QuietCandidateCore.java', java/'core/QuietCandidateCore.java')
 p = java/'utils/Utilities.java'
 s = p.read_text()
 if '// Quiet VPN owns DNS routing' not in s:

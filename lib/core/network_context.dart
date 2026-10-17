@@ -1,12 +1,13 @@
 /// A transient snapshot. Android's link estimates are not measured VPN speed.
 class NetworkContext {
-  const NetworkContext({this.type = 'other', this.session = '', this.signal, this.linkMbps,
+  const NetworkContext({this.type = 'other', this.session = '', this.historyKey, this.signal, this.linkMbps,
     this.ambiguous = false, this.vpnPresent = false, this.extended = false, this.phoneGranted = false, this.wifiMhz, this.radio, this.mobileSignal, this.operator, this.downKbps, this.upKbps, this.metered, this.roaming, this.validated});
   final String type, session;
+  final String? historyKey;
   final bool ambiguous, vpnPresent, extended, phoneGranted;
   final int? wifiMhz, radio, mobileSignal;
   final String? operator;
-  String get environmentKey => '$type|${operator ?? "?"}|${radio ?? 0}|${wifiBand ?? 0}${session.isEmpty ? '' : '|$session'}';
+  String get environmentKey => '$type|${operator ?? "?"}|${radio ?? 0}|${wifiBand ?? 0}${(historyKey ?? session).isEmpty ? '' : '|${historyKey ?? session}'}';
   int? get wifiBand => wifiMhz == null ? null : wifiMhz! >= 5925 ? 6 : wifiMhz! >= 4900 ? 5 : 2;
   String get radioLabel => radio == 20 ? '5G NR' : radio == 13 ? 'LTE' :
     [3, 5, 6, 8, 9, 10, 12, 14, 15].contains(radio) ? '3G' :
@@ -14,7 +15,7 @@ class NetworkContext {
   final int? signal, downKbps, upKbps, linkMbps;
   final bool? metered, roaming, validated;
   factory NetworkContext.fromMap(Map<dynamic, dynamic> m) => NetworkContext(
-    extended: m['extended'] == true, phoneGranted: m['phoneGranted'] == true,
+    historyKey: m['historyKey'] as String?, extended: m['extended'] == true, phoneGranted: m['phoneGranted'] == true,
     wifiMhz: m['wifiMhz'] as int?, radio: m['radio'] as int?, mobileSignal: m['mobileSignal'] as int?, operator: m['operator'] as String?,
     linkMbps: (m['linkMbps'] as num?)?.toInt(),
     vpnPresent: m['vpnPresent'] == true, ambiguous: m['ambiguous'] == true, type: m['type'] as String? ?? 'other', session: m['session'] as String? ?? '',

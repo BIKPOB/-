@@ -45,7 +45,7 @@ class BaseNetworkIntegrationTest {
         assertEquals(wifi, BaseNetwork.select(cm).first)
         val snapshot = NetworkSnapshot.read(context)
         assertEquals("wifi", snapshot["type"])
-        assertEquals(wifi.networkHandle.toString(), snapshot["session"])
+        assertEquals(NetworkSnapshot.session(context, wifi), snapshot["session"])
         shadow.setNetworkCapabilities(vpn, capabilities(NC.TRANSPORT_VPN, NC.TRANSPORT_CELLULAR))
         assertEquals(mobile, BaseNetwork.select(cm).first)
         assertEquals("mobile", NetworkSnapshot.read(context)["type"])

@@ -90,7 +90,7 @@ object NetworkBaselineStore {
                 caps.hasTransport(NC.TRANSPORT_CELLULAR) -> "mobile"
                 caps.hasTransport(NC.TRANSPORT_ETHERNET) -> "ethernet"
                 else -> "other" }
-            val result = JSONObject().put("session", network.networkHandle.toString()).put("type", type)
+            val result = JSONObject().put("session", NetworkSnapshot.session(c, network)).put("type", type)
                 .put("time", now).put("bytesPerSecond", bytes * 1000L / elapsed).put("latencyMs", latency)
             p.edit().putString("sample", result.toString())
                 .putInt("sampleBoot", android.provider.Settings.Global.getInt(c.contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)).commit()

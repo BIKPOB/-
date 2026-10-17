@@ -10,11 +10,12 @@ import '../core/profile_policy.dart';
 import '../core/traffic.dart';
 import 'desktop_capabilities.dart';
 import 'vpn_engine.dart';
+import 'candidate_host.dart';
 import 'windows_config.dart';
 import '../core/xray_failure.dart';
 import 'windows_probe.dart';
 
-class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities {
+class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, CandidateHost {
   final _events = StreamController<EngineEvent>.broadcast();
   final _probe = WindowsProbe();
   final _root = File(Platform.resolvedExecutable).parent.path;
@@ -111,7 +112,34 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities {
     } finally { p.kill(); }
   }
 
+  Process? _candidateCore;
+  @override Future<String> resolveCandidate(String host) async {
+    final addresses=await InternetAddress.lookup(host);
+    if(addresses.isEmpty) throw StateError('Нет адреса');
+    return addresses.firstWhere((a)=>a.type==InternetAddressType.IPv4,orElse:()=>addresses.first).address;
+  }
+  @override Future<void> startCandidates(String configuration) async {
+    if(_active || _stopping) throw StateError('VPN уже активен');
+    await stopCandidates();
+    await _verifyBundle();
+    await _validateConfig(Map<String,dynamic>.from(jsonDecode(configuration) as Map));
+    final p=await Process.start(_file('xray.exe'), ['run','-config','stdin:'],
+      workingDirectory:'$_root\\engines',runInShell:false);
+    _candidateCore=p;
+    unawaited(p.stdout.drain<void>());unawaited(p.stderr.drain<void>());
+    p.stdin.write(configuration);await p.stdin.flush();await p.stdin.close();
+    await CandidatePorts.wait(configuration);
+    if(await p.exitCode.timeout(const Duration(milliseconds:1),onTimeout:()=>-9999)!=-9999) {
+      throw StateError('Проверочный Xray завершился');
+    }
+  }
+  @override Future<void> stopCandidates() async {
+    final p=_candidateCore;_candidateCore=null;
+    if(p!=null) {p.kill();await p.exitCode.timeout(const Duration(seconds:3));}
+  }
+
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    await stopCandidates();
     if (_active || _stopping) throw StateError('Сначала отключите VPN');
     final profile = ProfilePolicy.parse(server.profile);
     await _verifyBundle();
@@ -205,5 +233,6 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities {
     final info = await _system('tunnel');
     if (info['ready'] != true && !_stopping) _emit(ConnectionState.error, 'Интерфейс VPN пропал');
   }
-  @override Future<void> dispose() async { if (_active) await disconnect(); await _events.close(); }
+  @override Future<void> dispose() async {
+    await stopCandidates(); if (_active) await disconnect(); await _events.close(); }
 }

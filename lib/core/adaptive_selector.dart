@@ -66,8 +66,8 @@ class AdaptiveSelector {
       if (stamp == null) return 0;
       final age = clock.difference(stamp);
       if (age.isNegative) return 0;
-      if ((entry['outcome'] == 'verified' || entry['outcome'] == 'usable') && age < const Duration(hours: 24)) return 1;
-      if ((entry['outcome'] == 'unconfirmed' || entry['outcome'] == 'slow_or_unstable' || entry['outcome'] == 'preflight_unreachable') &&
+      if ((entry['outcome'] == 'verified' || entry['outcome'] == 'usable' || entry['outcome'] == 'proxy_verified') && age < const Duration(hours: 24)) return 1;
+      if ((entry['outcome'] == 'proxy_unconfirmed' || entry['outcome'] == 'unconfirmed' || entry['outcome'] == 'slow_or_unstable' || entry['outcome'] == 'preflight_unreachable') &&
           age < const Duration(minutes: 10)) { return -1; }
       return 0;
     }
@@ -81,7 +81,7 @@ class AdaptiveSelector {
       if (entry['profile'] != id) continue;
       final stamp = DateTime.tryParse(entry['time']?.toString() ?? '');
       if (stamp == null || clock.isBefore(stamp) || clock.difference(stamp) >= const Duration(hours: 24)) return 0;
-      if (entry['outcome'] != 'verified' && entry['outcome'] != 'usable') return 0;
+      if (entry['outcome'] != 'verified' && entry['outcome'] != 'usable' && entry['outcome'] != 'proxy_verified') return 0;
       return max(0, (entry['bytesPerSecond'] as num?)?.toInt() ?? 0);
     }
     return 0;

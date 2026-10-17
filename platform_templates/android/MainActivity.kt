@@ -6,9 +6,44 @@ import io.flutter.embedding.android.FlutterActivity
 class MainActivity : FlutterActivity() {
     private var browserResult: io.flutter.plugin.common.MethodChannel.Result? = null
     private lateinit var wg: WgBridge
+    private val resolverWorker = java.util.concurrent.Executors.newFixedThreadPool(3)
+    private val candidateWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val probeWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     override fun configureFlutterEngine(engine: io.flutter.embedding.engine.FlutterEngine) {
         super.configureFlutterEngine(engine)
+        io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/candidate-lab")
+            .setMethodCallHandler { call, result ->
+                val worker = if (call.method == "resolve") resolverWorker else candidateWorker
+                worker.execute {
+                    try {
+                        when (call.method) {
+                            "resolve" -> {
+                                val cm = getSystemService(android.net.ConnectivityManager::class.java)
+                                val (network, _) = BaseNetwork.select(cm)
+                                val addresses = network.getAllByName(call.argument<String>("host") ?: "")
+                                val address = addresses.firstOrNull { it is java.net.Inet4Address } ?: addresses.first()
+                                runOnUiThread { result.success(address.hostAddress) }
+                            }
+                            "start" -> {
+                                val cm = getSystemService(android.net.ConnectivityManager::class.java)
+                                val active = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+                                check(active != null && !active.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN))
+                                val (network, _) = BaseNetwork.select(cm)
+                                dev.amirzr.flutter_v2ray_client.v2ray.core.QuietCandidateCore.start(applicationContext,
+                                    network, call.argument<String>("config") ?: "")
+                                runOnUiThread { result.success(null) }
+                            }
+                            "stop" -> {
+                                dev.amirzr.flutter_v2ray_client.v2ray.core.QuietCandidateCore.stop()
+                                runOnUiThread { result.success(null) }
+                            }
+                            else -> runOnUiThread { result.notImplemented() }
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread { result.error("CANDIDATE", "Проверка кандидатов: ${e.javaClass.simpleName}", null) }
+                    }
+                }
+            }
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/quality-notification")
             .setMethodCallHandler { call, result ->
                 if (call.method != "update") { result.notImplemented(); return@setMethodCallHandler }
@@ -143,6 +178,9 @@ class MainActivity : FlutterActivity() {
         if (::wg.isInitialized) wg.detach()
         WgSession.sink = null
         ProxyProbe.cancel(); probeWorker.shutdownNow()
+        candidateWorker.execute { dev.amirzr.flutter_v2ray_client.v2ray.core.QuietCandidateCore.stop() }
+        candidateWorker.shutdown()
+        resolverWorker.shutdownNow()
         super.cleanUpFlutterEngine(engine)
     }
     @Deprecated("Activity permission result contract")

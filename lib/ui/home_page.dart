@@ -55,7 +55,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
       'Состояние: ${vm.state.name}\nЭтап: ${vm.connectionStage ?? '—'}\n${vm.message ?? ''}\n'
       'Интернет и качество подтверждены: ${vm.connectionVerified}\n'
       'Сеть: ${vm.networkContext.label} · обучающих замеров: ${vm.learningSamples}\n'
-      '${vm.baselineStatus}\n'
+      '${vm.baselineStatus}\n${vm.networkAnalysisReport}\n'
       'ИИ: ${vm.autoStatus ?? 'не запускался'}\n${vm.autoAttemptReports.join('\n\n')}';
     if (!mounted) return;
     await showDialog<void>(context: context, builder: (context) => AlertDialog(title: const Text('Диагностика'),
@@ -66,7 +66,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
   Future<void> _deepSearch() async {
     final deep = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
       title: const Text('Режим ИИ-подбора'),
-      content: const Text('Быстрый режим оставит первый профиль, прошедший проверку системного VPN, DNS, HTTPS и скорости. Недавно работавшие профили проверяются первыми, недавно неудачные — позже. До 6 кандидатов; при таймаутах ожидание всё ещё может быть долгим.\n\nГлубокое сравнение изучит текущую сеть и сравнит до 8 VPN-профилей: DNS, HTTPS и до трёх загрузок по 256 КиБ на каждый. Затем повторно подключит лучший прошедший проверку вариант. Это может занять несколько минут, а при таймаутах — значительно дольше и до 6 МиБ тестовых данных плюс служебный трафик.\n\nНа Windows VPN запускается с правами администратора; сбор параметров сети использует системные API. На Android для мобильной сети приложение запросит доступ к состоянию телефона: он нужен для типа связи и уровня сигнала. Для Wi-Fi используются сигнал и диапазон. Геолокация, звонки и содержимое трафика не собираются. Данные обучения остаются на телефоне. При отказе от разрешения часть параметров будет недоступна.'),
+      content: const Text('Сначала проверяются DNS, HTTPS и стабильность ответов вашей сети без VPN. До трёх серверов одновременно проверяются через локальные прокси; затем скорость измеряется последовательно. Системный VPN включается для лучшего измеренного кандидата и проверяется повторно.\n\nБыстрый режим: до 12 кандидатов, бюджет прокси-проверки 45 с. Глубокий: до 24, бюджет 100 с. Загрузка для сравнения прокси — до 6/18 МиБ в лимитной сети или 24/72 МиБ в безлимитной; финальная проверка VPN расходует дополнительный трафик. Это короткие замеры, а не гарантия скорости видео. Измерения хранятся локально и разделяются по подключению.'),
       actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Отмена')),
         TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Глубокое сравнение')),
         FilledButton(onPressed: () => Navigator.pop(c, false), child: const Text('Быстро подключиться'))]));
@@ -81,7 +81,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
       content: SizedBox(width: 500, child: SingleChildScrollView(child: Text(
         vm.learningJournal.isEmpty ? 'Пока нет измерений. Модель начинает без готовых знаний о ваших серверах.' :
         vm.learningJournal.reversed.take(30).map((e) =>
-          '${e['time']} · ${e['network']} · ${e['protocol']}\n${switch (e['outcome']) { 'verified' => 'Проверено', 'slow_or_unstable' => 'Медленно или повторный замер не прошёл', 'network_uncertain' => 'Сеть не определена', _ => 'Соединение не подтверждено' }} · ${e['bytesPerSecond'] == null ? 'скорость не измерена' : '${((e['bytesPerSecond'] as num) / 1024).round()} КиБ/с'}').join('\n\n')))),
+          '${e['time']} · ${e['network']} · ${e['protocol']}\n${switch (e['outcome']) { 'verified' => 'Проверено', 'proxy_verified' => 'HTTPS и скорость через прокси проверены', 'proxy_unconfirmed' => 'Прокси не подтвердил HTTPS', 'slow_or_unstable' => 'Медленно или повторный замер не прошёл', 'network_uncertain' => 'Сеть не определена', _ => 'Соединение не подтверждено' }} · ${e['bytesPerSecond'] == null ? 'скорость не измерена' : '${((e['bytesPerSecond'] as num) / 1024).round()} КиБ/с'}').join('\n\n')))),
       actions: [TextButton(onPressed: vm.autoSelecting ? null : () async {
         final yes = await showDialog<bool>(context: c, builder: (d) => AlertDialog(
           title: const Text('Сбросить обучение?'), content: const Text('Будут удалены модель и история измерений. VPN-профили сохранятся.'),
@@ -118,6 +118,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
           icon: const Icon(Icons.call_split), label: const Text('Приложения в обход VPN')),
         const Text('Быстрый режим ищет VPN с целевой скоростью. Глубокий сравнивает несколько вариантов. На Windows цель — не ниже 5 Мбит/с, медленный VPN отмечается как резерв. Недавние результаты учитываются для похожих параметров сети. Во время подбора оставьте приложение открытым.'),
         if (Platform.isWindows) const Text('Проверка скорости VPN: до 4 МиБ на замер; глубокий режим делает до трёх замеров на кандидат. Скорость до тестового узла не гарантирует доступность YouTube.'),
+        Text(vm.analysisStatus),
+        TextButton.icon(onPressed: vm.autoSelecting || vm.canDisconnect || vm.analyzingNetwork ? null : () => vm.analyzeNetwork(force:true), icon: const Icon(Icons.network_check), label: Text(vm.analyzingNetwork ? 'Исследование сети…' : 'Исследовать Wi-Fi / LTE / Ethernet')),
         Text('${vm.baselineStatus}${vm.canDisconnect ? ' · прямые замеры приостановлены' : ''}'),
         const Text('Автозамеры сети без VPN: до 8 МиБ/сутки в лимитной сети, до 32 МиБ в безлимитной, плюс служебный трафик. При VPN замеры приостановлены.'),
         if (vm.backgroundStatus != null && !vm.autoSelecting) Text(vm.backgroundStatus!),

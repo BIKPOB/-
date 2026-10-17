@@ -1,7 +1,7 @@
 name: quiet_vpn
 description: Android VPN client for WireGuard, VLESS and Shadowsocks.
 publish_to: none
-version: 0.9.13+43
+version: 0.10.0+44
 environment:
   sdk: '>=3.8.0 <4.0.0'
 dependencies:
@@ -26,6 +26,7 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - assets/connection-policy.json
     - assets/public-proxies.txt
     - assets/public-wireguard.txt
     - assets/WIREGUARD_SOURCE_LICENSE.txt
