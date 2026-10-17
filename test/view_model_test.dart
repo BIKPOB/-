@@ -15,7 +15,7 @@ import 'package:quiet_vpn/viewmodels/vpn_view_model.dart';
 
 const server = VpnServer(id: 'fixture', name: 'fixture', country: 'Test', countryCode: 'US',
   host: '8.8.8.8', port: 443, transport: 'tcp', source: 'test',
-  protocol: 'vless', profile: 'vless://12345678-1234-1234-1234-123456789abc@8.8.8.8:443?security=none');
+  protocol: 'vless', profile: 'vless://12345678-1234-1234-1234-123456789abc@8.8.8.8:443?security=tls');
 
 class MemoryProfiles extends ProfileStore {
   String? selector, attempts;

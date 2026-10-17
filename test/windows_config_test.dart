@@ -4,6 +4,11 @@ import 'package:quiet_vpn/platform/windows_config.dart';
 import 'package:quiet_vpn/platform/windows_probe.dart';
 
 void main() {
+  test('unprotected public VLESS is rejected before starting Windows TUN', () {
+    expect(() => WindowsConfig.xray(
+      'vless://12345678-1234-1234-1234-123456789abc@example.com:443?security=none',
+      '203.0.113.1'), throwsFormatException);
+  });
   test('Windows Xray routes IPv4 and IPv6, protects DNS and preserves TLS name', () {
     final config = WindowsConfig.xray('vless://12345678-1234-1234-1234-123456789abc@example.com:443?security=tls&sni=verified.example', '203.0.113.1');
     final inbound = (config['inbounds'] as List).single as Map;
