@@ -5,6 +5,8 @@
 AppId={{58DF1A93-00CD-4EAE-80B7-870198C92D37}
 AppName=Quiet VPN
 AppVersion={#AppVersion}
+VersionInfoVersion={#AppVersion}
+VersionInfoProductVersion={#AppVersion}
 DefaultDirName={autopf}\Quiet VPN
 DefaultGroupName=Quiet VPN
 OutputDir=dist-windows
