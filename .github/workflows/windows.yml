@@ -65,9 +65,16 @@ jobs:
         run: |
           $iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
           if (!$iscc) { $isccPath='C:\Program Files (x86)\Inno Setup 6\ISCC.exe' } else { $isccPath=$iscc.Source }
+          $versionMatch = [regex]::Match((Get-Content pubspec.yaml -Raw), '(?m)^version:\s*(\d+\.\d+\.\d+)\+\d+\s*$')
+          if (!$versionMatch.Success) { throw 'Invalid application version in pubspec.yaml' }
+          $installerVersion = $versionMatch.Groups[1].Value
           New-Item -ItemType Directory -Force dist-windows | Out-Null
-          & $isccPath /O"$pwd/dist-windows" platform_templates/windows/installer.iss
+          & $isccPath "/DAppVersion=$installerVersion" /O"$pwd/dist-windows" platform_templates/windows/installer.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $setupPath = Join-Path $pwd "dist-windows/quiet-vpn-$installerVersion-windows-x64-setup.exe"
+          if (!(Test-Path $setupPath)) { throw 'Installer filename does not match the application version' }
+          $binaryVersion = (Get-Item $setupPath).VersionInfo.FileVersion
+          if ($binaryVersion -notmatch ('^' + [regex]::Escape($installerVersion) + '(\.0)?$')) { throw "Wrong installer binary version: $binaryVersion" }
           Copy-Item pubspec.lock dist-windows/DEPENDENCIES.lock
           git rev-parse HEAD | Set-Content dist-windows/SOURCE_COMMIT.txt -Encoding ascii
           Get-ChildItem dist-windows -Filter *.exe | ForEach-Object {"$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant())  $($_.Name)"} | Set-Content dist-windows/SHA256SUMS-Windows.txt -Encoding ascii
