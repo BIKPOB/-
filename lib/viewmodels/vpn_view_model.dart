@@ -565,6 +565,7 @@ class VpnViewModel extends ChangeNotifier {
         final previous = await store.loadAttempts();
         if (previous != null && previous.isNotEmpty) autoAttemptReports.add('Предыдущий подбор (сохранённый отчёт):\n$previous');
       } catch (_) { }
+      if(engine is CandidateHost) {
       try {
         final raw=await store.loadNetworkLab();
         if(raw!=null) _labStorage=Map<String,dynamic>.from(jsonDecode(raw) as Map);
@@ -575,6 +576,7 @@ class VpnViewModel extends ChangeNotifier {
           if(a.fresh(context,DateTime.now())) {networkAnalysis=a;analysisStatus=a.label;break;}
         }
       } catch(_) { }
+      }
       await engine.initialize(); ready = true;
     } catch (_) { message = 'Не удалось инициализировать VPN или защищённое хранилище. На Windows проверьте установку и запуск от администратора.'; state = ConnectionState.error; }
     if (servers.isNotEmpty) selectedId = servers.first.id;
@@ -691,7 +693,7 @@ class VpnViewModel extends ChangeNotifier {
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     backgroundStatus = null; busy = true; message = null; _localNetworkFailure = false; _notify();
     try {
-      if(!autoSelecting) {
+      if(!autoSelecting && engine is CandidateHost) {
         final context=await _network();networkContext=context;
         _selectionTarget=baseline?.fresh(context,DateTime.now())==true?baseline!.target:null;
       }

@@ -19,7 +19,9 @@ const server = VpnServer(id: 'fixture', name: 'fixture', country: 'Test', countr
   protocol: 'vless', profile: 'vless://12345678-1234-1234-1234-123456789abc@8.8.8.8:443?security=tls');
 
 class MemoryProfiles extends ProfileStore {
-  String? selector, attempts;
+  String? selector, attempts, networkLab;
+  @override Future<String?> loadNetworkLab() async => networkLab;
+  @override Future<void> saveNetworkLab(String value) async {networkLab=value;}
   @override Future<String?> loadAttempts() async => attempts;
   @override Future<void> saveAttempts(String value) async { attempts = value; }
   @override Future<List<VpnServer>> load() async => [server];
@@ -208,7 +210,7 @@ void main() {
   }
   test('Android proxy-lab engine also requires measured 5 Mbit minimum', () async {
     final engine=ProxyLabEngine();
-    final vm=VpnViewModel(engine,MemoryProfiles(),ServerMonitor(probe:(_) async=>const HealthResult(Reachability.reachable,1)));
+    final vm=VpnViewModel(engine,MemoryProfiles(),ServerMonitor(probe:(_) async=>const HealthResult(Reachability.reachable,1)),networkReader:() async=>'wifi');
     try {
       await vm.initialize();await vm.connect(null);
       await Future<void>.delayed(const Duration(milliseconds:10));
