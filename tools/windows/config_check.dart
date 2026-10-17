@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
-import '../../lib/platform/windows_config.dart';
+import 'package:quiet_vpn/platform/windows_config.dart';
 
 Future<void> main(List<String> args) async {
   const base = 'vless://12345678-1234-1234-1234-123456789abc@example.com:443';
