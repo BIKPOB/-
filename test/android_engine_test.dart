@@ -5,6 +5,13 @@ import 'package:quiet_vpn/core/models.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  setUp(() {
+    messenger.setMockMethodCallHandler(const MethodChannel('quietvpn/candidate-lab'), (call) async {
+      if(call.method!='stop') throw StateError('Unexpected candidate operation in engine lifecycle test');
+      return null;
+    });
+  });
+  tearDown(() {messenger.setMockMethodCallHandler(const MethodChannel('quietvpn/candidate-lab'), null);});
   test('Xray receives saved bypass list and never starts when routing settings cannot be read', () async {
     Map<dynamic, dynamic>? started;
     var failRead = false;
