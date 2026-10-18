@@ -1,3 +1,4 @@
+import '../core/search_rotation.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -241,6 +242,17 @@ class VpnViewModel extends ChangeNotifier {
         !_desktop || s.protocol != 'vless' || ConnectionStrategy.protectedVless(s)).toList();
       autoAttemptReports.add('База: ${catalog.status}\n'
         '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}');
+      final rotationData = Map<String,dynamic>.from((_labStorage['rotation'] as Map?) ?? {});
+      final rotation = SearchRotation(rotationData);
+      final rotationNetwork = sha256.convert(utf8.encode(context.environmentKey)).toString();
+      String rotationKey(VpnServer s) => sha256.convert(utf8.encode(s.profile.split('#').first)).toString();
+      List<VpnServer> rotate(List<VpnServer> servers) => rotation.order(
+        servers, rotationNetwork, rotationKey, DateTime.now());
+      Future<void> attempted(List<VpnServer> servers) async {
+        rotation.mark(rotationNetwork, servers.map(rotationKey), DateTime.now());
+        _labStorage['rotation'] = rotationData;
+        await _saveLab();
+      }
       int priority(VpnServer server) {
         final speed = _selector.recentSpeed(server, context);
         if (_requiresSpeed && speed > 0 && speed < targetBytesPerSecond) return -1;
@@ -274,7 +286,7 @@ class VpnViewModel extends ChangeNotifier {
         var count = 0;
         final diverse = [for (final tier in [1, 0, -1])
           ...PublicCatalog.diverse(group.where((server) => priority(server) == tier).toList())];
-        for (final server in diverse) {
+        for (final server in rotate(diverse)) {
           if (count >= (protocol == 'wireguard' ? 8 : 24)) break;
           if (hosts.add(sha256.convert(utf8.encode(server.profile)).toString())) { candidates.add(server); count++; }
         }
@@ -315,7 +327,14 @@ class VpnViewModel extends ChangeNotifier {
       var ordered = ConnectionStrategy.select(mixed, limit: deep ? 8 : 6, priority: priority);
       if(engine is CandidateHost) {
         final lab=_candidateLab ??= CandidateLab(engine as CandidateHost);
-        final proxyPool=_transportDiversity(mixed.where((s)=>s.protocol!='wireguard').toList());
+        final proxyRanked=_transportDiversity(mixed.where((s)=>s.protocol!='wireguard').toList());
+        final limit=deep?_policy.deepCandidates:_policy.fastCandidates;
+        final known=proxyRanked.where((s)=>_selector.recentSpeed(s,context)>=targetBytesPerSecond).toList()
+          ..sort((a,b)=>_selector.recentSpeed(b,context).compareTo(_selector.recentSpeed(a,context)));
+        final benchmark=known.isEmpty?null:known.first;
+        final proxyPool=[...rotate(proxyRanked.where((s)=>s!=benchmark).toList()).take(limit-(benchmark==null?0:1)),
+          if(benchmark!=null) benchmark];
+        autoAttemptReports.add('Ротация: сначала ещё не проверенные в этой сети; затем проверенные давно. До ${proxyPool.length} кандидатов, история до 7 дней.');
         Future<NetworkContext>? routeRead;
         NetworkContext? routeSnapshot;
         DateTime? routeReadAt;
@@ -334,7 +353,7 @@ class VpnViewModel extends ChangeNotifier {
           '${analysis?.preferLiteralEndpoint==true?"IP-адреса серверов получают приоритет из-за неподтверждённого системного DNS":"имена и IP сохраняются в подборе"}; '
           'замеров скорости ${deep || analysis?.extraSpeedSample==true?3:2}');
         final findings=await lab.run(proxyPool,deep:deep,metered:context.metered!=false,target:targetBytesPerSecond,analysis:analysis,policy:_policy,
-          routeValid:validRoute, status:(value){autoStatus=value;_notify();},
+          onAttempt:attempted, routeValid:validRoute, status:(value){autoStatus=value;_notify();},
           onResult:(finding){
             autoAttemptReports.add('Прокси-проверка: ${finding.report}');_notify();
           });
@@ -372,6 +391,8 @@ class VpnViewModel extends ChangeNotifier {
           continue;
         }
         if (!context.sameConnection(await _network())) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
+        if (cancelled()) return;
+        await attempted([server]);
         if (cancelled()) return;
         attempt++;
         autoStatus = 'ИИ-подбор: попытка $attempt/${ordered.length} · ${server.protocol} · подключение и проверка'; _notify();

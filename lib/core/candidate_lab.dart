@@ -64,7 +64,8 @@ class CandidateLab {
   }
   Future<List<CandidateResult>> run(List<VpnServer> candidates,{required bool deep,
       required bool metered, int target=131072, NetworkAnalysis? analysis, SelectionPolicy policy=const SelectionPolicy(), required Future<bool> Function() routeValid,
-      required void Function(String) status, void Function(CandidateResult)? onResult}) async {
+      required void Function(String) status, void Function(CandidateResult)? onResult,
+      Future<void> Function(List<VpnServer>)? onAttempt}) async {
     final token=++_epoch;
     final done=Completer<void>();_pending=done.future;
     final results=<CandidateResult>[];
@@ -100,6 +101,8 @@ class CandidateLab {
       // configuration is retried individually so one bad profile cannot veto peers.
       Future<void> group(List<VpnServer> servers) async {
         if(!live() || !await validRoute()) return;
+        await onAttempt?.call(servers);
+        if(!live()) return;
         update('Разрешение адресов: ${servers.length} кандидата');
         final entries=<({VpnServer server,String endpoint,int port})>[];
         await Future.wait(servers.map((s) async {
