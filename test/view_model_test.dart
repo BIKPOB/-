@@ -95,6 +95,13 @@ class DesktopSpeedEngine extends MeasuredEngine implements DesktopCapabilities {
     controller.add(EngineEvent(ConnectionState.connected, 'measured', true, currentSpeed));
   }
 }
+class StableGoalEngine extends DesktopSpeedEngine {
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++; chosen.add(server.host);
+    currentSpeed = connects == 1 ? 4000000 : 111250;
+    controller.add(EngineEvent(ConnectionState.connected, 'session-sensitive speed', true, currentSpeed));
+  }
+}
 class RestoreEngine extends MeasuredEngine {
   RestoreEngine({this.permanent = false});
   final bool permanent;
@@ -400,6 +407,28 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await engine.dispose();
+  });
+
+  test('deep desktop search preserves a session that meets the goal three times', () async {
+    final engine = StableGoalEngine();
+    final other = VpnServer.fromJson({...server.toJson(), 'id': 'other', 'host': '9.9.9.9',
+      'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.9')});
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () async => PublicCatalogResult([other], false, 0),
+      autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize();
+      vm.baseline = NetworkBaseline('', 'ethernet', DateTime.now(), 2375000, 350);
+      await vm.autoConnect(deep: true);
+      expect(engine.connects, 1);
+      expect(engine.disconnects, 0);
+      expect(vm.state, ConnectionState.connected);
+      expect(vm.connectionVerified, true);
+      expect(vm.measuredBytesPerSecond, 4000000);
+      expect(vm.autoStatus, contains('3 замерах'));
+      await vm.disconnect();
+    } finally { vm.dispose(); await engine.dispose(); }
   });
 
   test('deep selection keeps the fastest live finalist without reconnecting', () async {

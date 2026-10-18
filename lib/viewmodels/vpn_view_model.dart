@@ -485,6 +485,16 @@ class VpnViewModel extends ChangeNotifier {
             : 'ИИ сохранил первый рабочий VPN; скорость ниже цели. Глубокий подбор может найти быстрее.';
           return;
         }
+        // Proxy candidates were compared before TUN activation. Once the live
+        // tunnel meets the goal in all three samples, preserve this session:
+        // disconnect/reconnect can yield a different route or fail entirely.
+        if (deep && _requiresSpeed && success && usable &&
+            !context.ambiguous && !duringVpn.ambiguous && speeds.length == 3) {
+          connectionVerified = true;
+          measuredBytesPerSecond = medianSpeed;
+          autoStatus = 'Сохранён текущий VPN: цель скорости подтверждена в 3 замерах; дальнейшие переключения остановлены';
+          return;
+        }
         // Keep the best live tunnel when comparison is complete: reconnecting
         // a public endpoint can fail even immediately after a successful sample.
         final comparisonDone = finalists.where((candidate) => !_requiresSpeed || candidate.qualified).length >= 2 || server == ordered.last || searchClock.elapsed >= budget;
