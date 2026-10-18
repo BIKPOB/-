@@ -14,7 +14,7 @@ class SearchRotation {
 
   int _recent(dynamic value, DateTime now) {
     if (value is! int || value > now.millisecondsSinceEpoch ||
-        now.millisecondsSinceEpoch - value >= retention.inMilliseconds) return 0;
+        now.millisecondsSinceEpoch - value >= retention.inMilliseconds) { return 0; }
     return value;
   }
 

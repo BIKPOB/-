@@ -1,4 +1,5 @@
-import '../lib/core/search_rotation.dart';
+import 'dart:io';
+import 'package:quiet_vpn/core/search_rotation.dart';
 void check(bool value, String message) { if (!value) throw StateError(message); }
 void main() {
   final data = <String,dynamic>{};
@@ -19,5 +20,5 @@ void main() {
   check(order('wifi',now.add(const Duration(days:8))).first=='0', 'History must expire');
   for(var i=0;i<10;i++) {rotation.mark('network$i',['x'],now);}
   check(restored.length<=8, 'Storage must be bounded');
-  print('Search rotation: shortlist progression, network isolation, restart, partial attempts, refresh, expiry passed.');
+  stdout.writeln('Search rotation: shortlist progression, network isolation, restart, partial attempts, refresh, expiry passed.');
 }
