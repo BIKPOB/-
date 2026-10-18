@@ -219,6 +219,22 @@ class VpnViewModel extends ChangeNotifier {
     try {
       final context = await _network();
       networkContext = context;
+      if (engine is CandidateHost && !context.vpnPresent && !context.ambiguous &&
+          context.type != 'offline' && baseline?.fresh(context, DateTime.now()) != true) {
+        autoStatus = 'Оценка скорости вашей сети без VPN'; _notify();
+        try {
+          await _baselineMonitor.pause(false);
+          final sample = await _baselineMonitor.tick(context, readNetwork: _network)
+              .timeout(const Duration(seconds: 15));
+          if (cancelled()) return;
+          final after = await _network();
+          if (!after.vpnPresent && context.sameConnection(after) && sample?.fresh(after, DateTime.now()) == true) {
+            baseline = sample;
+            baselineStatus = '${sample!.label} · приблизительная скорость до тестового узла';
+          }
+        } catch (_) { baselineStatus = 'Прямой замер недоступен; используется резервная цель скорости'; }
+      }
+      if (cancelled()) return;
       _selectionTarget = baseline?.fresh(context, DateTime.now()) == true ? baseline!.target : null;
       await _baselineMonitor.pause(true);
       if(engine is CandidateHost) {

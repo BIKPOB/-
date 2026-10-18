@@ -7,16 +7,13 @@ class LatencyIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ms = result?.milliseconds;
-    final measured = result?.state == Reachability.reachable && ms != null && ms >= 0;
-    final color = measured
-      ? ms <= 100 ? Colors.green : ms <= 250 ? Colors.yellow : Colors.red
-      : Colors.grey;
-    final label = measured ? '${result!.method.isEmpty ? '' : '${result!.method} · '}$ms мс' : switch (result?.state) {
-      Reachability.unreachable => 'Нет ответа ICMP/TCP',
-      Reachability.notMeasured => result!.method.isEmpty ? 'Пинг недоступен' : result!.method,
-      Reachability.paused => 'Пауза',
-      _ => 'Не проверен',
+    // Endpoint reachability is not tunnel quality or throughput.
+    const color = Colors.grey;
+    final label = switch (result?.state) {
+      Reachability.reachable => 'Адрес отвечает · VPN не проверен',
+      Reachability.unreachable => 'Нет ответа · VPN не проверен',
+      Reachability.paused => 'Проверка приостановлена',
+      _ => 'VPN не проверен',
     };
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(Icons.circle, size: 10, color: color),
