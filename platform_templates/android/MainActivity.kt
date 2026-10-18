@@ -160,8 +160,9 @@ class MainActivity : FlutterActivity() {
                         else result.success(null)
                     }
                     "tick" -> {
-                        NetworkBaselineStore.request(applicationContext)
-                        result.success(NetworkBaselineStore.read(applicationContext))
+                        NetworkBaselineStore.request(applicationContext) {
+                            runOnUiThread { result.success(NetworkBaselineStore.read(applicationContext)) }
+                        }
                     }
                     else -> result.notImplemented()
                 }
