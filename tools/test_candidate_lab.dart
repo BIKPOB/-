@@ -6,6 +6,7 @@ import 'package:quiet_vpn/core/models.dart';
 import 'package:quiet_vpn/core/network_analysis.dart';
 import 'package:quiet_vpn/core/network_context.dart';
 import 'package:quiet_vpn/core/selection_policy.dart';
+import 'package:quiet_vpn/core/search_rotation.dart';
 import 'package:quiet_vpn/platform/candidate_host.dart';
 
 void check(bool value,String message) {if(!value) throw StateError(message);}
@@ -112,7 +113,49 @@ Future<void> stalledTlsRegression() async {
   await lab.cancel().timeout(const Duration(seconds:2));
   check((await pending).isEmpty && host.listeners.isEmpty,'Cancel left TLS search pending');
 }
+class RecoveringSpeedProbe extends NetworkAnalyzer {
+  RecoveringSpeedProbe({this.failures=3});
+  final int failures;
+  int attempts=0;
+  @override Future<int> https(Uri uri,{int? proxyPort,int bytes=0,int maxBytes=4096,
+      Duration timeout=const Duration(seconds:6)}) async {
+    if(bytes==0) return 10;
+    attempts++;
+    if(attempts<=failures) throw const SocketException('fixture download failed');
+    return 2000000;
+  }
+}
+Future<void> rotationIntegration() async {
+  final data=<String,dynamic>{};
+  final rotation=SearchRotation(data), host=Host(), probe=GateProbe();
+  final candidates=[for(var i=1;i<=30;i++) fixture(i)];
+  final lab=CandidateLab(host,probe:probe);
+  final now=DateTime.now();
+  final pending=lab.run(candidates,deep:false,metered:true,
+    routeValid:()async=>true,status:(_){},onAttempt:(group)async {
+      rotation.mark('wifi',group.map((s)=>s.id),now);
+    });
+  await probe.entered.future;
+  await lab.cancel();await pending;
+  final next=SearchRotation(data).order(candidates,'wifi',(s)=>s.id,now);
+  check(next.first.id=='4','Cancelled search consumed unstarted groups or lost progress');
+  check(next.take(24).last.id=='27','Rotation did not advance beyond the shortlist');
+  final speedHost=Host(), speedProbe=RecoveringSpeedProbe();
+  final results=await CandidateLab(speedHost,probe:speedProbe).run(
+    candidates.take(6).toList(),deep:false,metered:true,target:1000000,
+    routeValid:()async=>true,status:(_){});
+  check(results.any((r)=>r.usable),'Three failed downloads hid later working candidates');
+  check(speedProbe.attempts<=6,'Fast search exceeded its original transfer budget');
+  for(final deep in [false,true]) {
+    final probe=RecoveringSpeedProbe(failures:0);
+    final results=await CandidateLab(Host(),probe:probe).run(candidates,
+      deep:deep,metered:true,target:1000000,routeValid:()async=>true,status:(_){});
+    check(results.where((r)=>r.usable).length==(deep?3:2),
+      'Search stopped before comparing the required qualified candidates');
+  }
+}
 Future<void> main() async {
+  await rotationIntegration();
   await stalledTlsRegression();
   final candidates=[fixture(1),fixture(2),fixture(3)];
   final host=Host(),bad=Host()..badFirst=true;

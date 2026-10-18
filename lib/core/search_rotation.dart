@@ -9,7 +9,10 @@ class SearchRotation {
       Map<String, dynamic>.from((_storage[network] as Map?) ?? {});
 
   int attemptedAt(String network, String profile, DateTime now) {
-    final value = _entries(network)[profile];
+    return _recent(_entries(network)[profile], now);
+  }
+
+  int _recent(dynamic value, DateTime now) {
     if (value is! int || value > now.millisecondsSinceEpoch ||
         now.millisecondsSinceEpoch - value >= retention.inMilliseconds) return 0;
     return value;
@@ -17,7 +20,8 @@ class SearchRotation {
 
   List<T> order<T>(List<T> ranked, String network,
       String Function(T) key, DateTime now) {
-    final times = {for (final item in ranked) key(item): attemptedAt(network, key(item), now)};
+    final entries = _entries(network);
+    final times = {for (final item in ranked) key(item): _recent(entries[key(item)], now)};
     final indexed = ranked.asMap().entries.toList();
     indexed.sort((a, b) {
       final age = times[key(a.value)]!

@@ -15,11 +15,19 @@ Profiles and network identifiers are hashed. The existing local network-lab
 store persists up to 4096 entries per network, 8 networks, with a 7-day expiry.
 Catalog refresh retains history for unchanged profiles and admits new profiles.
 
-This does not increase speed-test budgets, change measurement methods or verify
-performance in Russia. Those remain separate issues. Exhausted/small catalogs,
+Follow-up: a fast search compares up to two qualifying candidates and deep
+search up to three, subject to the existing deadline. Failed downloads can yield
+unused rounds to later candidates (up to 6/12 speed-test attempts). The total
+number of requested download samples stays at the old 3/6 candidates multiplied
+by rounds, preserving the maximum requested payload budget. This does not change
+measurement methods or verify performance in Russia. Exhausted/small catalogs,
 expiry and the comparison candidate can legitimately produce repeated servers.
 
 Validation: `dart tools/test_search_rotation.dart` covers advancement beyond
 24 entries, separate networks, restored storage, partial groups, catalog additions,
 expiry and bounded network history. Standalone analyzer passed for the rotation
-module and test. Full Flutter analysis/platform tests were not run in this change.
+module and test. The candidate-lab integration suite also passed: cancellation preserves unstarted
+groups, later candidates are reached after three failed downloads, comparison
+counts and the transfer budget hold. Existing real-loopback stalled CONNECT/TLS,
+route-change, sequential-speed and cleanup regressions passed. Targeted Dart
+analysis passed; full Flutter analysis/platform tests were not run.

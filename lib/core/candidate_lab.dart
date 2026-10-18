@@ -96,7 +96,12 @@ class CandidateLab {
       final timeout=analysis?.candidateTimeout??const Duration(seconds:6);
       final rounds=deep || analysis?.extraSpeedSample==true?3:2;
       var speedTests=0, qualified=0;
-      final maxSpeedTests=deep?6:3;
+      final maxSpeedTests=deep?12:6;
+      final size=metered?1048576:4194304;
+      // Preserve the previous transfer budget while allowing failed downloads
+      // to yield their unused rounds to later candidates.
+      var remainingSamples=(deep?6:3)*rounds;
+      bool comparisonDone() => qualified >= (deep?3:2);
       // Each small group is torn down before starting the next group. Invalid
       // configuration is retried individually so one bad profile cannot veto peers.
       Future<void> group(List<VpnServer> servers) async {
@@ -145,14 +150,14 @@ class CandidateLab {
           passing.sort((a,b)=>a.latency.compareTo(b.latency));
           for(final e in passing) {
             if(!live() || !await validRoute()) return;
-            if(speedTests>=maxSpeedTests || qualified >= (deep?2:1)) break;
+            if(speedTests>=maxSpeedTests || remainingSamples<rounds || comparisonDone()) break;
             speedTests++;
             update('Сравнение скорости · ${e.server.protocol} · ${e.server.source}');
             final speeds=<int>[];
             String? error;
             for(var round=0;round<rounds&&live();round++) {
               try {
-                final size=metered?1048576:4194304;
+                remainingSamples--;
                 speeds.add(await _probe.https(Uri.https('speed.cloudflare.com','/__down',{'bytes':'$size'}),
                   proxyPort:e.port,bytes:size,maxBytes:size,timeout:const Duration(seconds:8)));
               } catch(ex) {error='Загрузка через прокси: ${ex.runtimeType}';break;}
@@ -167,7 +172,7 @@ class CandidateLab {
       }
       for(var i=0;i<pool.length && live();i+=3) {
         await group(pool.sublist(i,min(i+3,pool.length)));
-        if(speedTests>=maxSpeedTests || qualified >= (deep?2:1)) break;
+        if(speedTests>=maxSpeedTests || remainingSamples<rounds || comparisonDone()) break;
       }
       if(token!=_epoch && clock.elapsed<budget) return [];
       if(!await validRoute()) throw StateError('Сеть изменилась: результаты отклонены');
