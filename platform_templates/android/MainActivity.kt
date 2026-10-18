@@ -24,10 +24,14 @@ class MainActivity : FlutterActivity() {
                                 val address = addresses.firstOrNull { it is java.net.Inet4Address } ?: addresses.first()
                                 runOnUiThread { result.success(address.hostAddress) }
                             }
-                            "start" -> {
+                            "start", "reserveStart" -> {
                                 val cm = getSystemService(android.net.ConnectivityManager::class.java)
                                 val active = cm.activeNetwork?.let { cm.getNetworkCapabilities(it) }
-                                check(active != null && !active.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN))
+                                if (call.method == "start") {
+                                    check(active != null && !active.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN))
+                                } else {
+                                    check(dev.amirzr.flutter_v2ray_client.v2ray.V2rayController.getConnectionState().name == "V2RAY_CONNECTED")
+                                }
                                 val (network, _) = BaseNetwork.select(cm)
                                 dev.amirzr.flutter_v2ray_client.v2ray.core.QuietCandidateCore.start(applicationContext,
                                     network, call.argument<String>("config") ?: "")

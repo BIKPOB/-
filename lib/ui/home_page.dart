@@ -56,6 +56,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
       'Интернет и качество подтверждены: ${vm.connectionVerified}\n'
       'Сеть: ${vm.networkContext.label} · обучающих замеров: ${vm.learningSamples}\n'
       '${vm.baselineStatus}\n${vm.networkAnalysisReport}\n'
+      'Резерв: ${vm.reserveStatus}\n'
       'ИИ: ${vm.autoStatus ?? 'не запускался'}\n${vm.autoAttemptReports.join('\n\n')}';
     if (!mounted) return;
     await showDialog<void>(context: context, builder: (context) => AlertDialog(title: const Text('Диагностика'),
@@ -95,7 +96,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
     final items = vm.filtered;
     return Scaffold(appBar: AppBar(title: const Text('Quiet VPN'), actions: [
       if (Platform.isWindows) IconButton(tooltip: 'Выйти и отключить VPN', onPressed: _exit, icon: const Icon(Icons.exit_to_app)),
-      IconButton(tooltip: 'Проверить пинг', onPressed: vm.refreshLatency, icon: const Icon(Icons.refresh)),
+      IconButton(tooltip: 'Проверить доступность адресов', onPressed: vm.refreshLatency, icon: const Icon(Icons.refresh)),
       IconButton(tooltip: 'Обучение', onPressed: _learning, icon: const Icon(Icons.psychology_outlined)),
       IconButton(tooltip: 'Диагностика', onPressed: _diagnostics, icon: const Icon(Icons.bug_report_outlined)),
     ]), floatingActionButton: FloatingActionButton.extended(onPressed: vm.autoSelecting || vm.busy ? null : _add, icon: const Icon(Icons.add), label: const Text('Добавить сервер')),
@@ -122,6 +123,10 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
         TextButton.icon(onPressed: vm.autoSelecting || vm.canDisconnect || vm.analyzingNetwork ? null : () => vm.analyzeNetwork(force:true), icon: const Icon(Icons.network_check), label: Text(vm.analyzingNetwork ? 'Исследование сети…' : 'Исследовать Wi-Fi / LTE / Ethernet')),
         Text('${vm.baselineStatus}${vm.canDisconnect ? ' · прямые замеры приостановлены' : ''}'),
         const Text('Автозамеры сети без VPN: до 8 МиБ/сутки в лимитной сети, до 32 МиБ в безлимитной, плюс служебный трафик. При VPN замеры приостановлены.'),
+        SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Проверенный резерв (экспериментально)'),
+          subtitle: const Text('Для VLESS/Shadowsocks. До 24 МиБ/час в лимитной сети, 96 МиБ/час в безлимитной плюс служебный трафик. Возможна пауза при смене сервера. Android: пока приложение открыто.'),
+          value: vm.reserveEnabled, onChanged: vm.busy || vm.autoSelecting ? null : vm.setReserveEnabled),
+        if (vm.reserveEnabled) Text(vm.reserveStatus),
         if (vm.backgroundStatus != null && !vm.autoSelecting) Text(vm.backgroundStatus!),
         if (vm.autoStatus != null) Text(vm.networkContext.label),
         if (vm.autoStatus != null) Text(vm.autoStatus!),
@@ -131,7 +136,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
       const SizedBox(height: 16), Text('Мои серверы', style: Theme.of(context).textTheme.titleLarge),
       Wrap(spacing: 6, children: [ChoiceChip(label: const Text('Все'), selected: vm.protocolFilter == null, onSelected: (_) => vm.filterProtocol(null)),
         for (final p in protocols.entries) ChoiceChip(label: Text(p.value), selected: vm.protocolFilter == p.key, onSelected: (_) => vm.filterProtocol(p.key))]),
-      const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('Пинг всех адресов проверяется одновременно. ICMP — ответ узла, TCP — ответ порта; это не подтверждение работы VPN.')),
+      const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Text('Доступность адресов проверяется одновременно. ICMP — ответ узла, TCP — ответ порта; это не подтверждение работы VPN.')),
       if (items.isEmpty && !vm.autoSelecting) Card(child: Padding(padding: const EdgeInsets.all(24), child: Column(children: [
         const Icon(Icons.vpn_key_outlined, size: 48), const SizedBox(height: 12),
         const Text('Автоподбор или свой сервер', style: TextStyle(fontSize: 20)),

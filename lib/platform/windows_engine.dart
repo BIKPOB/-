@@ -15,7 +15,7 @@ import 'windows_config.dart';
 import '../core/xray_failure.dart';
 import 'windows_probe.dart';
 
-class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, CandidateHost {
+class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, ReserveCandidateHost {
   final _events = StreamController<EngineEvent>.broadcast();
   final _probe = WindowsProbe();
   final _root = File(Platform.resolvedExecutable).parent.path;
@@ -118,8 +118,26 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Ca
     if(addresses.isEmpty) throw StateError('Нет адреса');
     return addresses.firstWhere((a)=>a.type==InternetAddressType.IPv4,orElse:()=>addresses.first).address;
   }
+  @override Future<void> startReserveCandidates(String configuration) async {
+    if (!_active || _stopping || _protocol == 'wireguard') throw StateError('Резерв доступен только при активном Xray');
+    final network = await _system('network');
+    if (network['ambiguous'] == true || network['foreignVpn'] != false || network['physicalInterface'] is! String) {
+      throw StateError('Независимый маршрут резерва не подтверждён');
+    }
+    final config = Map<String,dynamic>.from(jsonDecode(configuration) as Map);
+    for (final outbound in config['outbounds'] as List) {
+      if (outbound['protocol'] == 'blackhole') continue;
+      final stream = outbound.putIfAbsent('streamSettings', () => <String,dynamic>{}) as Map;
+      final options = stream.putIfAbsent('sockopt', () => <String,dynamic>{}) as Map;
+      options['interface'] = network['physicalInterface'];
+    }
+    await _startCandidateProcess(jsonEncode(config));
+  }
   @override Future<void> startCandidates(String configuration) async {
     if(_active || _stopping) throw StateError('VPN уже активен');
+    await _startCandidateProcess(configuration);
+  }
+  Future<void> _startCandidateProcess(String configuration) async {
     await stopCandidates();
     await _verifyBundle();
     await _validateConfig(Map<String,dynamic>.from(jsonDecode(configuration) as Map));
@@ -210,6 +228,7 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Ca
   @override Future<void> disconnect() async {
     _stopping = true; _epoch++; _probe.cancel();
     try {
+      await stopCandidates();
       if (_protocol == 'wireguard') await _stopAwg();
       final p = _xray;
       if (p != null) { p.kill(); await p.exitCode.timeout(const Duration(seconds: 8)); _xray = null; }

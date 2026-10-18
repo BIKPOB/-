@@ -58,7 +58,7 @@ switch ($Operation) {
   $external=@(Get-NetRoute -ErrorAction Stop | Where-Object { $_.InterfaceIndex -in $virtual.ifIndex -and !(Test-LocalOnlyPrefix $_.DestinationPrefix) })
   $linkMbps=[int]([double]$a.ReceiveLinkSpeed / 1000000)
   if($linkMbps -le 0){$linkMbps=$null}
-  @{type=$type;session=$session;linkMbps=$linkMbps;vpnPresent=($external.Count -gt 0);ambiguous=($routes.Count -eq 0 -or ($routes.Count -gt 1 -and (Get-CombinedMetric $routes[0]) -eq (Get-CombinedMetric $routes[1])))} | ConvertTo-Json -Compress
+  @{physicalInterface=[string]$a.Name;foreignVpn=(@($external | Where-Object InterfaceAlias -notin @('QuietVPN-Xray','QuietVPN-AWG')).Count -gt 0);type=$type;session=$session;linkMbps=$linkMbps;vpnPresent=($external.Count -gt 0);ambiguous=($routes.Count -eq 0 -or ($routes.Count -gt 1 -and (Get-CombinedMetric $routes[0]) -eq (Get-CombinedMetric $routes[1])))} | ConvertTo-Json -Compress
  }
  'tunnel' {
   $a=Get-NetAdapter -Name $Alias -ErrorAction SilentlyContinue

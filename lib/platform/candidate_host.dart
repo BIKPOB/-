@@ -41,3 +41,15 @@ class CandidatePorts {
     }));
   }
 }
+
+/// Only implementations with an independently bound physical route opt in.
+abstract interface class ReserveCandidateHost implements CandidateHost {
+  Future<void> startReserveCandidates(String configuration);
+}
+class ReserveHostAdapter implements CandidateHost {
+  ReserveHostAdapter(this.host);
+  final ReserveCandidateHost host;
+  @override Future<String> resolveCandidate(String hostName) => host.resolveCandidate(hostName);
+  @override Future<void> startCandidates(String config) => host.startReserveCandidates(config);
+  @override Future<void> stopCandidates() => host.stopCandidates();
+}

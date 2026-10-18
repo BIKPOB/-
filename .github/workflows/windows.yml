@@ -61,6 +61,8 @@ jobs:
         run: ./tools/windows/package.ps1
       - name: Test Windows TUN and service lifecycle
         run: ./tools/windows/smoke.ps1
+      - name: Verify reserve route outside active TUN
+        run: ./tools/windows/reserve_smoke.ps1
       - name: Build installer
         run: |
           $iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue

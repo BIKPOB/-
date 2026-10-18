@@ -7,7 +7,7 @@ import '../core/traffic.dart';
 import 'vpn_engine.dart';
 import 'candidate_host.dart';
 
-class AndroidEngine implements VpnEngine, TrafficSource, CandidateHost {
+class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost {
   static const _wg = MethodChannel('quietvpn/wg');
   static const _xray = MethodChannel('flutter_v2ray_client');
   static const _stage = MethodChannel('quietvpn/xray-state');
@@ -79,6 +79,12 @@ class AndroidEngine implements VpnEngine, TrafficSource, CandidateHost {
   static const _lab = MethodChannel('quietvpn/candidate-lab');
   @override Future<String> resolveCandidate(String host) async =>
     (await _lab.invokeMethod<String>('resolve', {'host':host})) ?? (throw StateError('Нет адреса'));
+  @override Future<void> startReserveCandidates(String configuration) async {
+    if (_starting || _stopping || _active == 'wireguard' || _xrayState != 'CONNECTED') throw StateError('Резерв требует активного Xray');
+    _labConfiguration=configuration;
+    await _lab.invokeMethod<void>('reserveStart', {'config':configuration});
+    await CandidatePorts.wait(configuration);
+  }
   @override Future<void> startCandidates(String configuration) async {
     if (_starting || _xrayState != 'DISCONNECTED') throw StateError('VPN уже активен');
     _labConfiguration=configuration;
@@ -114,6 +120,7 @@ class AndroidEngine implements VpnEngine, TrafficSource, CandidateHost {
   @override Future<void> disconnect() async {
     _stopping = true; _starting = false; _epoch++; _verified = false;
     try {
+      await stopCandidates();
       await _stage.invokeMethod<void>('cancelProbe');
       if (_active == 'wireguard') { await _wg.invokeMethod<void>('stop'); }
       else {

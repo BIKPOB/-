@@ -1,3 +1,6 @@
+import 'package:quiet_vpn/core/candidate_lab.dart';
+import 'package:quiet_vpn/core/network_analysis.dart';
+import 'package:quiet_vpn/core/selection_policy.dart';
 import 'package:quiet_vpn/platform/desktop_capabilities.dart';
 import 'package:quiet_vpn/platform/candidate_host.dart';
 import 'package:quiet_vpn/core/network_context.dart';
@@ -100,6 +103,35 @@ class StableGoalEngine extends DesktopSpeedEngine {
     connects++; chosen.add(server.host);
     currentSpeed = connects == 1 ? 4000000 : 111250;
     controller.add(EngineEvent(ConnectionState.connected, 'session-sensitive speed', true, currentSpeed));
+  }
+}
+class ReserveEngine extends DesktopSpeedEngine implements ReserveCandidateHost {
+  ReserveEngine({this.rejectReserve=false});
+  final bool rejectReserve;
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++; chosen.add(server.host);
+    currentSpeed=connects==1 || (rejectReserve && connects==2)?100000:2000000;
+    controller.add(EngineEvent(ConnectionState.connected,'reserve fixture',true,currentSpeed));
+  }
+  @override Future<String> resolveCandidate(String host) async => host;
+  @override Future<void> startCandidates(String configuration) async {}
+  @override Future<void> startReserveCandidates(String configuration) async {}
+  @override Future<void> stopCandidates() async {}
+}
+class ReserveLabFixture extends CandidateLab {
+  ReserveLabFixture(this.engine,{this.gate}):super(ReserveHostAdapter(engine));
+  final ReserveEngine engine;
+  final Completer<void>? gate;
+  final entered=Completer<void>();
+  @override Future<List<CandidateResult>> run(List<VpnServer> candidates,{required bool deep,
+    required bool metered,int target=131072,NetworkAnalysis? analysis,
+    SelectionPolicy policy=const SelectionPolicy(),required Future<bool> Function() routeValid,
+    required void Function(String) status,void Function(CandidateResult)? onResult,
+    Future<void> Function(List<VpnServer>)? onAttempt}) async {
+    expect(engine.disconnects,0,reason:'Old tunnel must stay up during reserve search');
+    if(!entered.isCompleted) entered.complete();
+    if(gate!=null) await gate!.future;
+    return [CandidateResult(candidates.first,100,[1000000,1000000],null)];
   }
 }
 class RestoreEngine extends MeasuredEngine {
@@ -407,6 +439,48 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await engine.dispose();
+  });
+
+  for(final reject in [false,true]) {
+    test('prepared reserve switches once, with one rollback on failure: $reject',() async {
+      final engine=ReserveEngine(rejectReserve:reject);
+      var now=DateTime.utc(2026,10,18);
+      final other=VpnServer.fromJson({...server.toJson(),'id':'reserve','host':'9.9.9.9',
+        'profile':server.profile.replaceAll('8.8.8.8','9.9.9.9')});
+      final lab=ReserveLabFixture(engine);
+      final vm=VpnViewModel(engine,MemoryProfiles(),ServerMonitor(),
+        catalogLoader:()async=>PublicCatalogResult([other],false,0),
+        reserveClock:()=>now,reserveLabFactory:(_)=>lab);
+      try {
+        await vm.initialize();await vm.connect(null);await Future<void>.delayed(Duration.zero);
+        vm.setReserveEnabled(true);
+        await vm.checkReserve(); expect(engine.disconnects,0);
+        now=now.add(const Duration(minutes:2));await vm.checkReserve();expect(engine.disconnects,0);
+        now=now.add(const Duration(minutes:2));await vm.checkReserve();
+        expect(engine.connects,reject?3:2);
+        expect(engine.disconnects,reject?2:1);
+        expect(vm.state,ConnectionState.connected);
+        expect(vm.connectionVerified,true);
+        expect(vm.reserveStatus,contains(reject?'Возврат подтверждён':'Переход подтверждён'));
+        await vm.checkReserve();expect(engine.connects,reject?3:2);
+        await vm.disconnect();
+      } finally {vm.dispose();await engine.dispose();}
+    });
+  }
+  test('manual disconnect during reserve search cannot reconnect',() async {
+    final engine=ReserveEngine(),gate=Completer<void>();
+    final other=VpnServer.fromJson({...server.toJson(),'id':'reserve','host':'9.9.9.9',
+      'profile':server.profile.replaceAll('8.8.8.8','9.9.9.9')});
+    final lab=ReserveLabFixture(engine,gate:gate);
+    final vm=VpnViewModel(engine,MemoryProfiles(),ServerMonitor(),
+      catalogLoader:()async=>PublicCatalogResult([other],false,0),reserveLabFactory:(_)=>lab);
+    try {
+      await vm.initialize();await vm.connect(null);await Future<void>.delayed(Duration.zero);
+      vm.setReserveEnabled(true);
+      final pending=vm.checkReserve();await lab.entered.future;
+      await vm.disconnect();gate.complete();await pending;
+      expect(engine.connects,1);expect(vm.state,ConnectionState.disconnected);
+    } finally {vm.dispose();await engine.dispose();}
   });
 
   test('deep desktop search preserves a session that meets the goal three times', () async {
