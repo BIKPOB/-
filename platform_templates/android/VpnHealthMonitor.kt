@@ -46,7 +46,7 @@ object VpnHealthMonitor {
         lastSpeedAt = SystemClock.elapsedRealtime()
         val app = context.applicationContext
         task = worker.scheduleWithFixedDelay({
-            try { check(app, token) } catch (_: Exception) { /* Retry on the next tick. */ }
+            try { probeCycle(app, token) } catch (_: Exception) { /* Retry on the next tick. */ }
         }, 30, 30, TimeUnit.SECONDS)
     }
     @Synchronized fun stop(context: Context, clear: Boolean = true) {
@@ -110,7 +110,7 @@ object VpnHealthMonitor {
             return received * 1000L / maxOf(1L, SystemClock.elapsedRealtime() - start)
         } finally { deadline.cancel(false); connection.disconnect(); if (pending === connection) pending = null }
     }
-    private fun check(context: Context, token: Int) {
+    private fun probeCycle(context: Context, token: Int) {
         if (token != epoch) return
         val cm = context.getSystemService(ConnectivityManager::class.java)
         val network = watchedNetwork?.takeIf {

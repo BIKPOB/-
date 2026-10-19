@@ -55,7 +55,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
       'Состояние: ${vm.state.name}\nЭтап: ${vm.connectionStage ?? '—'}\n${vm.message ?? ''}\n'
       'Интернет и качество подтверждены: ${vm.connectionVerified}\n'
       'Сеть: ${vm.networkContext.label} · обучающих замеров: ${vm.learningSamples}\n'
-      '${vm.baselineStatus}\n${vm.networkAnalysisReport}\n'
+      '${vm.baselineStatus}\n${vm.networkAnalysisReport}\nФоновая связь: ${vm.reconnectAdvice ?? "предупреждений нет"}\n'
       'Резерв: ${vm.reserveStatus}\n'
       'ИИ: ${vm.autoStatus ?? 'не запускался'}\n${vm.autoAttemptReports.join('\n\n')}';
     if (!mounted) return;

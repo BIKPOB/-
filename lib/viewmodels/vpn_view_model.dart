@@ -276,7 +276,7 @@ class VpnViewModel extends ChangeNotifier {
       final rotationData = Map<String,dynamic>.from((_labStorage['rotation'] as Map?) ?? {});
       final rotation = SearchRotation(rotationData);
       final rotationNetwork = sha256.convert(utf8.encode(context.environmentKey)).toString();
-      String rotationKey(VpnServer s) => sha256.convert(utf8.encode(s.profile.split('#').first)).toString();
+      String rotationKey(VpnServer s) => sha256.convert(utf8.encode(ConnectionStrategy.profileKey(s))).toString();
       List<VpnServer> rotate(List<VpnServer> servers) => rotation.order(
         servers, rotationNetwork, rotationKey, DateTime.now());
       Future<void> attempted(List<VpnServer> servers) async {
@@ -1056,8 +1056,10 @@ class VpnViewModel extends ChangeNotifier {
     if (busy) { _pendingFailure = reason; return; }
     if (!autoSelecting && state == ConnectionState.connected) {
       reconnectAdvice = 'Соединение потеряно. Переподключитесь или подберите другой сервер.';
-      if (Platform.isAndroid) unawaited(const MethodChannel('quietvpn/quality-notification')
-          .invokeMethod<void>('reportDrop').catchError((Object _) {}));
+      if (Platform.isAndroid) {
+        unawaited(const MethodChannel('quietvpn/quality-notification')
+            .invokeMethod<void>('reportDrop').catchError((Object _) {}));
+      }
     }
     _clearConfirmation();
     traffic.reset(); _trafficTimer?.cancel();

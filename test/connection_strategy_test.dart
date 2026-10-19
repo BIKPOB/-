@@ -38,7 +38,7 @@ void main() {
     final pool = [for (var i = 0; i < 10; i++) VpnServer(
       id: '$i', name: '$i', country: 'Test', countryCode: 'US',
       host: '192.0.2.${i + 1}', port: 51820, transport: 'udp',
-      profile: 'wireguard-fixture-$i', source: 'same-source')];
+      profile: '# public config\n[Interface]\nPrivateKey = fixture-$i', source: 'same-source')];
     final queue = ConnectionStrategy.tunnelQueue([], [...pool, ...pool],
       deep: true, priority: (_) => 0);
     expect(queue.length, 8);
