@@ -110,6 +110,19 @@ class DesktopSpeedEngine extends MeasuredEngine implements DesktopCapabilities {
     controller.add(EngineEvent(ConnectionState.connected, 'measured', true, currentSpeed));
   }
 }
+class SlowDesktopEngine extends DesktopSpeedEngine {
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++; currentSpeed=387500; chosen.add(server.host);
+    controller.add(EngineEvent(ConnectionState.connected,'3.1 Mbit fixture',true,currentSpeed));
+  }
+}
+class FourthRoundEngine extends MeasuredEngine {
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++; chosen.add(server.host); currentSpeed=900000;
+    controller.add(EngineEvent(connects<=24 ? ConnectionState.error : ConnectionState.connected,
+      'round fixture',true,connects<=24 ? null : currentSpeed));
+  }
+}
 class StableGoalEngine extends DesktopSpeedEngine {
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
     connects++; chosen.add(server.host);
@@ -262,6 +275,39 @@ void main() {
       } finally { vm.dispose(); await engine.dispose(); }
     });
   }
+  test('desktop never preserves a 3.1 Mbit reserve against an 18.2 Mbit goal', () async {
+    final engine=SlowDesktopEngine();
+    final vm=VpnViewModel(engine,MemoryProfiles(),ServerMonitor(),
+      catalogLoader:() async=>const PublicCatalogResult([],false,0),
+      autoMonitor:ServerMonitor(probe:(_)async=>const HealthResult(Reachability.reachable,1)));
+    try {
+      await vm.initialize();
+      vm.baseline=NetworkBaseline('', 'ethernet', DateTime.now(), 3791667, 192);
+      await vm.autoConnect();
+      expect(engine.connects,1); expect(vm.canDisconnect,false);
+      expect(vm.connectionVerified,false);
+      expect(vm.autoStatus,contains('автоматически не сохранён'));
+    } finally {vm.dispose();await engine.dispose();}
+  });
+  test('one deep invocation reaches a successful fourth round without repeating endpoints', () async {
+    final engine=FourthRoundEngine();
+    const channel=MethodChannel('quietvpn/xray-state');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel,
+      (_)async=>{'delay':10,'bytesPerSecond':900000,'quality':true});
+    final pool=[for(var n=1;n<=40;n++) VpnServer.fromJson({...server.toJson(),
+      'id':'round-$n','host':'9.9.9.$n','profile':server.profile.replaceAll('8.8.8.8','9.9.9.$n')})];
+    final vm=VpnViewModel(engine,EmptyProfiles(),ServerMonitor(),
+      catalogLoader:()async=>PublicCatalogResult(pool,false,0),networkReader:()async=>'wifi',
+      autoMonitor:ServerMonitor(probe:(_)async=>const HealthResult(Reachability.reachable,1)));
+    try {
+      await vm.initialize();await vm.autoConnect(deep:true);
+      expect(engine.connects,26);expect(engine.chosen.toSet().length,26);
+      expect(vm.connectionVerified,true);
+      expect(vm.autoAttemptReports.join('\n'),contains('Раунд 4/4'));
+      await vm.disconnect();
+    } finally {vm.dispose();await engine.dispose();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel,null);}
+  });
   test('Android proxy-lab engine also requires measured 5 Mbit minimum', () async {
     final engine=ProxyLabEngine();
     final vm=VpnViewModel(engine,MemoryProfiles(),ServerMonitor(probe:(_) async=>const HealthResult(Reachability.reachable,1)),networkReader:() async=>'wifi');
@@ -344,7 +390,7 @@ void main() {
       await vm.disconnect();
     } finally { vm.dispose(); await engine.dispose(); }
   });
-  test('repeated unconfirmed protocol stops after two attempts in this search', () async {
+  test('quick search exhausts distinct same-source candidates across two rounds', () async {
     final engine = FailedEngine();
     final pool = [for (var n = 1; n <= 7; n++) VpnServer.fromJson({...server.toJson(),
       'id': 'node-$n', 'host': '9.9.9.$n', 'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.$n')})];
@@ -353,13 +399,13 @@ void main() {
       autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
     try {
       await vm.initialize(); await vm.autoConnect();
-      expect(engine.connects, 2);
+      expect(engine.connects, 8);
       expect(vm.state, ConnectionState.error);
       expect(vm.canDisconnect, false);
       expect(vm.learningSamples, 0);
     } finally { vm.dispose(); await engine.dispose(); }
   });
-  test('deep selection attempts eight servers despite same-source failures', () async {
+  test('deep selection expands beyond eight servers without another click', () async {
     final engine = FailedEngine();
     final pool = [for (var n = 1; n <= 10; n++) VpnServer.fromJson({...server.toJson(),
       'id': 'node-$n', 'host': '9.9.9.$n', 'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.$n')})];
@@ -368,8 +414,8 @@ void main() {
       autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
     try {
       await vm.initialize(); await vm.autoConnect(deep: true);
-      expect(engine.connects, 8);
-      expect(vm.autoStatus, contains('Проверено 8 вариантов'));
+      expect(engine.connects, 10);
+      expect(vm.autoStatus, contains('Проверено 10 вариантов'));
       expect(vm.autoAttemptReports.join('\n'), isNot(contains('пропуск после двух')));
     } finally { vm.dispose(); await engine.dispose(); }
   });

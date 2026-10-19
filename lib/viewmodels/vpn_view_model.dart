@@ -218,8 +218,44 @@ class VpnViewModel extends ChangeNotifier {
     autoStatus = reason; _notify();
     if (!busy && _nativeNeedsStop) await disconnect();
   }
+  final _searchVisited = <String>{};
+  DateTime? _searchDeadline;
+  bool _roundCanContinue = false;
   Future<void> autoConnect({bool deep = false}) async {
     if (!ready || busy || autoSelecting || _nativeNeedsStop || _stopping) return;
+    autoSelecting = true;
+    _searchVisited.clear();
+    _searchDeadline = DateTime.now().add(Duration(minutes:deep ? 12 : 4));
+    final reports = <String>[];
+    final rounds = deep ? 4 : 2;
+    try {
+      for (var round=1; round<=rounds; round++) {
+        if (_disposed || !DateTime.now().isBefore(_searchDeadline!)) break;
+        _roundCanContinue = false;
+        final visited = _searchVisited.length;
+        final expectedEpoch = _autoEpoch + 1;
+        await _autoConnectRound(deep:deep);
+        reports.add('Раунд $round/$rounds · ${deep ? "глубокий" : "быстрый"} подбор');
+        reports.addAll(autoAttemptReports);
+        if (_disposed || _autoEpoch != expectedEpoch || !_roundCanContinue ||
+            _nativeNeedsStop || _searchVisited.length == visited) break;
+      }
+    } finally {
+      if (_roundCanContinue && !_nativeNeedsStop && !connectionVerified) {
+        final total = reports.where((r)=>r.startsWith('Попытка ')).length;
+        autoStatus = 'Проверено $total вариантов: подходящая скорость не подтверждена. Медленный VPN автоматически не сохранён.';
+      }
+      autoAttemptReports..clear()..addAll(reports);
+      try { await store.saveAttempts('${DateTime.now().toIso8601String()}\n${reports.join('\n\n')}'); } catch (_) { }
+      _searchDeadline = null;
+      _searchVisited.clear();
+      autoSelecting = false;
+      if (!_disposed) { _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate:true); _notify(); }
+    }
+  }
+  Future<void> _autoConnectRound({required bool deep}) async {
+
+    if (!ready || busy || _nativeNeedsStop || _stopping) return;
     _cancelReserve();
     autoSelecting = true; final token = ++_autoEpoch;
     autoAttemptReports.clear();
@@ -227,7 +263,6 @@ class VpnViewModel extends ChangeNotifier {
     autoStatus = 'Локальная нейросеть: обновление базы'; _notify();
     _poll?.cancel(); _probeEpoch++; monitor.cancel();
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
-    final overallClock=Stopwatch()..start();
     bool cancelled() => token != _autoEpoch || _disposed;
     try {
       await _reserveLab?.cancel();
@@ -270,7 +305,8 @@ class VpnViewModel extends ChangeNotifier {
       final catalog = await _catalogLoader();
       if (cancelled()) return;
       final pool = [..._imports, ...catalog.servers].where((s) =>
-        !_desktop || s.protocol != 'vless' || ConnectionStrategy.protectedVless(s)).toList();
+        !_searchVisited.contains(ConnectionStrategy.profileKey(s)) &&
+        (!_desktop || s.protocol != 'vless' || ConnectionStrategy.protectedVless(s))).toList();
       autoAttemptReports.add('База: ${catalog.status}\n'
         '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}');
       final rotationData = Map<String,dynamic>.from((_labStorage['rotation'] as Map?) ?? {});
@@ -280,6 +316,7 @@ class VpnViewModel extends ChangeNotifier {
       List<VpnServer> rotate(List<VpnServer> servers) => rotation.order(
         servers, rotationNetwork, rotationKey, DateTime.now());
       Future<void> attempted(List<VpnServer> servers) async {
+        _searchVisited.addAll(servers.map(ConnectionStrategy.profileKey));
         rotation.mark(rotationNetwork, servers.map(rotationKey), DateTime.now());
         _labStorage['rotation'] = rotationData;
         await _saveLab();
@@ -383,7 +420,10 @@ class VpnViewModel extends ChangeNotifier {
         autoAttemptReports.add('Профиль сети: таймаут HTTPS через прокси ${analysis?.candidateTimeout.inSeconds??6} с; '
           '${analysis?.preferLiteralEndpoint==true?"IP-адреса серверов получают приоритет из-за неподтверждённого системного DNS":"имена и IP сохраняются в подборе"}; '
           'замеров скорости ${deep || analysis?.extraSpeedSample==true?3:2}');
-        final findings=await lab.run(proxyPool,deep:deep,metered:context.metered!=false,target:targetBytesPerSecond,analysis:analysis,policy:_policy,
+        final findings=await lab.run(proxyPool,deep:deep,metered:context.metered!=false,target:targetBytesPerSecond,analysis:analysis,policy:SelectionPolicy(
+            fastCandidates:_policy.fastCandidates,deepCandidates:_policy.deepCandidates,
+            fastSeconds:min(_policy.fastSeconds,max(1,_searchDeadline!.difference(DateTime.now()).inSeconds)),
+            deepSeconds:min(_policy.deepSeconds,max(1,_searchDeadline!.difference(DateTime.now()).inSeconds))),
           onAttempt:attempted, routeValid:validRoute, status:(value){autoStatus=value;_notify();},
           onResult:(finding){
             autoAttemptReports.add('Прокси-проверка: ${finding.report}');_notify();
@@ -405,6 +445,7 @@ class VpnViewModel extends ChangeNotifier {
           'подтверждено ${usable.length}. Очередь VPN: ${ordered.length}/${deep ? 8 : 6}; '
           'неподтверждённые кандидаты требуют проверки туннеля.');
         if(ordered.isEmpty) {
+          _roundCanContinue=true;
           autoStatus='Прокси-проверка не нашла подтверждённого HTTPS и загрузки. VPN не включён; подробности в диагностике.';
           return;
         }
@@ -413,9 +454,8 @@ class VpnViewModel extends ChangeNotifier {
       autoPlan = '${_selectionTarget == null && !_requiresSpeed ? '' : 'Цель скорости: ${(targetBytesPerSecond * 8 / 1000000).toStringAsFixed(1)} Мбит/с · '}${deep ? 'Глубокий' : 'Быстрый'} подбор · план: ${ordered.map((s) => s.protocol).join(' → ')}';
       autoAttemptReports.add(autoPlan);
       // Give all eight tunnel attempts their own time after proxy screening.
-      final searchClock = deep ? (Stopwatch()..start()) : overallClock;
-      final budget = Duration(seconds: deep ? 640 : 120);
-      final protocolFailures = <String, int>{};
+      final searchClock = Stopwatch()..start();
+      final budget = Duration(seconds:min(deep ? 640 : 120,max(1,_searchDeadline!.difference(DateTime.now()).inSeconds)));
       var attempt = 0;
       for (final server in ordered) {
         if (cancelled()) return;
@@ -424,11 +464,6 @@ class VpnViewModel extends ChangeNotifier {
           break;
         }
         if (deep && finalists.where((candidate) => !_requiresSpeed || candidate.qualified).length >= 2) break;
-        final failureGroup = '${server.source}|${server.protocol}';
-        if (!deep && (protocolFailures[failureGroup] ?? 0) >= 2) {
-          autoAttemptReports.add('${server.protocol} (${server.source}): пропуск после двух неподтверждённых попыток в этом подборе');
-          continue;
-        }
         if (!context.sameConnection(await _network())) { autoStatus = 'Сеть изменилась — запустите подбор заново'; return; }
         if (cancelled()) return;
         await attempted([server]);
@@ -482,9 +517,6 @@ class VpnViewModel extends ChangeNotifier {
         final medianSpeed = speeds.isEmpty ? null : speeds[speeds.length ~/ 2];
         final usable = state == ConnectionState.connected && !repeatFailed &&
             medianSpeed != null && medianSpeed > 0 && sameNetwork;
-        if (sameNetwork) {
-          protocolFailures[failureGroup] = usable || success ? 0 : (protocolFailures[failureGroup] ?? 0) + 1;
-        }
         // Short repeated downloads measure consistency, not long-session stability.
         final utility = medianSpeed == null ? 0.0 :
           (.75 * (medianSpeed / (medianSpeed + 524288)) +
@@ -496,7 +528,7 @@ class VpnViewModel extends ChangeNotifier {
             success ? 'verified' : usable ? 'usable' : medianSpeed != null ? 'slow_or_unstable' : 'unconfirmed',
             speed: medianSpeed, reward: medianSpeed == null || repeatFailed ? null : .2 + .8 * utility);
         }
-        if (usable && !context.ambiguous) {
+        if (usable && !context.ambiguous && (!_requiresSpeed || success)) {
           finalists.add((server: server, utility: utility, speed: speeds.first, qualified: success));
           autoAttemptReports.add('${speeds.length} замер(а): ${speeds.map((n) => '${(n / 1024).round()} КиБ/с').join(', ')}');
         }
@@ -521,7 +553,7 @@ class VpnViewModel extends ChangeNotifier {
         // Keep the best live tunnel when comparison is complete: reconnecting
         // a public endpoint can fail even immediately after a successful sample.
         final comparisonDone = finalists.where((candidate) => !_requiresSpeed || candidate.qualified).length >= 2 || server == ordered.last || searchClock.elapsed >= budget;
-        if (deep && usable && !context.ambiguous && comparisonDone &&
+        if (deep && usable && (!_requiresSpeed || success) && !context.ambiguous && comparisonDone &&
             finalists.every((candidate) => _requiresSpeed ? candidate.speed <= speeds.first : candidate.utility <= utility)) {
           connectionVerified = success;
           measuredBytesPerSecond = medianSpeed;
@@ -574,13 +606,14 @@ class VpnViewModel extends ChangeNotifier {
           if (_nativeNeedsStop) return;
         }
       }
+      _roundCanContinue = true;
       autoStatus = finalists.isNotEmpty
         ? 'Найдено ${finalists.length} рабочих вариантов, но повторное подключение не прошло проверку. Причины восстановления — в диагностике.'
         : 'Проверено $attempt вариантов: соединение с подходящей загрузкой не найдено. Результаты всех попыток — в диагностике.';
     } catch (error) { if(!cancelled()) autoStatus = 'Подбор остановлен: ${error is StateError ? error.message : error.runtimeType}. Подробности в диагностике.'; }
     finally {
       try { await store.saveAttempts('${DateTime.now().toIso8601String()}\n${autoAttemptReports.join('\n\n')}'); } catch (_) { }
-      autoSelecting = false; if (!_disposed) { _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate: true); _notify(); } }
+      if (!_disposed) _notify(); }
   }
   final CandidateLab Function(ReserveCandidateHost)? _reserveLabFactory;
   final DateTime Function() _reserveNow;
@@ -870,7 +903,8 @@ class VpnViewModel extends ChangeNotifier {
         final catalog = await _catalogLoader();
         if (token != _backgroundEpoch || autoSelecting || _nativeNeedsStop) return;
         final pool = [..._imports, ...catalog.servers].where((s) =>
-        !_desktop || s.protocol != 'vless' || ConnectionStrategy.protectedVless(s)).toList();
+        !_searchVisited.contains(ConnectionStrategy.profileKey(s)) &&
+        (!_desktop || s.protocol != 'vless' || ConnectionStrategy.protectedVless(s))).toList();
       autoAttemptReports.add('База: ${catalog.status}\n'
         '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}');
         final candidates = <VpnServer>[];

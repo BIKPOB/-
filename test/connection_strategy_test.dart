@@ -32,7 +32,7 @@ void main() {
     expect(ConnectionStrategy.tunnelQueue([], pool.take(3).toList(),
       deep: true, priority: (_) => 0).length, 3);
     expect(ConnectionStrategy.tunnelQueue([pool.last], pool,
-      deep: false, priority: (_) => 0), [pool.last]);
+      deep: false, priority: (_) => 0).length, 6);
   });
   test('deep WireGuard fallback keeps eight distinct configurations', () {
     final pool = [for (var i = 0; i < 10; i++) VpnServer(
@@ -44,7 +44,7 @@ void main() {
     expect(queue.length, 8);
     expect(queue.map((s) => s.profile).toSet().length, 8);
     expect(ConnectionStrategy.tunnelQueue([], pool,
-      deep: false, priority: (_) => 0).length, 1);
+      deep: false, priority: (_) => 0).length, 6);
   });
   test('Xray reason does not expose log credentials or addresses', () {
     const raw = 'failed to build > invalid "password": SECRET at private.example';

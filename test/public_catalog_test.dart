@@ -45,6 +45,12 @@ void main() {
       expect(result.skipped, 2);
     }
   });
+  test('malformed URI escapes cannot discard valid subscription peers', () {
+    final result=PublicCatalog.parse('vless://$uuid@broken.example:443#%ZZ\n'
+      'vless://$uuid@good.example:443?security=tls');
+    expect(result.servers.single.host,'good.example');
+    expect(result.skipped,1);
+  });
   test('catalog limits are independent per protocol and local addresses are excluded', () {
     final lines = List.generate(320, (i) => 'vless://$uuid@node$i.example.com:443');
     lines.add('ss://aes-256-gcm:secret@example.org:443');

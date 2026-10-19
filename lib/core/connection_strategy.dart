@@ -13,11 +13,7 @@ class ConnectionStrategy {
       List<VpnServer> ranked, {required bool deep,
       required int Function(VpnServer) priority}) {
     final seen = <String>{};
-    final fallback = deep
-        ? select(ranked, limit: ranked.length, priority: priority)
-        : verified.isEmpty
-            ? ranked.where((s) => s.protocol == 'wireguard').take(1)
-            : <VpnServer>[];
+    final fallback = select(ranked, limit: ranked.length, priority: priority);
     return [...verified, ...fallback]
         .where((s) => seen.add(profileKey(s)))
         .take(deep ? 8 : 6).toList();

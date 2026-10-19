@@ -52,6 +52,7 @@ class PublicCatalog {
           country: 'Публичный сервер', countryCode: '--', host: parsed.host, port: parsed.port,
           transport: parsed.transport, profile: parsed.text, source: sourceName, protocol: parsed.protocol));
       } on FormatException { skipped++; }
+      on ArgumentError { skipped++; }
     }
     if (servers.isEmpty) throw const FormatException('В источнике нет совместимых серверов');
     return PublicCatalogResult(servers, bundled, skipped);
