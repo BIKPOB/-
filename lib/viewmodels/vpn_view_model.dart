@@ -594,14 +594,18 @@ class VpnViewModel extends ChangeNotifier {
   void _scheduleReserve() {
     if (!reserveEnabled || _disposed || !_foreground || autoSelecting || busy ||
         _reserveBusy || state != ConnectionState.connected || engine is! ReserveCandidateHost ||
-        activeServer?.protocol == 'wireguard') return;
+        activeServer?.protocol == 'wireguard') {
+      return;
+    }
     _reserveTimer ??= Timer(const Duration(minutes: 2), () {
       _reserveTimer=null; unawaited(_watchReserve());
     });
   }
   Future<void> _watchReserve() async {
     if (_reserveBusy || busy || autoSelecting || _disposed || !reserveEnabled || !_foreground ||
-        state != ConnectionState.connected || engine is! ReserveCandidateHost) return;
+        state != ConnectionState.connected || engine is! ReserveCandidateHost) {
+      return;
+    }
     _reserveBusy=true;
     final token=_reserveEpoch, session=_connectionEpoch;
     bool live() => !_disposed && reserveEnabled && _foreground && token==_reserveEpoch &&
