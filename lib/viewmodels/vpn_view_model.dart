@@ -28,10 +28,10 @@ import '../platform/desktop_capabilities.dart';
 
 class VpnViewModel extends ChangeNotifier {
   VpnViewModel(this.engine, this.store, this.monitor, {
-    Future<PublicCatalogResult> Function()? catalogLoader, NetworkAnalyzer? networkAnalyzer,
+    Future<PublicCatalogResult> Function()? catalogLoader, NetworkAnalyzer? networkAnalyzer, BaselineMonitor? baselineMonitor,
     CandidateLab Function(ReserveCandidateHost)? reserveLabFactory, DateTime Function()? reserveClock,
     Future<String> Function()? networkReader, ServerMonitor? autoMonitor, ServerMonitor? backgroundMonitor,
-  }) : _networkAnalyzer=networkAnalyzer??NetworkAnalyzer(), _reserveLabFactory=reserveLabFactory, _reserveNow=reserveClock??DateTime.now,
+  }) : _baselineMonitor=baselineMonitor??BaselineMonitor(), _networkAnalyzer=networkAnalyzer??NetworkAnalyzer(), _reserveLabFactory=reserveLabFactory, _reserveNow=reserveClock??DateTime.now,
        _catalogLoader = catalogLoader ?? PublicCatalog().load,
        _networkReader = networkReader, _autoMonitor = autoMonitor ?? ServerMonitor(tcpOnly: true),
        _backgroundMonitor = backgroundMonitor ?? ServerMonitor(tcpOnly: true);
@@ -60,7 +60,7 @@ class VpnViewModel extends ChangeNotifier {
   Timer? _backgroundTimer;
   int _backgroundEpoch = 0;
   String? backgroundStatus;
-  final _baselineMonitor = BaselineMonitor();
+  final BaselineMonitor _baselineMonitor;
   Timer? _baselineTimer;
   NetworkBaseline? baseline;
   String baselineStatus = 'Наблюдение за вашей сетью: ожидание замера без VPN';

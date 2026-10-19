@@ -86,6 +86,11 @@ class ProxyLabEngine extends MeasuredEngine implements CandidateHost {
   @override Future<void> startCandidates(String configuration) async {throw StateError('Not used in manual test');}
   @override Future<void> stopCandidates() async {}
 }
+class IdleBaselineMonitor extends BaselineMonitor {
+  @override Future<void> pause(bool value) async {}
+  @override Future<NetworkBaseline?> tick(NetworkContext context,
+      {Future<NetworkContext> Function()? readNetwork, bool forSelection=false}) async => null;
+}
 class CountingNetworkAnalyzer extends NetworkAnalyzer {
   final contexts = <NetworkContext>[];
   @override Future<NetworkAnalysis> analyze(NetworkContext context) async {
@@ -416,7 +421,7 @@ void main() {
     var network='wifi';
     final vm=VpnViewModel(engine,EmptyProfiles(),
       ServerMonitor(probe:(_) async=>const HealthResult(Reachability.reachable,1)),
-      networkAnalyzer:analyzer,networkReader:()async=>network);
+      networkAnalyzer:analyzer,baselineMonitor:IdleBaselineMonitor(),networkReader:()async=>network);
     await tester.pumpWidget(MaterialApp(home:HomePage(vm)));
     await tester.pump();
     expect(find.text('Исследовать Wi-Fi / LTE / Ethernet'),findsNothing);
