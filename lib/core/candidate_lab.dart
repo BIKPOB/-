@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math';
 import '../platform/candidate_host.dart';
 import 'models.dart';
+import 'speed_policy.dart';
 import 'network_analysis.dart';
 import 'proxy_profile.dart';
 import 'selection_policy.dart';
@@ -165,7 +166,7 @@ class CandidateLab {
             if(live()) {
               final value=CandidateResult(e.server,e.latency,speeds,error);
               record(value);
-              if(value.usable && value.speed>=target) qualified++;
+              if(value.usable && (deep ? SpeedPolicy.stableSamples(value.speeds,target) : value.speed>=target)) qualified++;
             }
           }
         } finally {await _stop();}
@@ -176,7 +177,11 @@ class CandidateLab {
       }
       if(token!=_epoch && clock.elapsed<budget) return [];
       if(!await validRoute()) throw StateError('Сеть изменилась: результаты отклонены');
-      results.sort((a,b)=>b.speed.compareTo(a.speed));
+      results.sort((a,b) {
+        final aStable=SpeedPolicy.stableSamples(a.speeds,target);
+        final bStable=SpeedPolicy.stableSamples(b.speeds,target);
+        return aStable==bStable ? b.speed.compareTo(a.speed) : aStable ? -1 : 1;
+      });
       return results;
     } finally {
       timer.cancel();routeTimer.cancel();progressTimer.cancel();

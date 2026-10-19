@@ -67,7 +67,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
   Future<void> _deepSearch() async {
     final deep = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
       title: const Text('Режим ИИ-подбора'),
-      content: const Text('Сначала проверяются DNS, HTTPS и стабильность ответов вашей сети без VPN. До трёх серверов одновременно проверяются через локальные прокси; затем скорость измеряется последовательно. Системный VPN включается для лучшего измеренного кандидата и проверяется повторно.\n\nБыстрый режим: до 12 кандидатов, бюджет прокси-проверки 45 с. Глубокий: до 24, бюджет 100 с. Загрузка для сравнения прокси — до 9/18 МиБ в лимитной сети или 36/72 МиБ в безлимитной; финальная проверка VPN расходует дополнительный трафик. Это короткие замеры, а не гарантия скорости видео. Измерения хранятся локально и разделяются по подключению.'),
+      content: const Text('Состояние текущей сети анализируется автоматически. Перед подбором обновляются устаревшие измерения DNS, HTTPS и скорости без VPN. До трёх серверов одновременно проверяются через локальные прокси; затем скорость измеряется последовательно. Системный VPN включается для лучшего измеренного кандидата и проверяется повторно.\n\nБыстрый режим: до 12 кандидатов, бюджет прокси-проверки 45 с. Глубокий: до 24 прокси за 100 с, затем до 8 разных VPN-профилей за 640 с. Загрузка для сравнения прокси — до 9/18 МиБ в лимитной сети или 36/72 МиБ в безлимитной; финальная проверка VPN расходует дополнительный трафик. Это короткие замеры, а не гарантия скорости видео. Измерения хранятся локально и разделяются по подключению.'),
       actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Отмена')),
         TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Глубокое сравнение')),
         FilledButton(onPressed: () => Navigator.pop(c, false), child: const Text('Быстро подключиться'))]));
@@ -119,8 +119,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
           icon: const Icon(Icons.call_split), label: const Text('Приложения в обход VPN')),
         const Text('Быстрый режим ищет VPN с целевой скоростью. Глубокий сравнивает несколько вариантов. На Windows цель — не ниже 5 Мбит/с, медленный VPN отмечается как резерв. Недавние результаты учитываются для похожих параметров сети. Во время подбора оставьте приложение открытым.'),
         if (Platform.isWindows) const Text('Проверка скорости VPN: до 4 МиБ на замер; глубокий режим делает до трёх замеров на кандидат. Скорость до тестового узла не гарантирует доступность YouTube.'),
-        Text(vm.analysisStatus),
-        TextButton.icon(onPressed: vm.autoSelecting || vm.canDisconnect || vm.analyzingNetwork ? null : () => vm.analyzeNetwork(force:true), icon: const Icon(Icons.network_check), label: Text(vm.analyzingNetwork ? 'Исследование сети…' : 'Исследовать Wi-Fi / LTE / Ethernet')),
+        if (vm.reconnectAdvice != null) ...[
+          Text(vm.reconnectAdvice!),
+          Wrap(spacing: 8, children: [
+            TextButton(onPressed: vm.busy || vm.autoSelecting ? null : () => vm.reconnectFromAdvice(),
+              child: const Text('Переподключиться')),
+            TextButton(onPressed: vm.busy || vm.autoSelecting ? null : () => vm.reconnectFromAdvice(findAnother:true),
+              child: const Text('Найти другой сервер')),
+          ]),
+        ],
+        const Text('Во время VPN Android проверяет связь в фоне. При повторных сбоях появится предложение переподключиться. Проверки скорости: до 3 МиБ/час плюс служебный трафик.'),
+        Text(vm.canDisconnect ? 'Автоанализ прямой сети приостановлен на время VPN' : vm.analysisStatus),
         Text('${vm.baselineStatus}${vm.canDisconnect ? ' · прямые замеры приостановлены' : ''}'),
         const Text('Автозамеры сети без VPN: до 8 МиБ/сутки в лимитной сети, до 32 МиБ в безлимитной, плюс служебный трафик. При VPN замеры приостановлены.'),
         SwitchListTile(contentPadding: EdgeInsets.zero, title: const Text('Проверенный резерв (экспериментально)'),

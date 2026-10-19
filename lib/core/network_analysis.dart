@@ -5,16 +5,18 @@ import 'network_context.dart';
 
 class NetworkAnalysis {
   const NetworkAnalysis(this.key, this.time, this.dnsMs, this.httpsMs, this.ipHttps,
-      this.udpDns, this.failures);
+      this.udpDns, this.failures, {this.session});
   final String key;
+  final String? session;
   final DateTime time;
   final int? dnsMs;
   final List<int> httpsMs;
   final bool ipHttps, udpDns;
   final List<String> failures;
-  bool fresh(NetworkContext context, DateTime now) => key == context.environmentKey &&
-    !context.ambiguous && now.difference(time) >= Duration.zero &&
-    now.difference(time) < const Duration(minutes: 15);
+  bool fresh(NetworkContext context, DateTime now, {Duration maxAge = const Duration(minutes: 5)}) =>
+    key == context.environmentKey && session == context.session &&
+    !context.vpnPresent && context.type != 'offline' && !context.ambiguous && now.difference(time) >= Duration.zero &&
+    now.difference(time) < maxAge;
   bool get preferLiteralEndpoint => dnsMs == null && ipHttps;
   bool get extraSpeedSample => httpsMs.length>=2 && jitterMs>max(500,httpsMs.reduce(min));
   Duration get candidateTimeout {
@@ -28,11 +30,11 @@ class NetworkAnalysis {
     'HTTPS по IP ${ipHttps ? "да" : "не подтверждён"}; DNS/UDP ${udpDns ? "да" : "не подтверждён"}';
   String get report => '$label\nВремя: ${time.toLocal()}${failures.isEmpty ? "" : "\n${failures.join('; ')}"}\n'
     'Проверка DNS/UDP не определяет доступность всех UDP-протоколов; таймаут не доказывает блокировку.';
-  Map<String, dynamic> toJson() => {'key':key,'time':time.millisecondsSinceEpoch,
+  Map<String, dynamic> toJson() => {'key':key,'session':session,'time':time.millisecondsSinceEpoch,
     'dns':dnsMs,'https':httpsMs,'ip':ipHttps,'udp':udpDns,'failures':failures};
   factory NetworkAnalysis.fromJson(Map<String,dynamic> m) => NetworkAnalysis(m['key'] as String,
     DateTime.fromMillisecondsSinceEpoch(m['time'] as int), m['dns'] as int?,
-    (m['https'] as List).cast<int>(),m['ip']==true,m['udp']==true,(m['failures'] as List).cast<String>());
+    (m['https'] as List).cast<int>(),m['ip']==true,m['udp']==true,(m['failures'] as List).cast<String>(), session:m['session'] as String?);
 }
 
 /// Owns every client/socket, so cancellation closes outstanding requests.
@@ -118,6 +120,6 @@ class NetworkAnalyzer {
       () async {for(var i=0;i<3 && token==_epoch;i++) {try {durations.add(await https(Uri.parse(i==1?'https://cp.cloudflare.com/generate_204':'https://www.gstatic.com/generate_204')));}catch(e){errors.add('HTTPS ${i+1}: ${e.runtimeType}');}}}(),
     ]);
     if(token!=_epoch) throw StateError('Анализ отменён');
-    return NetworkAnalysis(context.environmentKey,DateTime.now(),dns,durations,ip,udp,errors);
+    return NetworkAnalysis(context.environmentKey,DateTime.now(),dns,durations,ip,udp,errors,session:context.session);
   }
 }

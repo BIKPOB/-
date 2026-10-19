@@ -28,10 +28,10 @@ import '../platform/desktop_capabilities.dart';
 
 class VpnViewModel extends ChangeNotifier {
   VpnViewModel(this.engine, this.store, this.monitor, {
-    Future<PublicCatalogResult> Function()? catalogLoader,
+    Future<PublicCatalogResult> Function()? catalogLoader, NetworkAnalyzer? networkAnalyzer,
     CandidateLab Function(ReserveCandidateHost)? reserveLabFactory, DateTime Function()? reserveClock,
     Future<String> Function()? networkReader, ServerMonitor? autoMonitor, ServerMonitor? backgroundMonitor,
-  }) : _reserveLabFactory=reserveLabFactory, _reserveNow=reserveClock??DateTime.now,
+  }) : _networkAnalyzer=networkAnalyzer??NetworkAnalyzer(), _reserveLabFactory=reserveLabFactory, _reserveNow=reserveClock??DateTime.now,
        _catalogLoader = catalogLoader ?? PublicCatalog().load,
        _networkReader = networkReader, _autoMonitor = autoMonitor ?? ServerMonitor(tcpOnly: true),
        _backgroundMonitor = backgroundMonitor ?? ServerMonitor(tcpOnly: true);
@@ -65,11 +65,11 @@ class VpnViewModel extends ChangeNotifier {
   NetworkBaseline? baseline;
   String baselineStatus = 'Наблюдение за вашей сетью: ожидание замера без VPN';
   int? _selectionTarget;
-  final _networkAnalyzer = NetworkAnalyzer();
+  final NetworkAnalyzer _networkAnalyzer;
   CandidateLab? _candidateLab;
   NetworkAnalysis? networkAnalysis;
   bool analyzingNetwork = false;
-  String analysisStatus = 'Анализ сети: ожидание прямого маршрута';
+  String analysisStatus = 'Автоанализ сети: ожидание прямого маршрута';
   Map<String,dynamic> _labStorage = {};
   Future<void>? _analysisPending;
   SelectionPolicy _policy = const SelectionPolicy();
@@ -83,16 +83,19 @@ class VpnViewModel extends ChangeNotifier {
     await _analyzeNetwork(context,force:force);
   }
   Future<void> _analyzeNetwork(NetworkContext context,{bool force=false}) async {
-    if(_analysisPending!=null) { await _analysisPending; return; }
+    if(_analysisPending!=null) await _analysisPending;
+    if (_disposed) return;
     if(context.vpnPresent || context.ambiguous || context.type=='offline') {
       analysisStatus='Анализ отложен: нет однозначного прямого маршрута без VPN';return;
     }
-    if(!force && networkAnalysis?.fresh(context,DateTime.now())==true) return;
+    final maxAge = force ? const Duration(seconds:30)
+        : Duration(minutes:context.metered==false ? 2 : 5);
+    if(networkAnalysis?.fresh(context,DateTime.now(),maxAge:maxAge)==true) return;
     final done=Completer<void>();_analysisPending=done.future;analyzingNetwork=true;_notify();
     try {
       final now=DateTime.now();final day=now.toUtc().toIso8601String().substring(0,10);
       final used=_labStorage['analysisDay']==day?(_labStorage['analysisCount'] as num?)?.toInt()??0:0;
-      if(used >= (context.metered==false?48:12)) {analysisStatus='Достигнут суточный лимит коротких анализов сети';return;}
+      if(used >= (context.metered==false?720:288)) {analysisStatus='Достигнут суточный лимит коротких анализов сети';return;}
       _labStorage.addAll({'analysisDay':day,'analysisCount':used+1});await _saveLab();
       analysisStatus='Проверка системного DNS, DNS/UDP, HTTPS по IP и трёх HTTPS-ответов';_notify();
       final value=await _networkAnalyzer.analyze(context);
@@ -143,6 +146,11 @@ class VpnViewModel extends ChangeNotifier {
           final context = await _network();
           if (_disposed || autoSelecting || _nativeNeedsStop || busy) return;
           networkContext = context;
+          if (networkAnalysis?.fresh(context,DateTime.now()) != true) {
+            networkAnalysis = null;
+            analysisStatus = 'Автоанализ текущей сети: обновление';
+          }
+          if (baseline?.fresh(context,DateTime.now()) != true) baseline = null;
           if(engine is CandidateHost) await _analyzeNetwork(context,force:forceAnalysis);
           if (_disposed || autoSelecting || _nativeNeedsStop || busy) return;
           await _baselineMonitor.pause(false);
@@ -231,7 +239,7 @@ class VpnViewModel extends ChangeNotifier {
         autoStatus = 'Оценка скорости вашей сети без VPN'; _notify();
         try {
           await _baselineMonitor.pause(false);
-          final sample = await _baselineMonitor.tick(context, readNetwork: _network)
+          final sample = await _baselineMonitor.tick(context, readNetwork: _network, forSelection:true)
               .timeout(const Duration(seconds: 15));
           if (cancelled()) return;
           final after = await _network();
@@ -245,7 +253,7 @@ class VpnViewModel extends ChangeNotifier {
       _selectionTarget = baseline?.fresh(context, DateTime.now()) == true ? baseline!.target : null;
       await _baselineMonitor.pause(true);
       if(engine is CandidateHost) {
-        await _analyzeNetwork(context);
+        await _analyzeNetwork(context,force:true);
         if(cancelled()) return;
         await _refreshPolicy();
         if(cancelled()) return;
@@ -469,7 +477,7 @@ class VpnViewModel extends ChangeNotifier {
           }
           if (cancelled()) return;
           speeds.sort();
-          success = !repeatFailed && speeds.length == 3 && speeds.first >= targetBytesPerSecond;
+          success = !repeatFailed && SpeedPolicy.stableSamples(speeds, targetBytesPerSecond);
         }
         final medianSpeed = speeds.isEmpty ? null : speeds[speeds.length ~/ 2];
         final usable = state == ConnectionState.connected && !repeatFailed &&
@@ -518,7 +526,7 @@ class VpnViewModel extends ChangeNotifier {
           connectionVerified = success;
           measuredBytesPerSecond = medianSpeed;
           autoStatus = success ? 'Сохранён лучший из ${finalists.length} измеренных вариантов без переподключения'
-            : 'Сохранён рабочий резервный VPN; скорость ниже целевой.';
+            : 'Сохранён резервный VPN; скорость ниже цели или нестабильна.';
           return;
         }
         final failure = message;
@@ -557,10 +565,10 @@ class VpnViewModel extends ChangeNotifier {
           if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
           autoAttemptReports.add('Восстановление $restoreAttempt · ${finalist.server.protocol} · ${message ?? connectionStage ?? 'Нет подробностей'}');
           if (state == ConnectionState.connected && (connectionVerified || (measuredBytesPerSecond ?? 0) > 0) && context.sameConnection(await _network())) {
-            if (_selectionTarget != null || _requiresSpeed) connectionVerified = (measuredBytesPerSecond ?? 0) >= targetBytesPerSecond;
+            if (_selectionTarget != null || _requiresSpeed) connectionVerified = finalist.qualified && (measuredBytesPerSecond ?? 0) >= targetBytesPerSecond;
             autoStatus = connectionVerified
                 ? 'Выбран лучший из ${finalists.length} измеренных вариантов · опыт: ${_selector.samples}'
-                : 'Сохранён рабочий резервный VPN; скорость ниже целевой. Можно повторить подбор позже.'; return;
+                : 'Сохранён резервный VPN; скорость ниже цели или нестабильна. Можно повторить подбор позже.'; return;
           }
           if (_nativeNeedsStop) await disconnect();
           if (_nativeNeedsStop) return;
@@ -713,6 +721,32 @@ class VpnViewModel extends ChangeNotifier {
     finally { _reserveBusy=false; if (!_disposed) {_notify(); _scheduleReserve();} }
   }
 
+  String? reconnectAdvice;
+  Timer? _healthTimer;
+  void _scheduleHealthStatus() {
+    _healthTimer?.cancel();
+    if (_disposed || !_foreground || !Platform.isAndroid) return;
+    _healthTimer = Timer(const Duration(seconds: 5), () async {
+      try {
+        final value = await const MethodChannel('quietvpn/quality-notification')
+            .invokeMapMethod<String,dynamic>('status');
+        if (_disposed) return;
+        final text = value?['message'] as String?;
+        reconnectAdvice = text == null || text.isEmpty ? null : text;
+        if (reconnectAdvice != null) connectionVerified = false;
+        _notify();
+      } catch (_) { }
+      if (!_disposed) _scheduleHealthStatus();
+    });
+  }
+  Future<void> reconnectFromAdvice({bool findAnother = false}) async {
+    if (busy || autoSelecting) return;
+    await disconnect();
+    if (_disposed || _nativeNeedsStop) return;
+    if (findAnother) { await autoConnect(deep: true); }
+    else { await connect(null); }
+  }
+
   bool _foreground = true, _disposed = false, _nativeNeedsStop = false, _stopping = false;
   bool _localNetworkFailure = false;
   bool _verifying = false;
@@ -785,7 +819,7 @@ class VpnViewModel extends ChangeNotifier {
       await engine.initialize(); ready = true;
     } catch (_) { message = 'Не удалось инициализировать VPN или защищённое хранилище. На Windows проверьте установку и запуск от администратора.'; state = ConnectionState.error; }
     if (servers.isNotEmpty) selectedId = servers.first.id;
-    _scheduleProbe(immediate: true); _scheduleBackgroundPreflight(immediate: true); _scheduleBaseline(immediate: true); _notify();
+    _scheduleProbe(immediate: true); _scheduleBackgroundPreflight(immediate: true); _scheduleBaseline(immediate: true); _scheduleHealthStatus(); _notify();
   }
   void refreshLatency() {
     _probeEpoch++; monitor.cancel();
@@ -803,6 +837,7 @@ class VpnViewModel extends ChangeNotifier {
   void setForeground(bool visible) {
     if (_disposed || _foreground == visible) return;
     _foreground = visible;
+    _scheduleHealthStatus();
     if (!visible) _cancelReserve();
     _baselineTimer?.cancel();
     if (visible) _scheduleBaseline(immediate: true);
@@ -1019,6 +1054,11 @@ class VpnViewModel extends ChangeNotifier {
   Future<void> _fail(String reason) async {
     if (_stopping || _disposed) return;
     if (busy) { _pendingFailure = reason; return; }
+    if (!autoSelecting && state == ConnectionState.connected) {
+      reconnectAdvice = 'Соединение потеряно. Переподключитесь или подберите другой сервер.';
+      if (Platform.isAndroid) unawaited(const MethodChannel('quietvpn/quality-notification')
+          .invokeMethod<void>('reportDrop').catchError((Object _) {}));
+    }
     _clearConfirmation();
     traffic.reset(); _trafficTimer?.cancel();
     _stopping = true; _nativeConnected = false; _connectionEpoch++; _connectTimeout?.cancel(); _connectTimeout = null;
@@ -1033,11 +1073,15 @@ class VpnViewModel extends ChangeNotifier {
   Future<void> disconnect({bool automatic=false}) async {
     if (!automatic) _cancelReserve();
     if (busy || _stopping) return;
+    reconnectAdvice = null;
     _clearConfirmation();
     traffic.reset(); _trafficTimer?.cancel();
     busy = true; _stopping = true; _nativeConnected = false; _connectionEpoch++;
     _connectTimeout?.cancel(); _connectTimeout = null; _notify();
     try {
+      if (Platform.isAndroid) {
+        try { await const MethodChannel('quietvpn/quality-notification').invokeMethod<void>('stop'); } catch (_) { }
+      }
       await engine.disconnect(); _nativeNeedsStop = false; activeServer = null;
       if (!autoSelecting) await _baselineMonitor.pause(false);
       state = ConnectionState.disconnected; message = null;
@@ -1051,6 +1095,7 @@ class VpnViewModel extends ChangeNotifier {
   @override void dispose() {
     _cancelReserve();
     _networkAnalyzer.cancel();unawaited(_candidateLab?.cancel());
+    _healthTimer?.cancel();
     _baselineTimer?.cancel(); _baselineMonitor.dispose();
     _disposed = true; _autoEpoch++; _autoMonitor.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     _backgroundTimer?.cancel(); _trafficTimer?.cancel(); _poll?.cancel(); _connectTimeout?.cancel();

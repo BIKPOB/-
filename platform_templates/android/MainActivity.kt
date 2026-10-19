@@ -50,7 +50,12 @@ class MainActivity : FlutterActivity() {
             }
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/quality-notification")
             .setMethodCallHandler { call, result ->
+                if (call.method == "status") { result.success(VpnHealthMonitor.status(applicationContext)); return@setMethodCallHandler }
+                if (call.method == "stop") { VpnHealthMonitor.stop(applicationContext); result.success(null); return@setMethodCallHandler }
+                if (call.method == "reportDrop") { VpnHealthMonitor.reportDrop(applicationContext); result.success(null); return@setMethodCallHandler }
                 if (call.method != "update") { result.notImplemented(); return@setMethodCallHandler }
+                VpnHealthMonitor.configure(applicationContext, call.argument<Boolean>("active") == true,
+                    call.argument<Number>("target")?.toLong() ?: 625000L)
                 QualityNotification.update(applicationContext, call.argument<Boolean>("active") == true,
                     call.argument<Number>("speed")?.toLong() ?: 0L,
                     call.argument<Number>("target")?.toLong() ?: 0L)
@@ -164,7 +169,7 @@ class MainActivity : FlutterActivity() {
                         else result.success(null)
                     }
                     "tick" -> {
-                        NetworkBaselineStore.request(applicationContext) {
+                        NetworkBaselineStore.request(applicationContext, call.argument<Boolean>("forSelection") == true) {
                             runOnUiThread { result.success(NetworkBaselineStore.read(applicationContext)) }
                         }
                     }

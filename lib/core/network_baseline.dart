@@ -13,7 +13,7 @@ class NetworkBaseline {
   final int bytesPerSecond, latencyMs;
   bool fresh(NetworkContext network, DateTime now) => !network.ambiguous &&
     network.sameConnection(NetworkContext(type: type, session: session)) &&
-    now.difference(time) >= Duration.zero && now.difference(time) < const Duration(hours: 2);
+    now.difference(time) >= Duration.zero && now.difference(time) < const Duration(minutes: 5);
   int get target => (bytesPerSecond * .6).round();
   Map<String, dynamic> toJson() => {'session': session, 'type': type,
     'time': time.millisecondsSinceEpoch, 'bytesPerSecond': bytesPerSecond, 'latencyMs': latencyMs};
@@ -34,9 +34,9 @@ class BaselineMonitor {
     if (value) { _epoch++; _client?.close(force: true); }
     if (Platform.isAndroid) await channel.invokeMethod<void>('pause', value);
   }
-  Future<NetworkBaseline?> tick(NetworkContext context, {Future<NetworkContext> Function()? readNetwork}) async {
+  Future<NetworkBaseline?> tick(NetworkContext context, {Future<NetworkContext> Function()? readNetwork, bool forSelection=false}) async {
     if (Platform.isAndroid) {
-      final m = await channel.invokeMapMethod<dynamic, dynamic>('tick');
+      final m = await channel.invokeMapMethod<dynamic, dynamic>('tick', {'forSelection':forSelection});
       if (m != null && m['bytesPerSecond'] != null) latest = NetworkBaseline.fromJson(m);
       return latest;
     }
@@ -56,8 +56,8 @@ class BaselineMonitor {
       final limited = context.metered != false; // Unknown Windows cost is treated as metered.
       final interval = Duration(minutes: limited ? 120 : 30);
       final last = DateTime.fromMillisecondsSinceEpoch((saved['attempt'] as num?)?.toInt() ?? 0);
-      if (now.difference(last) < const Duration(minutes: 5) ||
-          (latest?.fresh(context, now) == true && saved['attemptSession'] == context.session && now.difference(last) < interval)) {
+      if (now.difference(last) < Duration(seconds: forSelection ? 30 : 300) ||
+          (!forSelection && saved['attemptSession'] == context.session && now.difference(last) < interval)) {
         status = 'ожидание следующего прямого замера (после неудачи — не раньше 5 минут)';
         return latest;
       }

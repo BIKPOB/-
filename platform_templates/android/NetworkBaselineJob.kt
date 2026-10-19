@@ -40,8 +40,8 @@ object NetworkBaselineStore {
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY).setRequiresBatteryNotLow(true)
                 .setPeriodic(15 * 60 * 1000L).setPersisted(true).build())
     }
-    fun request(c: Context, done: () -> Unit = {}) { worker.execute { try { measure(c) } catch (_: Exception) { } finally { done() } } }
-    private fun measure(c: Context) {
+    fun request(c: Context, forSelection: Boolean = false, done: () -> Unit = {}) { worker.execute { try { measure(c, forSelection) } catch (_: Exception) { } finally { done() } } }
+    private fun measure(c: Context, forSelection: Boolean) {
         val token = epoch
         if (paused) return
         val cm = c.getSystemService(ConnectivityManager::class.java)
@@ -55,7 +55,7 @@ object NetworkBaselineStore {
         val now = System.currentTimeMillis()
         val interval = (if (limited) 120 else 30) * 60 * 1000L
         val age = now - p.getLong("attempt", 0)
-        if (age < 5 * 60 * 1000L || (p.getString("attemptSession", "") == network.networkHandle.toString() && age < interval)) return
+        if (age < (if (forSelection) 30_000L else 5 * 60 * 1000L) || (!forSelection && p.getString("attemptSession", "") == network.networkHandle.toString() && age < interval)) return
         val day = now / 86400000L
         val used = if (p.getLong("day", -1) == day) p.getInt("used", 0) else 0
         val size = (if (limited) 1 else 4) * 1048576

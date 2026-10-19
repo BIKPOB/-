@@ -86,6 +86,13 @@ class ProxyLabEngine extends MeasuredEngine implements CandidateHost {
   @override Future<void> startCandidates(String configuration) async {throw StateError('Not used in manual test');}
   @override Future<void> stopCandidates() async {}
 }
+class CountingNetworkAnalyzer extends NetworkAnalyzer {
+  final contexts = <NetworkContext>[];
+  @override Future<NetworkAnalysis> analyze(NetworkContext context) async {
+    contexts.add(context);
+    return NetworkAnalysis(context.environmentKey,DateTime.now(),20,[30,31,32],true,true,[],session:context.session);
+  }
+}
 class DesktopSpeedEngine extends MeasuredEngine implements DesktopCapabilities {
   @override Future<NetworkContext> readNetwork() async => const NetworkContext(type: 'ethernet');
   @override Future<String> diagnostics() async => '';
@@ -403,6 +410,25 @@ void main() {
         await vm.disconnect();
       } finally { vm.dispose(); await engine.dispose(); }
     }
+  });
+  testWidgets('network analysis starts automatically and refreshes after network change', (tester) async {
+    final engine=ProxyLabEngine(), analyzer=CountingNetworkAnalyzer();
+    var network='wifi';
+    final vm=VpnViewModel(engine,EmptyProfiles(),
+      ServerMonitor(probe:(_) async=>const HealthResult(Reachability.reachable,1)),
+      networkAnalyzer:analyzer,networkReader:()async=>network);
+    await tester.pumpWidget(MaterialApp(home:HomePage(vm)));
+    await tester.pump();
+    expect(find.text('Исследовать Wi-Fi / LTE / Ethernet'),findsNothing);
+    await tester.pump(const Duration(seconds:1));
+    await tester.pump();
+    expect(analyzer.contexts.map((c)=>c.type),['wifi']);
+    network='mobile';
+    await tester.pump(const Duration(seconds:30));
+    await tester.pump();
+    expect(analyzer.contexts.map((c)=>c.type),['wifi','mobile']);
+    expect(vm.networkAnalysis!.key,contains('mobile'));
+    await tester.pumpWidget(const SizedBox.shrink());await engine.dispose();
   });
   testWidgets('automatic search with no imports never asks for a manual server', (tester) async {
     final engine=AutoEngine(),catalog=Completer<PublicCatalogResult>();
