@@ -238,12 +238,14 @@ class VpnViewModel extends ChangeNotifier {
         reports.add('Раунд $round/$rounds · ${deep ? "глубокий" : "быстрый"} подбор');
         reports.addAll(autoAttemptReports);
         if (_disposed || _autoEpoch != expectedEpoch || !_roundCanContinue ||
-            _nativeNeedsStop || _searchVisited.length == visited) break;
+            _nativeNeedsStop || _searchVisited.length == visited) { break; }
       }
     } finally {
       if (_roundCanContinue && !_nativeNeedsStop && !connectionVerified) {
         final total = reports.where((r)=>r.startsWith('Попытка ')).length;
-        autoStatus = 'Проверено $total вариантов: подходящая скорость не подтверждена. Медленный VPN автоматически не сохранён.';
+        autoStatus = reports.any((r)=>r.startsWith('Восстановление '))
+            ? 'Проверено $total вариантов: повторное подключение не прошло проверку. Подробности в диагностике.'
+            : 'Проверено $total вариантов: подходящая скорость не подтверждена. Медленный VPN автоматически не сохранён.';
       }
       autoAttemptReports..clear()..addAll(reports);
       try { await store.saveAttempts('${DateTime.now().toIso8601String()}\n${reports.join('\n\n')}'); } catch (_) { }
