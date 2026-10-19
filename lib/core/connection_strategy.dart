@@ -3,6 +3,22 @@ import 'models.dart';
 /// Prefer proven routes, then encrypted VLESS transports. A TCP response is
 /// ordering evidence only; it never confirms a working VPN.
 class ConnectionStrategy {
+  /// Proxy screening is evidence for ordering, not a veto on tunnel attempts.
+  /// Fill the deep queue even when screening found zero or one usable proxy.
+  static List<VpnServer> tunnelQueue(List<VpnServer> verified,
+      List<VpnServer> ranked, {required bool deep,
+      required int Function(VpnServer) priority}) {
+    final seen = <String>{};
+    final fallback = deep
+        ? select(ranked, limit: ranked.length, priority: priority)
+        : verified.isEmpty
+            ? ranked.where((s) => s.protocol == 'wireguard').take(1)
+            : <VpnServer>[];
+    return [...verified, ...fallback]
+        .where((s) => seen.add(s.profile.split('#').first))
+        .take(deep ? 8 : 6).toList();
+  }
+
   static bool protectedVless(VpnServer server) {
     if (server.protocol != 'vless') return false;
     final security = Uri.tryParse(server.profile)?.queryParameters['security'];

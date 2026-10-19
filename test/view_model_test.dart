@@ -347,6 +347,20 @@ void main() {
       expect(vm.learningSamples, 0);
     } finally { vm.dispose(); await engine.dispose(); }
   });
+  test('deep selection attempts eight servers despite same-source failures', () async {
+    final engine = FailedEngine();
+    final pool = [for (var n = 1; n <= 10; n++) VpnServer.fromJson({...server.toJson(),
+      'id': 'node-$n', 'host': '9.9.9.$n', 'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.$n')})];
+    final vm = VpnViewModel(engine, EmptyProfiles(), ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () async => PublicCatalogResult(pool, false, 0), networkReader: () async => 'wifi',
+      autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize(); await vm.autoConnect(deep: true);
+      expect(engine.connects, 8);
+      expect(vm.autoStatus, contains('Проверено 8 вариантов'));
+      expect(vm.autoAttemptReports.join('\n'), isNot(contains('пропуск после двух')));
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   test('quick selection keeps first measured success without repeated probes or reconnect', () async {
     final engine = MeasuredEngine();
     final other = VpnServer.fromJson({...server.toJson(), 'id': 'other', 'host': '9.9.9.9',

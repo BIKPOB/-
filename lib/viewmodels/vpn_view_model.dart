@@ -391,8 +391,11 @@ class VpnViewModel extends ChangeNotifier {
           }
         }
         final usable=findings.where((f)=>f.usable).toList();
-        ordered=[...usable.map((f)=>f.server),
-          if(usable.isEmpty) ...mixed.where((s)=>s.protocol=='wireguard').take(1)];
+        ordered=ConnectionStrategy.tunnelQueue(
+          usable.map((f)=>f.server).toList(), mixed, deep:deep, priority:priority);
+        autoAttemptReports.add('Прокси: в выборке ${proxyPool.length}, результатов ${findings.length}, '
+          'подтверждено ${usable.length}. Очередь VPN: ${ordered.length}/${deep ? 8 : 6}; '
+          'неподтверждённые кандидаты требуют проверки туннеля.');
         if(ordered.isEmpty) {
           autoStatus='Прокси-проверка не нашла подтверждённого HTTPS и загрузки. VPN не включён; подробности в диагностике.';
           return;
@@ -401,15 +404,20 @@ class VpnViewModel extends ChangeNotifier {
       final finalists = <({VpnServer server, double utility, int speed, bool qualified})>[];
       autoPlan = '${_selectionTarget == null && !_requiresSpeed ? '' : 'Цель скорости: ${(targetBytesPerSecond * 8 / 1000000).toStringAsFixed(1)} Мбит/с · '}${deep ? 'Глубокий' : 'Быстрый'} подбор · план: ${ordered.map((s) => s.protocol).join(' → ')}';
       autoAttemptReports.add(autoPlan);
-      final searchClock = overallClock;
-      final budget = Duration(seconds: deep ? 240 : 120);
+      // Give all eight tunnel attempts their own time after proxy screening.
+      final searchClock = deep ? (Stopwatch()..start()) : overallClock;
+      final budget = Duration(seconds: deep ? 640 : 120);
       final protocolFailures = <String, int>{};
       var attempt = 0;
       for (final server in ordered) {
         if (cancelled()) return;
-        if (searchClock.elapsed >= budget || (deep && finalists.where((candidate) => !_requiresSpeed || candidate.qualified).length >= 2)) break;
+        if (searchClock.elapsed >= budget) {
+          autoAttemptReports.add('Лимит времени этапа VPN: проверено $attempt/${ordered.length}');
+          break;
+        }
+        if (deep && finalists.where((candidate) => !_requiresSpeed || candidate.qualified).length >= 2) break;
         final failureGroup = '${server.source}|${server.protocol}';
-        if ((protocolFailures[failureGroup] ?? 0) >= 2) {
+        if (!deep && (protocolFailures[failureGroup] ?? 0) >= 2) {
           autoAttemptReports.add('${server.protocol} (${server.source}): пропуск после двух неподтверждённых попыток в этом подборе');
           continue;
         }
