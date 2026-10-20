@@ -2,6 +2,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:quiet_vpn/core/speed_policy.dart';
 
 void main() {
+  test('fresh LTE baseline target is not raised above the displayed target', () {
+    expect(SpeedPolicy.networkTarget(412500), 412500);
+    expect(SpeedPolicy.networkTarget(2272500), 2272500);
+    expect(SpeedPolicy.networkTarget(null), 625000);
+  });
   test('desktop target has a minimum and scales with a faster baseline', () {
     expect(SpeedPolicy.desktopTarget(null), 625000);
     expect(SpeedPolicy.desktopTarget(100000), 625000);

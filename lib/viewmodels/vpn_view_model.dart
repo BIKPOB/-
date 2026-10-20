@@ -136,7 +136,7 @@ class VpnViewModel extends ChangeNotifier {
   }
   bool get _desktop => engine is DesktopCapabilities;
   bool get _requiresSpeed => _desktop || engine is CandidateHost;
-  int get targetBytesPerSecond => _requiresSpeed ? SpeedPolicy.desktopTarget(_selectionTarget) : _selectionTarget ?? 131072;
+  int get targetBytesPerSecond => _requiresSpeed ? SpeedPolicy.networkTarget(_selectionTarget) : _selectionTarget ?? 131072;
   void _scheduleBaseline({bool immediate = false, bool forceAnalysis = false}) {
     _baselineTimer?.cancel();
     if (_disposed || !ready || (!Platform.isWindows && !_foreground)) return;
@@ -220,11 +220,13 @@ class VpnViewModel extends ChangeNotifier {
   }
   final _searchVisited = <String>{};
   DateTime? _searchDeadline;
+  PublicCatalogResult? _searchCatalog;
   bool _roundCanContinue = false;
   Future<void> autoConnect({bool deep = false}) async {
     if (!ready || busy || autoSelecting || _nativeNeedsStop || _stopping) return;
     autoSelecting = true;
     _searchVisited.clear();
+    _searchCatalog = null;
     _searchDeadline = DateTime.now().add(Duration(minutes:deep ? 12 : 4));
     final reports = <String>[];
     final rounds = deep ? 4 : 2;
@@ -250,6 +252,7 @@ class VpnViewModel extends ChangeNotifier {
       autoAttemptReports..clear()..addAll(reports);
       try { await store.saveAttempts('${DateTime.now().toIso8601String()}\n${reports.join('\n\n')}'); } catch (_) { }
       _searchDeadline = null;
+      _searchCatalog = null;
       _searchVisited.clear();
       autoSelecting = false;
       if (!_disposed) { _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate:true); _notify(); }
@@ -304,7 +307,7 @@ class VpnViewModel extends ChangeNotifier {
         autoStatus=context.vpnPresent ? 'Прямая проверка отложена: обнаружен другой VPN или внешний маршрут через виртуальный адаптер. Отключите его перед подбором.' : 'Подбор остановлен: базовая сеть неоднозначна';
         return;
       }
-      final catalog = await _catalogLoader();
+      final catalog = _searchCatalog ??= await _catalogLoader();
       if (cancelled()) return;
       final pool = [..._imports, ...catalog.servers].where((s) =>
         !_searchVisited.contains(ConnectionStrategy.profileKey(s)) &&
@@ -442,7 +445,8 @@ class VpnViewModel extends ChangeNotifier {
         }
         final usable=findings.where((f)=>f.usable).toList();
         ordered=ConnectionStrategy.tunnelQueue(
-          usable.map((f)=>f.server).toList(), mixed, deep:deep, priority:priority);
+          usable.map((f)=>f.server).toList(), mixed, deep:deep, priority:priority,
+          screened: findings.where((f)=>!f.usable).map((f)=>ConnectionStrategy.profileKey(f.server)).toSet());
         autoAttemptReports.add('Прокси: в выборке ${proxyPool.length}, результатов ${findings.length}, '
           'подтверждено ${usable.length}. Очередь VPN: ${ordered.length}/${deep ? 8 : 6}; '
           'неподтверждённые кандидаты требуют проверки туннеля.');

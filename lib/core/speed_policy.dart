@@ -6,6 +6,8 @@ class SpeedPolicy {
   static const sampleMinimumMs = 1500;
   static int desktopTarget(int? baselineTarget) =>
     baselineTarget != null && baselineTarget > desktopMinimum ? baselineTarget : desktopMinimum;
+  static int networkTarget(int? baselineTarget) =>
+    baselineTarget != null && baselineTarget > 0 ? baselineTarget : desktopMinimum;
   static bool stableSamples(List<int> samples, int target) {
     if (samples.length < 3 || samples.any((s) => s < target)) return false;
     final sorted = [...samples]..sort();

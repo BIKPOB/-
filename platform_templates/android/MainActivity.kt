@@ -44,7 +44,7 @@ class MainActivity : FlutterActivity() {
                             else -> runOnUiThread { result.notImplemented() }
                         }
                     } catch (e: Exception) {
-                        runOnUiThread { result.error("CANDIDATE", "Проверка кандидатов: ${e.javaClass.simpleName}", null) }
+                        runOnUiThread { result.error("CANDIDATE_${e.javaClass.simpleName}", "Проверка кандидатов: ${e.javaClass.simpleName}", null) }
                     }
                 }
             }

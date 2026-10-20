@@ -11,10 +11,12 @@ class ConnectionStrategy {
   /// Fill the deep queue even when screening found zero or one usable proxy.
   static List<VpnServer> tunnelQueue(List<VpnServer> verified,
       List<VpnServer> ranked, {required bool deep,
-      required int Function(VpnServer) priority}) {
+      required int Function(VpnServer) priority, Set<String> screened = const {}}) {
     final seen = <String>{};
     final fallback = select(ranked, limit: ranked.length, priority: priority);
-    return [...verified, ...fallback]
+    return [...verified,
+        ...fallback.where((s) => !screened.contains(profileKey(s))),
+        ...fallback.where((s) => screened.contains(profileKey(s)))]
         .where((s) => seen.add(profileKey(s)))
         .take(deep ? 8 : 6).toList();
   }

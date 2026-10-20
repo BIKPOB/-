@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'package:flutter/services.dart';
 import '../platform/candidate_host.dart';
 import 'models.dart';
 import 'speed_policy.dart';
@@ -128,7 +129,7 @@ class CandidateLab {
           await _stop();
           if(e is TimeoutException) throw StateError('Проверочный Xray не ответил вовремя; запуск VPN отменён');
           if(servers.length>1) {for(final s in servers) {if(live()) await group([s]);}}
-          else if(live()) {record(CandidateResult(servers.single,null,[], 'Проверочный Xray не запущен: ${e.runtimeType}'));}
+          else if(live()) {record(CandidateResult(servers.single,null,[], 'Проверочный Xray не запущен: ${e is PlatformException ? e.code : e.runtimeType}'));}
           return;
         }
         try {

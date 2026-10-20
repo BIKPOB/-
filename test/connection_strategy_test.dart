@@ -5,6 +5,15 @@ import 'package:quiet_vpn/core/xray_failure.dart';
 import 'package:quiet_vpn/data/public_catalog.dart';
 
 void main() {
+  test('untried candidates precede failed proxy screens without discarding fallback', () {
+    final pool = PublicCatalog.parse([for (var i = 0; i < 10; i++)
+      'vless://12345678-1234-1234-1234-123456789abc@node$i.example:443?security=tls'].join('\n')).servers;
+    final queue = ConnectionStrategy.tunnelQueue([], pool, deep: true,
+      priority: (_) => 0, screened: pool.take(6).map(ConnectionStrategy.profileKey).toSet());
+    expect(queue.take(4).map((s) => s.host), pool.skip(6).map((s) => s.host));
+    expect(queue.length, 8);
+    expect(queue.map(ConnectionStrategy.profileKey).toSet().length, 8);
+  });
   test('proven alternative wins; protected candidates get two exploration slots', () {
     final servers = PublicCatalog.parse('ss://aes-128-gcm:secret@a.example:443\n'
       'vless://12345678-1234-1234-1234-123456789abc@b.example:443?security=tls\n'
