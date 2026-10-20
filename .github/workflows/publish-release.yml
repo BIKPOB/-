@@ -1,8 +1,5 @@
 name: Publish verified desktop and Android release
 on:
-  push:
-    branches: [main]
-    paths: ['.github/workflows/publish-release.yml']
   workflow_run:
     workflows: ['Build Android APK', 'Build Windows installer']
     types: [completed]
@@ -21,11 +18,15 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      BUILD_RUN: ${{ github.event.workflow_run.id || '38437529917' }}
+      BUILD_RUN: ${{ github.event.workflow_run.id || '' }}
     steps:
       - name: Require successful Windows and Android builds from the same source
         id: builds
         run: |
+          if [ -z "$BUILD_RUN" ]; then
+            BUILD_RUN=$(gh run list --workflow verify.yml --branch main --event push --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+            test -n "$BUILD_RUN" && test "$BUILD_RUN" != null
+          fi
           gh api "repos/$GH_REPO/actions/runs/$BUILD_RUN" > run.json
           SOURCE_SHA=$(python3 -c "import json;print(json.load(open('run.json'))['head_sha'])")
           gh api "repos/$GH_REPO/actions/runs?head_sha=$SOURCE_SHA&per_page=100" > runs.json
@@ -118,3 +119,4 @@ jobs:
           else
             gh release create "$RELEASE_TAG" release/* --target "$SOURCE_SHA" --title "Quiet VPN $RELEASE_TAG — Android и Windows" --notes-file notes.md
           fi
+
