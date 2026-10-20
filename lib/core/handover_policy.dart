@@ -30,6 +30,12 @@ class HandoverPolicy {
       !now.isBefore(measuredAt) && now.difference(measuredAt) < const Duration(minutes: 2) &&
       speed >= target && speed >= current * 1.5;
   }
+  bool canRecover(String profile, DateTime measuredAt, DateTime now) {
+    _switches.removeWhere((t) => now.difference(t) >= const Duration(hours: 1));
+    return eligible(profile, now) && _switches.length < 2 &&
+      (_lastSwitch == null || now.difference(_lastSwitch!) >= const Duration(seconds: 30)) &&
+      !now.isBefore(measuredAt) && now.difference(measuredAt) < const Duration(minutes: 10);
+  }
   void beginSwitch(DateTime now) {
     _lastSwitch = now; _switches.add(now); _bad = 0; _badSince = null;
   }

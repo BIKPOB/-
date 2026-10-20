@@ -143,6 +143,14 @@ class ReserveEngine extends DesktopSpeedEngine implements ReserveCandidateHost {
   @override Future<void> startReserveCandidates(String configuration) async {}
   @override Future<void> stopCandidates() async {}
 }
+class DelayedRecoveryEngine extends ReserveEngine {
+  final recoveryStarted = Completer<void>();
+  final releaseRecovery = Completer<void>();
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    if (connects == 1) { recoveryStarted.complete(); await releaseRecovery.future; }
+    await super.connect(server, credentials);
+  }
+}
 class ReserveLabFixture extends CandidateLab {
   ReserveLabFixture(this.engine,{this.gate}):super(ReserveHostAdapter(engine));
   final ReserveEngine engine;
@@ -558,6 +566,82 @@ void main() {
       } finally {vm.dispose();await engine.dispose();}
     });
   }
+  for (final event in [ConnectionState.error, ConnectionState.disconnected]) {
+    test('hard drop activates saved reserve while desktop window is hidden: $event', () async {
+      final engine = ReserveEngine();
+      final other = VpnServer.fromJson({...server.toJson(), 'id':'reserve', 'host':'9.9.9.9',
+        'profile':server.profile.replaceAll('8.8.8.8','9.9.9.9')});
+      final lab = ReserveLabFixture(engine);
+      final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(), baselineMonitor: IdleBaselineMonitor(),
+        catalogLoader:() async => PublicCatalogResult([other], false, 0), reserveLabFactory:(_) => lab);
+      try {
+        await vm.initialize(); await vm.connect(null); await Future<void>.delayed(Duration.zero);
+        vm.setReserveEnabled(true); await vm.checkReserve();
+        vm.setForeground(false);
+        engine.controller.add(EngineEvent(event, 'lost transport'));
+        for (var i=0; i<100 && (engine.connects<2 || vm.autoSelecting); i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        expect(engine.connects, 2);
+        expect(engine.chosen.last, '9.9.9.9');
+        expect(vm.connectionVerified, true);
+        expect(vm.reserveStatus, contains('Связь восстановлена'));
+        await vm.disconnect();
+      } finally { vm.dispose(); await engine.dispose(); }
+    });
+  }
+  test('saved reserve is not activated after physical network changes', () async {
+    final engine = ReserveEngine(); var network = 'wifi';
+    final other = VpnServer.fromJson({...server.toJson(), 'id':'reserve', 'host':'9.9.9.9',
+      'profile':server.profile.replaceAll('8.8.8.8','9.9.9.9')});
+    final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(), networkReader:() async => network,
+      baselineMonitor: IdleBaselineMonitor(), catalogLoader:() async => PublicCatalogResult([other], false, 0),
+      reserveLabFactory:(_) => ReserveLabFixture(engine));
+    try {
+      await vm.initialize(); await vm.connect(null); await Future<void>.delayed(Duration.zero);
+      vm.setReserveEnabled(true); await vm.checkReserve(); network = 'mobile';
+      engine.controller.add(const EngineEvent(ConnectionState.error, 'lost'));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(engine.connects, 1); expect(vm.connectionVerified, false);
+      expect(vm.reserveStatus, contains('Сеть изменилась'));
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+  test('manual disconnect during reserve activation stops the late connection', () async {
+    final engine = DelayedRecoveryEngine();
+    final other = VpnServer.fromJson({...server.toJson(), 'id':'reserve', 'host':'9.9.9.9',
+      'profile':server.profile.replaceAll('8.8.8.8','9.9.9.9')});
+    final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(), baselineMonitor: IdleBaselineMonitor(),
+      catalogLoader:() async => PublicCatalogResult([other], false, 0),
+      reserveLabFactory:(_) => ReserveLabFixture(engine));
+    try {
+      await vm.initialize(); await vm.connect(null); await Future<void>.delayed(Duration.zero);
+      vm.setReserveEnabled(true); await vm.checkReserve();
+      engine.controller.add(const EngineEvent(ConnectionState.error, 'lost'));
+      await engine.recoveryStarted.future.timeout(const Duration(seconds: 2));
+      await vm.disconnect(); engine.releaseRecovery.complete();
+      for (var i=0; i<100 && vm.autoSelecting; i++) { await Future<void>.delayed(const Duration(milliseconds: 10)); }
+      expect(vm.state, ConnectionState.disconnected); expect(vm.connectionVerified, false);
+      expect(engine.connects, 2); expect(engine.disconnects, 2);
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+  test('slow reserve after hard drop is stopped without reconnect loop', () async {
+    final engine = ReserveEngine(rejectReserve: true);
+    final other = VpnServer.fromJson({...server.toJson(), 'id':'reserve', 'host':'9.9.9.9',
+      'profile':server.profile.replaceAll('8.8.8.8','9.9.9.9')});
+    final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(), baselineMonitor: IdleBaselineMonitor(),
+      catalogLoader:() async => PublicCatalogResult([other], false, 0),
+      reserveLabFactory:(_) => ReserveLabFixture(engine));
+    try {
+      await vm.initialize(); await vm.connect(null); await Future<void>.delayed(Duration.zero);
+      vm.setReserveEnabled(true); await vm.checkReserve();
+      engine.controller.add(const EngineEvent(ConnectionState.error, 'lost'));
+      for (var i=0; i<100 && (engine.connects<2 || vm.autoSelecting); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(engine.connects, 2); expect(vm.canDisconnect, false);
+      expect(vm.connectionVerified, false); expect(vm.reserveStatus, contains('Резерв не подтвердился'));
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   test('manual disconnect during reserve search cannot reconnect',() async {
     final engine=ReserveEngine(),gate=Completer<void>();
     final other=VpnServer.fromJson({...server.toJson(),'id':'reserve','host':'9.9.9.9',

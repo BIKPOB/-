@@ -1,6 +1,17 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quiet_vpn/core/handover_policy.dart';
 void main() {
+  test('hard drop uses recent reserve without waiting for degradation, bounded retries', () {
+    final p = HandoverPolicy(), now = DateTime.utc(2026, 10, 20);
+    expect(p.canRecover('r', now.subtract(const Duration(minutes: 9)), now), true);
+    expect(p.canRecover('r', now.subtract(const Duration(minutes: 10)), now), false);
+    expect(p.canRecover('r', now.add(const Duration(seconds: 1)), now), false);
+    p.beginSwitch(now);
+    expect(p.canRecover('r', now, now.add(const Duration(seconds: 29))), false);
+    expect(p.canRecover('r', now, now.add(const Duration(seconds: 30))), true);
+    p.beginSwitch(now.add(const Duration(seconds: 30)));
+    expect(p.canRecover('r', now, now.add(const Duration(minutes: 1))), false);
+  });
   test('isolated failures, stale reserves, small gains and cooldown cannot switch', () {
     final p=HandoverPolicy(); final start=DateTime.utc(2026,10,18);
     bool allowed(DateTime now,{int speed=1000,DateTime? measured}) => p.canSwitch(

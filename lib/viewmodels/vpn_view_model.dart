@@ -632,6 +632,7 @@ class VpnViewModel extends ChangeNotifier {
   Timer? _reserveTimer;
   CandidateLab? _reserveLab;
   bool _reserveBusy = false;
+  bool get _reserveAllowed => _foreground || _desktop;
   int _reserveEpoch = 0, _reserveCursor = 0;
   CandidateResult? _reserve;
   DateTime? _reserveTime, _reserveAttempt;
@@ -639,33 +640,33 @@ class VpnViewModel extends ChangeNotifier {
   void setReserveEnabled(bool value) {
     reserveEnabled = value;
     _cancelReserve();
-    reserveStatus = value ? 'Ожидание активного VPN; Android: проверка пока приложение открыто' : 'Подготовка резерва выключена';
+    reserveStatus = value ? 'Подготовка после подключения; Android: пока приложение открыто' : 'Подготовка резерва выключена';
     _notify();
   }
   void _cancelReserve() {
     _handoverPolicy.resetEvidence();
     _reserveEpoch++; _reserveTimer?.cancel(); _reserveTimer=null;
-    _reserve=null; _reserveTime=null; _reserveNetwork=null;
+    _reserve=null; _reserveTime=null; _reserveNetwork=null; _reserveAttempt=null;
     unawaited(_reserveLab?.cancel().catchError((Object _) {}));
   }
   void _scheduleReserve() {
-    if (!reserveEnabled || _disposed || !_foreground || autoSelecting || busy ||
+    if (!reserveEnabled || _disposed || !_reserveAllowed || autoSelecting || busy ||
         _reserveBusy || state != ConnectionState.connected || engine is! ReserveCandidateHost ||
         activeServer?.protocol == 'wireguard') {
       return;
     }
-    _reserveTimer ??= Timer(const Duration(minutes: 2), () {
+    _reserveTimer ??= Timer(_reserveAttempt == null ? const Duration(seconds: 5) : const Duration(minutes: 2), () {
       _reserveTimer=null; unawaited(_watchReserve());
     });
   }
   Future<void> _watchReserve() async {
-    if (_reserveBusy || busy || autoSelecting || _disposed || !reserveEnabled || !_foreground ||
+    if (_reserveBusy || busy || autoSelecting || _disposed || !reserveEnabled || !_reserveAllowed ||
         state != ConnectionState.connected || engine is! ReserveCandidateHost) {
       return;
     }
     _reserveBusy=true;
     final token=_reserveEpoch, session=_connectionEpoch;
-    bool live() => !_disposed && reserveEnabled && _foreground && token==_reserveEpoch &&
+    bool live() => !_disposed && reserveEnabled && _reserveAllowed && token==_reserveEpoch &&
       session==_connectionEpoch && !autoSelecting && !busy && state==ConnectionState.connected;
     try {
       final context=await _network();
@@ -718,7 +719,10 @@ class VpnViewModel extends ChangeNotifier {
       if (!live()) return;
       final candidate=_reserve, time=_reserveTime;
       if (candidate==null || time==null) { reserveStatus='Подходящий резерв не найден; текущий VPN сохранён'; return; }
-      reserveStatus='Резерв проверен: ${(candidate.speed*8/1000000).toStringAsFixed(1)} Мбит/с; переключение только при устойчивом ухудшении';
+      final fresh = _reserveNow().difference(time) < const Duration(minutes: 2);
+      reserveStatus = fresh
+        ? 'Резерв проверен: ${(candidate.speed*8/1000000).toStringAsFixed(1)} Мбит/с; готов к проверке при разрыве'
+        : 'Резерв сохранён; замер устарел. При разрыве потребуется повторное подтверждение соединения';
       if (_handoverPolicy.canSwitch(profile:candidate.server.profile,speed:candidate.speed,current:speed??0,
           target:targetBytesPerSecond,measuredAt:time,now:_reserveNow()) && context.sameConnection(await _network()) && live()) {
         final previous=activeServer;
@@ -879,12 +883,12 @@ class VpnViewModel extends ChangeNotifier {
     if (_disposed || _foreground == visible) return;
     _foreground = visible;
     _scheduleHealthStatus();
-    if (!visible) _cancelReserve();
+    if (!visible && !_desktop) _cancelReserve();
     _baselineTimer?.cancel();
     if (visible) _scheduleBaseline(immediate: true);
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     if (!visible) _networkAnalyzer.cancel();
-    if (!visible && autoSelecting && !requestingNetworkPermission) {
+    if (!visible && !_desktop && autoSelecting && !requestingNetworkPermission) {
       unawaited(cancelAutoSelection(reason: 'Подбор остановлен: приложение ушло в фон'));
     }
     _scheduleTraffic();
@@ -1094,9 +1098,59 @@ class VpnViewModel extends ChangeNotifier {
   void _clearConfirmation() {
     connectionVerified = false; measuredBytesPerSecond = null; connectionStage = null;
   }
+  Future<void> _recoverReserve(CandidateResult candidate, NetworkContext network, int token) async {
+    bool allowed() => !_disposed && reserveEnabled && token == _reserveEpoch && _reserveAllowed;
+    if (!allowed() || _nativeNeedsStop || busy || autoSelecting) return;
+    autoSelecting = true;
+    _handoverPolicy.beginSwitch(_reserveNow());
+    _reserve = null; _reserveTime = null; _reserveAttempt = null;
+    reserveStatus = 'Соединение потеряно. Подключение резерва и повторная проверка интернета';
+    _notify();
+    try {
+      final current = await _network();
+      if (!allowed() || current.ambiguous || current.type == 'offline' || !network.sameConnection(current)) {
+        reserveStatus = 'Сеть изменилась или недоступна; резерв прежней сети не подключён';
+        return;
+      }
+      await importProfile(candidate.server.profile, candidate.server.name,
+        'Резерв · ${candidate.server.source}', updateFilter: false);
+      if (!allowed()) return;
+      await connect(null, automatic: true);
+      final deadline = DateTime.now().add(const Duration(seconds: 60));
+      while (allowed() && (busy || _stopping || state == ConnectionState.connecting) && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+      if (!allowed()) return;
+      if (state == ConnectionState.connected && connectionVerified && network.sameConnection(await _network())) {
+        reconnectAdvice = null;
+        reserveStatus = 'Связь восстановлена через резерв; интернет и скорость подтверждены';
+      } else {
+        _handoverPolicy.failed(candidate.server.profile, _reserveNow());
+        if (_nativeNeedsStop) await disconnect(automatic: true);
+        reserveStatus = 'Резерв не подтвердился. Нужен новый подбор';
+        reconnectAdvice = 'Восстановление не удалось. Запустите подбор другого сервера.';
+      }
+    } catch (_) {
+      if (allowed()) {
+        if (_nativeNeedsStop) await disconnect(automatic: true);
+        reserveStatus = 'Восстановление не удалось; запустите новый подбор';
+      }
+    } finally {
+      if (!allowed() && !_disposed && _nativeNeedsStop && !busy && !_stopping) {
+        await disconnect(automatic: true);
+      }
+      autoSelecting = false;
+      if (!_disposed) _notify();
+    }
+  }
   Future<void> _fail(String reason) async {
     if (_stopping || _disposed) return;
     if (busy) { _pendingFailure = reason; return; }
+    final recovery = !autoSelecting && state == ConnectionState.connected && reserveEnabled &&
+        _reserveAllowed ? _reserve : null;
+    final recoveryNetwork = _reserveNetwork;
+    final recoveryTime = _reserveTime;
+    final recoveryToken = _reserveEpoch;
     if (!autoSelecting && state == ConnectionState.connected) {
       reconnectAdvice = 'Соединение потеряно. Переподключитесь или подберите другой сервер.';
       if (Platform.isAndroid) {
@@ -1114,6 +1168,11 @@ class VpnViewModel extends ChangeNotifier {
       message = reason;
     } catch (_) { message = '$reason Отключение не подтверждено — повторите его.'; }
     finally { _stopping = false; state = ConnectionState.error; _notify(); }
+    if (recovery != null && recoveryNetwork != null && recoveryTime != null && !_nativeNeedsStop &&
+        _handoverPolicy.canRecover(recovery.server.profile, recoveryTime, _reserveNow())) {
+      await _reserveLab?.cancel();
+      await _recoverReserve(recovery, recoveryNetwork, recoveryToken);
+    }
   }
   Future<void> disconnect({bool automatic=false}) async {
     if (!automatic) _cancelReserve();
