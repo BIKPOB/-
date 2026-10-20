@@ -53,6 +53,8 @@ jobs:
         run: dart run tools/windows/config_check.dart "$pwd/xray-source/xray.exe"
       - name: Test proxy lab with pinned Xray
         run: dart run tools/windows/lab_smoke.dart "$pwd/xray-source/xray.exe"
+      - name: Verify explicit site bypass with blocked default proxy
+        run: dart run tools/windows/site_bypass_smoke.dart "$pwd/xray-source/xray.exe"
       - name: Build Windows app
         run: |
           flutter build windows --release
@@ -63,6 +65,8 @@ jobs:
         run: ./tools/windows/smoke.ps1
       - name: Verify reserve route outside active TUN
         run: ./tools/windows/reserve_smoke.ps1
+      - name: Verify direct site bypass under Windows TUN
+        run: ./tools/windows/site_bypass_tun.ps1
       - name: Build installer
         run: |
           $iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue

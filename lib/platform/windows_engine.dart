@@ -14,11 +14,22 @@ import 'candidate_host.dart';
 import 'windows_config.dart';
 import '../core/xray_failure.dart';
 import 'windows_probe.dart';
+import '../core/site_bypass.dart';
 
-class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, ReserveCandidateHost {
+class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, ReserveCandidateHost, SiteBypassHost {
   final _events = StreamController<EngineEvent>.broadcast();
   final _probe = WindowsProbe();
   final _root = File(Platform.resolvedExecutable).parent.path;
+  File? _bypassFile;
+  List<String> _bypassSites = [];
+  @override List<String> get bypassSites => List.unmodifiable(_bypassSites);
+  @override Future<void> saveBypassSites(List<String> sites) async {
+    final normalized = SiteBypass.parse(sites.join('\n'));
+    final file = _bypassFile;
+    if (file == null) throw StateError('Настройки ещё не загружены');
+    await file.writeAsString(jsonEncode(normalized), flush: true);
+    _bypassSites = normalized;
+  }
   Process? _xray;
   bool _active = false, _stopping = false;
   int _epoch = 0, _logBytes = 0;
@@ -75,6 +86,10 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
     await _verifyBundle();
     await _system('check');
     final support = await getApplicationSupportDirectory();
+    _bypassFile = File('${support.path}\\site-bypass.json');
+    if (await _bypassFile!.exists()) {
+      _bypassSites = SiteBypass.parse((jsonDecode(await _bypassFile!.readAsString()) as List).cast<String>().join('\n'));
+    }
     _privateDir = '${support.path}\\tunnel';
     await _system('prepare', path: _privateDir);
     // Stop only our service left by an interrupted previous session.
@@ -160,6 +175,9 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
     await stopCandidates();
     if (_active || _stopping) throw StateError('Сначала отключите VPN');
     final profile = ProfilePolicy.parse(server.profile);
+    if (profile.protocol == 'wireguard' && _bypassSites.isNotEmpty) {
+      throw StateError('Исключения сайтов поддерживают VLESS/Shadowsocks. Выберите такой сервер или очистите список исключений.');
+    }
     await _verifyBundle();
     final token = ++_epoch;
     _protocol = profile.protocol; _active = true; _logBytes = 0; _errors.clear(); _logTail = '';
@@ -176,7 +194,7 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
       } else {
         final addresses = await InternetAddress.lookup(profile.host).timeout(const Duration(seconds: 8));
         if (addresses.isEmpty) throw StateError('DNS сервера недоступен');
-        final config = WindowsConfig.xray(profile.text, addresses.first.address);
+        final config = WindowsConfig.xray(profile.text, addresses.first.address, bypassSites: _bypassSites);
         await _validateConfig(config);
         if (token != _epoch) return;
         final p = await Process.start(_file('xray.exe'), ['run', '-config', 'stdin:'],

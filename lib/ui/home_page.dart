@@ -9,6 +9,8 @@ import '../core/traffic.dart';
 import '../viewmodels/vpn_view_model.dart';
 import 'catalog_page.dart';
 import 'app_routing_page.dart';
+import 'site_bypass_page.dart';
+import '../core/site_bypass.dart';
 import 'latency_indicator.dart';
 
 class HomePage extends StatefulWidget {
@@ -114,10 +116,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
           : () async { if (vm.autoSelecting) { await vm.cancelAutoSelection(); } else { await _deepSearch(); } },
           icon: Icon(vm.autoSelecting ? Icons.stop : Icons.auto_awesome),
           label: Text(vm.autoSelecting ? 'Остановить подбор' : 'ИИ-подбор')),
+        if (vm.engine is SiteBypassHost) OutlinedButton.icon(
+          onPressed: !vm.ready || vm.autoSelecting || vm.busy ? null : () => Navigator.push(context,
+            MaterialPageRoute<void>(builder: (_) => SiteBypassPage(host: vm.engine as SiteBypassHost, vpnActive: vm.canDisconnect))),
+          icon: const Icon(Icons.alt_route), label: const Text('Сайты в обход VPN')),
         if (!Platform.isWindows) OutlinedButton.icon(onPressed: vm.autoSelecting || vm.busy ? null : () =>
           Navigator.push(context, MaterialPageRoute<void>(builder: (_) => AppRoutingPage(vpnActive: vm.canDisconnect))),
           icon: const Icon(Icons.call_split), label: const Text('Приложения в обход VPN')),
-        const Text('Быстрый режим ищет VPN с целевой скоростью. Глубокий сравнивает несколько вариантов. На Windows цель — не ниже 5 Мбит/с, медленный VPN не сохраняется результатом автоподбора. Недавние результаты учитываются для похожих параметров сети. Во время подбора оставьте приложение открытым.'),
+        const Text('Быстрый режим ищет VPN с целевой скоростью. Глубокий сравнивает несколько вариантов. Цель учитывает свежий замер вашей сети; без замера используется 5 Мбит/с, медленный VPN не сохраняется результатом автоподбора. Недавние результаты учитываются для похожих параметров сети. Во время подбора оставьте приложение открытым.'),
         if (Platform.isWindows) const Text('Проверка скорости VPN: до 4 МиБ на замер; глубокий режим делает до трёх замеров на кандидат. Скорость до тестового узла не гарантирует доступность YouTube.'),
         if (vm.reconnectAdvice != null) ...[
           Text(vm.reconnectAdvice!),

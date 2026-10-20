@@ -17,7 +17,7 @@ Future<void> main(List<String> args) async {
     final p = await Process.start(args.single, ['run', '-test', '-config', 'stdin:']);
     final out = p.stdout.drain<void>();
     final err = p.stderr.drain<void>();
-    p.stdin.write(jsonEncode(WindowsConfig.xray(profiles[i], '203.0.113.1')));
+    p.stdin.write(jsonEncode(WindowsConfig.xray(profiles[i], '203.0.113.1', bypassSites: ['example.ru', '192.0.2.25', '2001:db8::1'])));
     await p.stdin.close();
     final code = await p.exitCode;
     await Future.wait([out, err]);

@@ -25,6 +25,7 @@ import '../core/network_baseline.dart';
 import '../core/speed_policy.dart';
 import '../platform/vpn_engine.dart';
 import '../platform/desktop_capabilities.dart';
+import '../core/site_bypass.dart';
 
 class VpnViewModel extends ChangeNotifier {
   VpnViewModel(this.engine, this.store, this.monitor, {
@@ -311,6 +312,7 @@ class VpnViewModel extends ChangeNotifier {
       if (cancelled()) return;
       final pool = [..._imports, ...catalog.servers].where((s) =>
         !_searchVisited.contains(ConnectionStrategy.profileKey(s)) &&
+        !(engine is SiteBypassHost && (engine as SiteBypassHost).bypassSites.isNotEmpty && s.protocol == 'wireguard') &&
         (!_desktop || s.protocol != 'vless' || ConnectionStrategy.protectedVless(s))).toList();
       autoAttemptReports.add('База: ${catalog.status}\n'
         '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}');
@@ -910,6 +912,7 @@ class VpnViewModel extends ChangeNotifier {
         if (token != _backgroundEpoch || autoSelecting || _nativeNeedsStop) return;
         final pool = [..._imports, ...catalog.servers].where((s) =>
         !_searchVisited.contains(ConnectionStrategy.profileKey(s)) &&
+        !(engine is SiteBypassHost && (engine as SiteBypassHost).bypassSites.isNotEmpty && s.protocol == 'wireguard') &&
         (!_desktop || s.protocol != 'vless' || ConnectionStrategy.protectedVless(s))).toList();
       autoAttemptReports.add('База: ${catalog.status}\n'
         '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}');
