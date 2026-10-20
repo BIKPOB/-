@@ -2,6 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+class CandidateStartException implements Exception {
+  const CandidateStartException(this.code);
+  final String code;
+}
+
 /// A bounded proxy-only core. Implementations must never create a TUN here.
 abstract interface class CandidateHost {
   Future<String> resolveCandidate(String host);

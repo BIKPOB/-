@@ -88,7 +88,11 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost {
   @override Future<void> startCandidates(String configuration) async {
     if (_starting || _xrayState != 'DISCONNECTED') throw StateError('VPN уже активен');
     _labConfiguration=configuration;
-    await _lab.invokeMethod<void>('start', {'config':configuration});
+    try {
+      await _lab.invokeMethod<void>('start', {'config':configuration});
+    } on PlatformException catch (e) {
+      throw CandidateStartException(e.code);
+    }
     await CandidatePorts.wait(configuration);
   }
   @override Future<void> stopCandidates() async {
