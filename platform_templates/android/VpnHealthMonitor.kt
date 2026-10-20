@@ -33,7 +33,7 @@ object VpnHealthMonitor {
     private var lastSpeedAt = 0L
     private fun prefs(context: Context) = context.getSharedPreferences("vpn-health", Context.MODE_PRIVATE)
     @Synchronized fun configure(context: Context, active: Boolean, desired: Long) {
-        target = maxOf(625000L, desired)
+        target = if (desired > 0L) desired else 625000L
         if (!active) { stop(context, false); return }
         if (task != null) return
         watchedNetwork = context.getSystemService(ConnectivityManager::class.java).allNetworks.firstOrNull {
