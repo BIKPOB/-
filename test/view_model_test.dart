@@ -272,16 +272,16 @@ void main() {
     final engine = MeasuredEngine();
     final pool = [for (var n = 1; n <= 9; n++) VpnServer.fromJson({...server.toJson(),
       'id': 'node-$n', 'host': '9.9.9.$n', 'profile': server.profile.replaceAll('8.8.8.8', '9.9.9.$n')})];
-    var probes = 0;
+    final probedHosts = <String>{};
     final vm = VpnViewModel(engine, MemoryProfiles(),
       ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
       catalogLoader: () async => PublicCatalogResult(pool, false, 0), networkReader: () async => 'wifi',
       autoMonitor: ServerMonitor(probe: (s) async {
-        probes++; return HealthResult(Reachability.reachable, s.host == '9.9.9.9' ? 1 : 1000);
+        probedHosts.add(s.host); return HealthResult(Reachability.reachable, s.host == '9.9.9.9' ? 1 : 1000);
       }));
     try {
       await vm.initialize(); await vm.autoConnect(deep:true);
-      expect(probes, 10);
+      expect(probedHosts.length, 10);
       expect(engine.chosen.first, '9.9.9.9');
       await vm.disconnect();
     } finally { vm.dispose(); await engine.dispose(); }
