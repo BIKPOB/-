@@ -1,0 +1,58 @@
+name: Reclaim Actions storage
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/reclaim-actions-storage.yml']
+permissions:
+  contents: read
+  actions: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Keep latest verified builds and reclaim old storage
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const repo = context.repo;
+            const keepSha = 'e5e84ce5b9409e2542b04402450f494b89daf596';
+            const keepIds = [39474120479, 39474120487];
+            for (const run_id of keepIds) {
+              const {data: r} = await github.rest.actions.getWorkflowRun({...repo, run_id});
+              if (r.head_sha !== keepSha || r.conclusion !== 'success') throw new Error('Latest builds not verified');
+            }
+            const {data: release} = await github.rest.repos.getReleaseByTag({...repo, tag:'v0.10.10'});
+            if (release.draft || !release.assets.some(a=>a.name.endsWith('.apk')) || !release.assets.some(a=>a.name.endsWith('.exe'))) throw new Error('Published installers missing');
+            const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {...repo, per_page:100});
+            if (runs.length > 500) throw new Error('Unexpected inventory size');
+            const old = runs.filter(r => r.id < Math.min(...keepIds) && r.status === 'completed' && r.head_sha !== keepSha);
+            const oldIds = new Set(old.map(r=>r.id));
+            const artifacts = await github.paginate(github.rest.actions.listArtifactsForRepo, {...repo, per_page:100});
+            const removedArtifacts = artifacts.filter(a=>oldIds.has(a.workflow_run?.id));
+            const bytes = removedArtifacts.reduce((n,a)=>n+a.size_in_bytes,0);
+            core.info('Old runs: '+old.length+'; their artifacts: '+removedArtifacts.length+'; bytes: '+bytes);
+            for (const r of old) {
+              await github.rest.actions.deleteWorkflowRun({...repo, run_id:r.id});
+              await new Promise(resolve=>setTimeout(resolve,1000));
+            }
+            const caches = await github.paginate(github.rest.actions.getActionsCacheList, {...repo, per_page:100});
+            let cacheBytes = 0;
+            for (const c of caches) {
+              await github.rest.actions.deleteActionsCacheById({...repo, cache_id:c.id});
+              cacheBytes += c.size_in_bytes;
+              await new Promise(resolve=>setTimeout(resolve,1000));
+            }
+            for (const run_id of keepIds) {
+              await github.rest.actions.getWorkflowRun({...repo, run_id});
+              const {data: a} = await github.rest.actions.listWorkflowRunArtifacts({...repo, run_id});
+              if (!a.artifacts.some(a=>!a.expired)) throw new Error('Latest build artifacts missing');
+            }
+            const remaining = await github.paginate(github.rest.actions.listArtifactsForRepo, {...repo, per_page:100});
+            if (remaining.some(a=>oldIds.has(a.workflow_run?.id))) throw new Error('Old artifacts remain');
+            const report = {deletedRuns:old.length, deletedArtifacts:removedArtifacts.length,
+              artifactBytes:bytes, deletedCaches:caches.length, cacheBytes,
+              remainingArtifacts:remaining.map(a=>({name:a.name,bytes:a.size_in_bytes,run:a.workflow_run?.id})),
+              keptBuilds:keepIds, release:'v0.10.10'};
+            core.info(JSON.stringify(report));
+            await core.summary.addHeading('Storage cleanup').addCodeBlock(JSON.stringify(report,null,2),'json').write();
