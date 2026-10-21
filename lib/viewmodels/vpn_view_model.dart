@@ -145,7 +145,7 @@ class VpnViewModel extends ChangeNotifier {
       try {
         if (!autoSelecting && !_nativeNeedsStop && !busy) {
           final context = await _network();
-          if (_disposed || autoSelecting || _nativeNeedsStop || busy) return;
+          if (_disposed || (!_desktop && !_foreground) || autoSelecting || _nativeNeedsStop || busy) return;
           networkContext = context;
           if (networkAnalysis?.fresh(context,DateTime.now()) != true) {
             networkAnalysis = null;
@@ -153,7 +153,7 @@ class VpnViewModel extends ChangeNotifier {
           }
           if (baseline?.fresh(context,DateTime.now()) != true) baseline = null;
           if(engine is CandidateHost) await _analyzeNetwork(context,force:forceAnalysis);
-          if (_disposed || autoSelecting || _nativeNeedsStop || busy) return;
+          if (_disposed || (!_desktop && !_foreground) || autoSelecting || _nativeNeedsStop || busy) return;
           await _baselineMonitor.pause(false);
           final result = await _baselineMonitor.tick(context, readNetwork: _network);
           if (_disposed) return;
