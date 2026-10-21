@@ -4,6 +4,7 @@ import android.content.Intent
 import io.flutter.embedding.android.FlutterActivity
 
 class MainActivity : FlutterActivity() {
+    private var currentProbe: CurrentConnectionProbe? = null
     private var browserResult: io.flutter.plugin.common.MethodChannel.Result? = null
     private lateinit var wg: WgBridge
     private val resolverWorker = java.util.concurrent.Executors.newFixedThreadPool(3)
@@ -11,6 +12,39 @@ class MainActivity : FlutterActivity() {
     private val probeWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     override fun configureFlutterEngine(engine: io.flutter.embedding.engine.FlutterEngine) {
         super.configureFlutterEngine(engine)
+        io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/current-connection")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "cancel" -> { currentProbe?.cancel(); result.success(null) }
+                    "share" -> {
+                        try {
+                            val text = call.argument<String>("text")?.take(20000) ?: ""
+                            startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                                type = "text/plain"; putExtra(Intent.EXTRA_TEXT, text)
+                                putExtra(Intent.EXTRA_SUBJECT, "Quiet VPN — текущая сеть")
+                            }, "Отправить отчёт"))
+                            result.success(null)
+                        } catch (_: Exception) { result.error("SHARE", "Не удалось открыть отправку", null) }
+                    }
+                    "run" -> {
+                        if (currentProbe != null) { result.error("BUSY", "Тест уже выполняется", null) }
+                        else {
+                            val probe = CurrentConnectionProbe(applicationContext)
+                            currentProbe = probe
+                            val label = call.argument<String>("label")?.take(80) ?: "Не указано"
+                            Thread {
+                                try {
+                                    val report = probe.run(label)
+                                    runOnUiThread { currentProbe = null; result.success(report) }
+                                } catch (e: Exception) {
+                                    runOnUiThread { currentProbe = null; result.error("PROBE", e.javaClass.simpleName, null) }
+                                }
+                            }.start()
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/candidate-lab")
             .setMethodCallHandler { call, result ->
                 val worker = if (call.method == "resolve") resolverWorker else candidateWorker

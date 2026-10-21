@@ -8,6 +8,7 @@ import '../core/models.dart';
 import '../core/traffic.dart';
 import '../viewmodels/vpn_view_model.dart';
 import 'catalog_page.dart';
+import 'current_connection_page.dart';
 import 'app_routing_page.dart';
 import 'site_bypass_page.dart';
 import '../core/site_bypass.dart';
@@ -20,6 +21,7 @@ class HomePage extends StatefulWidget {
 }
 class _HomePageState extends State<HomePage> with WidgetsBindingObserver, WindowListener {
   bool _closing = false;
+  bool _connectionReportOpen = false;
   @override void onWindowClose() async { await windowManager.minimize(); }
   Future<void> _exit() async {
     if (_closing) return;
@@ -34,7 +36,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
   VpnViewModel get vm => widget.vm;
   @override void initState() { super.initState(); if (vm.engine is DesktopCapabilities) windowManager.addListener(this); WidgetsBinding.instance.addObserver(this); unawaited(vm.initialize()); }
   @override void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (vm.engine is DesktopCapabilities) return;
+    if (vm.engine is DesktopCapabilities || _connectionReportOpen) return;
     // Notification shade and permission dialogs remove focus without hiding the app.
     // Ignore inactive, including the transition back from paused to resumed.
     switch (state) {
@@ -50,6 +52,21 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
   }
   @override void dispose() { WidgetsBinding.instance.removeObserver(this); if (vm.engine is DesktopCapabilities) windowManager.removeListener(this); vm.dispose(); super.dispose(); }
   void _add() => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => CatalogPage(vm)));
+  Future<void> _currentConnection() async {
+    _connectionReportOpen = true;
+    vm.setForeground(false);
+    try {
+      await const MethodChannel('quietvpn/baseline').invokeMethod<void>('pause', true);
+      if (!mounted) return;
+      await Navigator.push<void>(context, MaterialPageRoute(builder: (_) => const CurrentConnectionPage()));
+    } on PlatformException {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Не удалось подготовить тест сети')));
+    } finally {
+      await const MethodChannel('quietvpn/baseline').invokeMethod<void>('pause', false);
+      _connectionReportOpen = false;
+      if (mounted) vm.setForeground(true);
+    }
+  }
   Future<void> _diagnostics() async {
     final native = vm.engine is DesktopCapabilities ? await (vm.engine as DesktopCapabilities).diagnostics()
       : await const MethodChannel('quietvpn/diagnostics').invokeMethod<String>('report') ?? '';
@@ -100,6 +117,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver, Window
       if (Platform.isWindows) IconButton(tooltip: 'Выйти и отключить VPN', onPressed: _exit, icon: const Icon(Icons.exit_to_app)),
       IconButton(tooltip: 'Проверить доступность адресов', onPressed: vm.refreshLatency, icon: const Icon(Icons.refresh)),
       IconButton(tooltip: 'Обучение', onPressed: _learning, icon: const Icon(Icons.psychology_outlined)),
+      if (Platform.isAndroid) IconButton(tooltip: 'Отчёт о текущем соединении', onPressed: vm.busy || vm.autoSelecting || vm.canDisconnect ? null : _currentConnection, icon: const Icon(Icons.network_check)),
       IconButton(tooltip: 'Диагностика', onPressed: _diagnostics, icon: const Icon(Icons.bug_report_outlined)),
     ]), floatingActionButton: FloatingActionButton.extended(onPressed: vm.autoSelecting || vm.busy ? null : _add, icon: const Icon(Icons.add), label: const Text('Добавить сервер')),
     body: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 820), child: ListView(padding: const EdgeInsets.fromLTRB(16,16,16,100), children: [
