@@ -269,7 +269,7 @@ class VpnViewModel extends ChangeNotifier {
               if (!_disposed) {
                 _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate:true); _notify();
               }
-            }).catchError((Object _) {}));
+            }).then<void>((_) {}).catchError((Object _) {}));
             autoStatus = 'За 15 секунд рабочее соединение не подтверждено. Попробуйте снова или используйте глубокий подбор.';
             reports.addAll(autoAttemptReports);
             reports.add(autoStatus!);
