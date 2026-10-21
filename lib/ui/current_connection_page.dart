@@ -27,8 +27,10 @@ class _CurrentConnectionPageState extends State<CurrentConnectionPage> {
     try {
       await _channel.invokeMethod<void>('share', {'text': _report});
     } on PlatformException {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Отправка недоступна. Скопируйте отчёт.')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Отправка недоступна. Скопируйте отчёт.')));
+      }
     }
   }
   @override
