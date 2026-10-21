@@ -34,9 +34,12 @@ class VpnViewModel extends ChangeNotifier {
     Future<String> Function()? networkReader, ServerMonitor? autoMonitor, ServerMonitor? backgroundMonitor,
   }) : _baselineMonitor=baselineMonitor??BaselineMonitor(), _networkAnalyzer=networkAnalyzer??NetworkAnalyzer(), _reserveLabFactory=reserveLabFactory, _reserveNow=reserveClock??DateTime.now,
        _catalogLoader = catalogLoader ?? PublicCatalog().load,
+       _quickCatalogLoader = catalogLoader ?? PublicCatalog().local,
        _networkReader = networkReader, _autoMonitor = autoMonitor ?? ServerMonitor(tcpOnly: true),
        _backgroundMonitor = backgroundMonitor ?? ServerMonitor(tcpOnly: true);
   final Future<PublicCatalogResult> Function() _catalogLoader;
+  final Future<PublicCatalogResult> Function() _quickCatalogLoader;
+  bool _quickDraining = false;
   final Future<String> Function()? _networkReader;
   final VpnEngine engine;
   final ProfileStore store;
@@ -224,11 +227,11 @@ class VpnViewModel extends ChangeNotifier {
   PublicCatalogResult? _searchCatalog;
   bool _roundCanContinue = false;
   Future<void> autoConnect({bool deep = false}) async {
-    if (!ready || busy || autoSelecting || _nativeNeedsStop || _stopping) return;
+    if (!ready || busy || autoSelecting || _nativeNeedsStop || _stopping || _quickDraining) return;
     autoSelecting = true;
     _searchVisited.clear();
     _searchCatalog = null;
-    _searchDeadline = DateTime.now().add(Duration(minutes:deep ? 12 : 4));
+    _searchDeadline = DateTime.now().add(deep ? const Duration(minutes:12) : const Duration(seconds:15));
     final reports = <String>[];
     final rounds = deep ? 4 : 2;
     try {
@@ -237,7 +240,42 @@ class VpnViewModel extends ChangeNotifier {
         _roundCanContinue = false;
         final visited = _searchVisited.length;
         final expectedEpoch = _autoEpoch + 1;
-        await _autoConnectRound(deep:deep);
+        final work = _autoConnectRound(deep:deep);
+        if (deep) {
+          await work;
+        } else {
+          try {
+            await work.timeout(_searchDeadline!.difference(DateTime.now()));
+          } on TimeoutException {
+            _autoEpoch++; _networkAnalyzer.cancel(); _autoMonitor.cancel();
+            _roundCanContinue = false;
+            _connectTimeout?.cancel(); _connectTimeout = null;
+            _quickDraining = true;
+            _stopping = true;
+            _connectionEpoch++; _nativeConnected = false;
+            _clearConfirmation();
+            autoStatus = 'За 15 секунд рабочее соединение не подтверждено. Остановка попытки…';
+            _notify();
+            // Never reuse the engine until the old operation and stop both finish.
+            final stop = engine.disconnect().then((_) {
+              _nativeNeedsStop = false; activeServer = null;
+              state = ConnectionState.disconnected;
+            }).catchError((Object _) {
+              state = ConnectionState.error;
+              message = 'Отключение не подтверждено. Повторите отключение.';
+            });
+            unawaited(Future.wait<void>([work, stop]).whenComplete(() {
+              _quickDraining = false; _stopping = false;
+              if (!_disposed) {
+                _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate:true); _notify();
+              }
+            }).catchError((Object _) {}));
+            autoStatus = 'За 15 секунд рабочее соединение не подтверждено. Попробуйте снова или используйте глубокий подбор.';
+            reports.addAll(autoAttemptReports);
+            reports.add(autoStatus!);
+            break;
+          }
+        }
         reports.add('Раунд $round/$rounds · ${deep ? "глубокий" : "быстрый"} подбор');
         reports.addAll(autoAttemptReports);
         if (_disposed || _autoEpoch != expectedEpoch || !_roundCanContinue ||
@@ -256,7 +294,10 @@ class VpnViewModel extends ChangeNotifier {
       _searchCatalog = null;
       _searchVisited.clear();
       autoSelecting = false;
-      if (!_disposed) { _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate:true); _notify(); }
+      if (!_disposed) {
+        if (!_quickDraining) { _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate:true); }
+        _notify();
+      }
     }
   }
   Future<void> _autoConnectRound({required bool deep}) async {
@@ -275,7 +316,7 @@ class VpnViewModel extends ChangeNotifier {
       if (cancelled()) return;
       final context = await _network();
       networkContext = context;
-      if (engine is CandidateHost && !context.vpnPresent && !context.ambiguous &&
+      if (deep && engine is CandidateHost && !context.vpnPresent && !context.ambiguous &&
           context.type != 'offline' && baseline?.fresh(context, DateTime.now()) != true) {
         autoStatus = 'Оценка скорости вашей сети без VPN'; _notify();
         try {
@@ -293,7 +334,7 @@ class VpnViewModel extends ChangeNotifier {
       if (cancelled()) return;
       _selectionTarget = baseline?.fresh(context, DateTime.now()) == true ? baseline!.target : null;
       await _baselineMonitor.pause(true);
-      if(engine is CandidateHost) {
+      if(deep && engine is CandidateHost) {
         await _analyzeNetwork(context,force:true);
         if(cancelled()) return;
         await _refreshPolicy();
@@ -308,7 +349,7 @@ class VpnViewModel extends ChangeNotifier {
         autoStatus=context.vpnPresent ? 'Прямая проверка отложена: обнаружен другой VPN или внешний маршрут через виртуальный адаптер. Отключите его перед подбором.' : 'Подбор остановлен: базовая сеть неоднозначна';
         return;
       }
-      final catalog = _searchCatalog ??= await _catalogLoader();
+      final catalog = _searchCatalog ??= await (deep ? _catalogLoader() : _quickCatalogLoader());
       if (cancelled()) return;
       final pool = [..._imports, ...catalog.servers].where((s) =>
         !_searchVisited.contains(ConnectionStrategy.profileKey(s)) &&
@@ -374,12 +415,12 @@ class VpnViewModel extends ChangeNotifier {
           if (_backgroundHealth[server.id] case final value?) server.id: value,
       };
       final missing = candidates.where((server) => !latency.containsKey(server.id)).toList();
-      if (engine is! CandidateHost && missing.isNotEmpty) latency.addAll(await _autoMonitor.sample(missing));
+      if (deep && engine is! CandidateHost && missing.isNotEmpty) latency.addAll(await _autoMonitor.sample(missing));
       if (cancelled()) return;
       // Recheck negatives once, including cached negatives, before lowering
       // their scheduling priority. Do not persist this as a failed protocol handshake.
       final unavailable = candidates.where((s) => latency[s.id]?.state == Reachability.unreachable).toList();
-      if (engine is! CandidateHost && unavailable.isNotEmpty) {
+      if (deep && engine is! CandidateHost && unavailable.isNotEmpty) {
         latency.addAll(await _autoMonitor.sample(unavailable));
         if (cancelled()) return;
       }
@@ -400,7 +441,7 @@ class VpnViewModel extends ChangeNotifier {
       final mixed = [for (final tier in [1, 0, -1])
         ...PublicCatalog.diverse(candidates.where((s) => priority(s) == tier).toList())];
       var ordered = ConnectionStrategy.select(mixed, limit: deep ? 8 : 6, priority: priority);
-      if(engine is CandidateHost) {
+      if(deep && engine is CandidateHost) {
         final lab=_candidateLab ??= CandidateLab(engine as CandidateHost);
         final proxyRanked=_transportDiversity(mixed.where((s)=>s.protocol!='wireguard').toList());
         final limit=deep?_policy.deepCandidates:_policy.fastCandidates;
@@ -980,7 +1021,9 @@ class VpnViewModel extends ChangeNotifier {
   Future<void> connect(Credentials? credentials, {bool automatic=false}) async {
     if (!automatic) _cancelReserve();
     final server = selected;
-    if (!ready || busy || _stopping || _nativeNeedsStop || server == null) return;
+    if (!ready || busy || _stopping || _quickDraining || _nativeNeedsStop || server == null) return;
+    final selectionEpoch = _autoEpoch;
+    final selectedAutomatically = autoSelecting;
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     backgroundStatus = null; busy = true; message = null; _localNetworkFailure = false; _notify();
     try {
@@ -996,6 +1039,7 @@ class VpnViewModel extends ChangeNotifier {
       final auth = credentials ?? await store.credentials(server.id);
       if (parsed.needsAuth && auth == null) throw StateError('Укажите логин и пароль профиля');
       if (credentials != null) await store.saveCredentials(server.id, credentials);
+      if (_disposed || _stopping || (selectedAutomatically && selectionEpoch != _autoEpoch)) return;
       _nativeNeedsStop = true; activeServer = server;
       state = ConnectionState.connecting;
       connectionVerified = false; measuredBytesPerSecond = null;
@@ -1010,6 +1054,7 @@ class VpnViewModel extends ChangeNotifier {
       _notify();
       await engine.connect(server, auth);
     } catch (error) {
+      if (selectedAutomatically && selectionEpoch != _autoEpoch) return;
       _localNetworkFailure = error is PlatformException && error.code == 'BASE_NETWORK';
       await _fail(error is StateError ? error.message.toString()
         : error is PlatformException ? (error.message ?? 'Не удалось запустить VPN')
@@ -1018,7 +1063,7 @@ class VpnViewModel extends ChangeNotifier {
       busy = false;
       final failure = _pendingFailure;
       _pendingFailure = null;
-      if (failure != null) await _fail(failure);
+      if (failure != null && (!selectedAutomatically || selectionEpoch == _autoEpoch)) await _fail(failure);
       _notify();
     }
   }

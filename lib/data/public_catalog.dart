@@ -105,6 +105,27 @@ class PublicCatalog {
       _recent = result; _loadedAt = DateTime.now(); return result;
     }).whenComplete(() { _pendingLoad = null; });
   }
+  /// Local snapshots only: quick connect must not wait for subscription servers.
+  Future<PublicCatalogResult> local() async {
+    if (_recent != null) return _recent!;
+    final result = <VpnServer>[];
+    for (final name in ['igareck RU Mobile-150', 'igareck RU VLESS', 'igareck RU Shadowsocks',
+      '0xRadikal/Free-v2ray-Configs verified', source, 'NiREvil/vless']) {
+      try {
+        final snapshots = Platform.isWindows ? await WindowsCatalogCache.read(name)
+          : await _cache.invokeListMethod<dynamic>('read', {'source': name}) ?? [];
+        for (final snapshot in snapshots) {
+          try { result.addAll(parse(snapshot['text'] as String, sourceName: name).servers); break; }
+          catch (_) { }
+        }
+      } catch (_) { }
+    }
+    for (final asset in ['assets/public-proxies.txt', 'assets/public-wireguard.txt']) {
+      try { result.addAll(parse(await rootBundle.loadString(asset), bundled: true, sourceName: asset).servers); }
+      catch (_) { }
+    }
+    return PublicCatalogResult(diverse(result), true, 0, status: 'Локальные снимки и встроенная база; без ожидания загрузки');
+  }
   Future<PublicCatalogResult> _refresh() async {
     final parts = await Future.wait([
       _loadSource('https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt',

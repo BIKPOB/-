@@ -172,21 +172,25 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
   }
 
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    final token = ++_epoch;
     await stopCandidates();
+    if (token != _epoch) return;
     if (_active || _stopping) throw StateError('Сначала отключите VPN');
     final profile = ProfilePolicy.parse(server.profile);
     if (profile.protocol == 'wireguard' && _bypassSites.isNotEmpty) {
       throw StateError('Исключения сайтов поддерживают VLESS/Shadowsocks. Выберите такой сервер или очистите список исключений.');
     }
     await _verifyBundle();
-    final token = ++_epoch;
+    if (token != _epoch) return;
     _protocol = profile.protocol; _active = true; _logBytes = 0; _errors.clear(); _logTail = '';
     _emit(ConnectionState.connecting, 'Windows: запуск ${profile.protocol}');
     try {
       if (profile.protocol == 'wireguard') {
         final file = File('$_privateDir\\QuietVPN-AWG.conf');
         await file.writeAsString(profile.text, flush: true);
+        if (token != _epoch) return;
         final result = await _run(_file('amneziawg.exe'), ['/installtunnelservice', file.path]);
+        if (token != _epoch) { await _stopAwg(); return; }
         if (result.exitCode != 0) throw StateError('Не удалось запустить службу WireGuard (${result.exitCode})');
         final systemRoot = Platform.environment['SystemRoot'] ?? r'C:\Windows';
         final demand = await _run('$systemRoot\\System32\\sc.exe', ['config', r'AmneziaWGTunnel$QuietVPN-AWG', 'start=', 'demand']);
@@ -199,6 +203,7 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
         if (token != _epoch) return;
         final p = await Process.start(_file('xray.exe'), ['run', '-config', 'stdin:'],
           workingDirectory: '$_root\\engines', runInShell: false);
+        if (token != _epoch) { p.kill(); await p.exitCode; return; }
         _xray = p;
         p.stdout.listen(_capture);
         p.stderr.listen(_capture);

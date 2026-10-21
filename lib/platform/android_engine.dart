@@ -102,9 +102,12 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost {
     _labConfiguration=null;
   }
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    final token = ++_epoch;
     await stopCandidates();
-    _epoch++; _verified = false; _counters = null; _active = server.protocol; _starting = true;
+    if (token != _epoch || _stopping) return;
+    _verified = false; _counters = null; _active = server.protocol; _starting = true;
     await Permission.notification.request();
+    if (token != _epoch || _stopping) return;
     if (_active == 'wireguard') {
       await _wg.invokeMethod<void>('start', {'profile':server.profile}); return;
     }
@@ -113,13 +116,16 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost {
     final logPath = await _stage.invokeMethod<String>('prepareDiagnostics');
     _emit(ConnectionState.connecting, 'Разрешение адреса VPN-сервера до запуска туннеля');
     final endpoint = await _stage.invokeMethod<String>('resolveEndpoint', {'host': server.host, 'port': server.port}).timeout(const Duration(seconds: 15));
+    if (token != _epoch || _stopping) return;
     if (endpoint == null) throw StateError('DNS: не удалось разрешить адрес VPN-сервера');
     final config = ProxyProfile.parse(server.profile).configurationWithDiagnostics(errorLogPath: logPath, endpointAddress: endpoint);
     if (await _xray.invokeMethod<bool>('requestPermission') != true) throw StateError('Разрешение VPN отклонено');
+    if (token != _epoch || _stopping) return;
     _xrayState = 'CONNECTING';
     _emit(ConnectionState.connecting, 'Запуск ${server.protocol.toUpperCase()}');
     await _xray.invokeMethod<void>('startV2Ray', {'remark':'Quiet VPN', 'config':config,
       'blocked_apps':bypass, 'bypass_subnets':null, 'proxy_only':false, 'notificationDisconnectButtonName':'Отключить'});
+    if (token != _epoch) await _xray.invokeMethod<void>('stopV2Ray');
   }
   @override Future<void> disconnect() async {
     _stopping = true; _starting = false; _epoch++; _verified = false;

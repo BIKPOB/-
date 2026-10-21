@@ -207,7 +207,7 @@ class BaseNetworkErrorEngine extends ControlledEngine {
   }
 }
 void main() {
-  test('failed preflight is retried but still permits a real tunnel attempt', () async {
+  test('quick selection skips TCP preflight and attempts the real tunnel', () async {
     final engine = FailedEngine();
     var probes = 0;
     final vm = VpnViewModel(engine, MemoryProfiles(),
@@ -219,9 +219,9 @@ void main() {
       }));
     try {
       await vm.initialize(); await vm.autoConnect();
-      expect(probes, 2);
+      expect(probes, 0);
       expect(engine.connects, 1);
-      expect(vm.autoAttemptReports.join('\n'), contains('оставлены в резерве'));
+      expect(vm.autoAttemptReports.join('\n'), isNot(contains('TCP:')));
     } finally { vm.dispose(); await engine.dispose(); }
   });
 
@@ -245,6 +245,29 @@ void main() {
     } finally { vm.dispose(); await engine.dispose(); }
   });
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets('quick deadline returns after 15 seconds and rejects late catalog completion', (tester) async {
+    final engine = ControlledEngine();
+    final catalog = Completer<PublicCatalogResult>();
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () => catalog.future, networkReader: () async => 'wifi');
+    await vm.initialize();
+    var done = false;
+    final search = vm.autoConnect().then((_) { done = true; });
+    await tester.pump();
+    await tester.pump(const Duration(seconds:16));
+    await tester.pump();
+    expect(done, true);
+    expect(vm.autoStatus, contains('15 секунд'));
+    expect(engine.connects, 0);
+    catalog.complete(const PublicCatalogResult([server], false, 0));
+    await tester.pump();
+    await tester.pump();
+    expect(engine.connects, 0);
+    await search;
+    vm.dispose(); await engine.dispose();
+  });
+
   test('preflight considers a good endpoint beyond the old eight-profile cutoff', () async {
     final engine = MeasuredEngine();
     final pool = [for (var n = 1; n <= 9; n++) VpnServer.fromJson({...server.toJson(),
@@ -257,7 +280,7 @@ void main() {
         probes++; return HealthResult(Reachability.reachable, s.host == '9.9.9.9' ? 1 : 1000);
       }));
     try {
-      await vm.initialize(); await vm.autoConnect();
+      await vm.initialize(); await vm.autoConnect(deep:true);
       expect(probes, 10);
       expect(engine.chosen.first, '9.9.9.9');
       await vm.disconnect();
