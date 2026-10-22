@@ -521,11 +521,11 @@ void main() {
     await tester.pump();
     final search=vm.autoConnect();await tester.pump();
     expect(vm.autoSelecting,true);
-    expect(find.text('Сервер выбирается автоматически из публичных баз'),findsOneWidget);
+    expect(find.text('Стоп'),findsOneWidget);
     expect(find.text('Выберите сервер'),findsNothing);
     expect(find.text('Автоподбор или свой сервер'),findsNothing);
     expect(find.byType(LinearProgressIndicator),findsOneWidget);
-    expect(tester.widget<FloatingActionButton>(find.byType(FloatingActionButton)).onPressed,isNull);
+    expect(find.byType(FloatingActionButton),findsNothing);
     await vm.cancelAutoSelection();
     catalog.complete(const PublicCatalogResult([],false,0));
     await tester.pump();await search;

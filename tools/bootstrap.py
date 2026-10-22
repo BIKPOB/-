@@ -25,6 +25,11 @@ if 'android' in args.platforms:
     template = ROOT/'platform_templates/android'
     target = ROOT/'android/app/src/main'
     shutil.copyfile(template/'AndroidManifest.xml', target/'AndroidManifest.xml')
+    shutil.copytree(template/'res', target/'res', dirs_exist_ok=True)
+    for density in ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']:
+        icon_dir = target/'res'/('mipmap-' + density)
+        icon_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT/'assets/design/app_icon.png', icon_dir/'ic_launcher.png')
     kotlin = target/'kotlin/app/quietvpn/quiet_vpn'
     kotlin.mkdir(parents=True, exist_ok=True)
     for source in template.glob('*.kt'):
@@ -62,6 +67,7 @@ if 'android' in args.platforms:
     root_build.write_text(text)
 # Set the UAC level through the linker so its generated manifest agrees.
 if 'windows' in args.platforms:
+    shutil.copyfile(ROOT/'assets/design/app_icon.ico', ROOT/'windows/runner/resources/app_icon.ico')
     runner_cmake = ROOT/'windows/runner/CMakeLists.txt'
     text = runner_cmake.read_text()
     text += "\ntarget_link_options(${BINARY_NAME} PRIVATE \"/MANIFESTUAC:level='requireAdministrator' uiAccess='false'\")\n"

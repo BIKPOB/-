@@ -1,0 +1,17 @@
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent">
+    <ImageView android:id="@+id/widget_image" android:layout_width="match_parent" android:layout_height="match_parent" android:scaleType="fitXY" android:contentDescription="Quiet VPN" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="horizontal">
+        <Button android:id="@+id/widget_open" android:layout_width="0dp" android:layout_weight="60" android:layout_height="match_parent" android:background="@android:color/transparent" android:contentDescription="Открыть Quiet VPN" />
+        <LinearLayout android:layout_width="0dp" android:layout_weight="34" android:layout_height="match_parent" android:orientation="vertical" android:paddingTop="24dp" android:paddingBottom="12dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
+                <Button android:id="@+id/widget_power" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:background="@android:color/transparent" android:contentDescription="Подключить или отключить VPN" />
+                <Button android:id="@+id/widget_search" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:background="@android:color/transparent" android:contentDescription="Выбор сервера" />
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:orientation="horizontal">
+                <Button android:id="@+id/widget_ai" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:background="@android:color/transparent" android:contentDescription="ИИ-поиск" />
+                <Button android:id="@+id/widget_reserve" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:background="@android:color/transparent" android:contentDescription="Настройки резерва" />
+            </LinearLayout>
+        </LinearLayout>
+        <TextView android:layout_width="0dp" android:layout_weight="6" android:layout_height="match_parent" />
+    </LinearLayout>
+</FrameLayout>

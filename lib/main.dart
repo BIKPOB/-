@@ -7,6 +7,7 @@ import 'platform/android_engine.dart';
 import 'platform/windows_engine.dart';
 import 'package:window_manager/window_manager.dart';
 import 'ui/home_page.dart';
+import 'ui/quiet_theme.dart';
 import 'viewmodels/vpn_view_model.dart';
 
 Future<void> main() async {
@@ -20,9 +21,11 @@ Future<void> main() async {
   if (Platform.isWindows) {
     await windowManager.ensureInitialized();
     await windowManager.setPreventClose(true);
+    await windowManager.setSize(const Size(480, 850));
+    await windowManager.center();
   }
   final vm = VpnViewModel(Platform.isWindows ? WindowsEngine() : AndroidEngine(), ProfileStore(), ServerMonitor());
   runApp(MaterialApp(debugShowCheckedModeBanner: false, title: 'Quiet VPN',
-    theme: ThemeData(useMaterial3: true, colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF176B61))),
+    theme: quietTheme,
     home: HomePage(vm)));
 }

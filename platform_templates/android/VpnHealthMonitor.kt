@@ -62,6 +62,7 @@ object VpnHealthMonitor {
     @Synchronized fun reportDrop(context: Context) = warn(context,
         "VPN потерял соединение. Откройте Quiet VPN и переподключитесь или запустите подбор другого сервера.")
     private fun warn(context: Context, text: String) {
+        QuietWidget.connectionWarning(context)
         notice = text
         prefs(context).edit().putString("notice", text).apply()
         try {
@@ -111,6 +112,7 @@ object VpnHealthMonitor {
         } finally { deadline.cancel(false); connection.disconnect(); if (pending === connection) pending = null }
     }
     private fun probeCycle(context: Context, token: Int) {
+        QuietWidget.refresh(context)
         if (token != epoch) return
         val cm = context.getSystemService(ConnectivityManager::class.java)
         val network = watchedNetwork?.takeIf {

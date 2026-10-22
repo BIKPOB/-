@@ -11,6 +11,14 @@ class MainActivity : FlutterActivity() {
     private val probeWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     override fun configureFlutterEngine(engine: io.flutter.embedding.engine.FlutterEngine) {
         super.configureFlutterEngine(engine)
+        io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/widget")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "update" -> { QuietWidget.update(applicationContext, call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()); result.success(null) }
+                    "consumeAction" -> { val action = intent?.getStringExtra("widget_action"); intent?.removeExtra("widget_action"); result.success(action) }
+                    else -> result.notImplemented()
+                }
+            }
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/candidate-lab")
             .setMethodCallHandler { call, result ->
                 val worker = if (call.method == "resolve") resolverWorker else candidateWorker
@@ -182,6 +190,10 @@ class MainActivity : FlutterActivity() {
             override fun onListen(args: Any?, sink: io.flutter.plugin.common.EventChannel.EventSink?) { WgSession.sink = sink; sink?.success(WgSession.state) }
             override fun onCancel(args: Any?) { WgSession.sink = null }
         })
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
     }
     override fun cleanUpFlutterEngine(engine: io.flutter.embedding.engine.FlutterEngine) {
         browserResult?.error("cancelled", "Окно приложения пересоздано. Откройте источник повторно.", null); browserResult = null
