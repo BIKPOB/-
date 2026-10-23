@@ -235,7 +235,7 @@ class _HomePageState extends State<HomePage>
       _session.stop();
       _session.reset();
     }
-    if (Platform.isAndroid)
+    if (Platform.isAndroid) {
       unawaited(
         _widgetChannel
             .invokeMethod<void>('update', {
@@ -247,6 +247,7 @@ class _HomePageState extends State<HomePage>
             })
             .catchError((Object _) {}),
       );
+    }
   }
 
   Future<void> _initialize() async {
