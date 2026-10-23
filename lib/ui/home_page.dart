@@ -585,34 +585,6 @@ class _HomePageState extends State<HomePage>
           const Text(
             'Фоновый анализ без VPN: до 8 МиБ/сутки в лимитной сети, до 32 МиБ в безлимитной. Проверки качества VPN: до 3 МиБ/час. Резерв: до 24/96 МиБ/час соответственно, плюс служебный трафик.',
           ),
-          if (vm.engine is SiteBypassHost)
-            TextButton(
-              onPressed: _working
-                  ? null
-                  : () => Navigator.push(
-                      context,
-                      MaterialPageRoute<void>(
-                        builder: (_) => SiteBypassPage(
-                          host: vm.engine as SiteBypassHost,
-                          vpnActive: vm.canDisconnect,
-                        ),
-                      ),
-                    ),
-              child: const Text('Сайты в обход VPN'),
-            ),
-          if (Platform.isAndroid)
-            TextButton(
-              onPressed: _working
-                  ? null
-                  : () => Navigator.push(
-                      context,
-                      MaterialPageRoute<void>(
-                        builder: (_) =>
-                            AppRoutingPage(vpnActive: vm.canDisconnect),
-                      ),
-                    ),
-              child: const Text('Приложения в обход VPN'),
-            ),
           TextButton(
             onPressed: _diagnostics,
             child: const Text('Диагностика и копирование отчёта'),
@@ -823,6 +795,30 @@ class _HomePageState extends State<HomePage>
       ),
     ],
   );
+  Future<void> _openBypass() async {
+    if (!vm.ready || _working) return;
+    final Widget page;
+    if (vm.engine is SiteBypassHost) {
+      page = SiteBypassPage(host: vm.engine as SiteBypassHost, vpnActive: vm.canDisconnect);
+    } else if (Platform.isAndroid) {
+      page = AppRoutingPage(vpnActive: vm.canDisconnect);
+    } else {
+      return;
+    }
+    await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => page));
+  }
+
+  Widget _bypassButton() {
+    final label = Platform.isWindows ? 'Обход сайтов' : 'Обход приложений';
+    return QuietAction(label: label, color: quietGreen,
+      onTap: vm.ready && !_working && (Platform.isAndroid || vm.engine is SiteBypassHost) ? _openBypass : null,
+      child: Padding(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.alt_route, color: Colors.white, size: 26),
+          const SizedBox(width: 10), Flexible(child: Text(label, style: quietText(24))),
+        ])));
+  }
+
   Widget _mainScreen() => LayoutBuilder(
     builder: (context, bounds) {
       final height = bounds.maxHeight.clamp(780.0, 900.0);
@@ -831,7 +827,7 @@ class _HomePageState extends State<HomePage>
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 470),
             child: SizedBox(
-              height: height,
+              height: height + (_settings ? 120 : 0) + (vm.reconnectAdvice != null ? 48 : 0),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Column(
@@ -905,6 +901,8 @@ class _HomePageState extends State<HomePage>
                     ),
                     SizedBox(height: height * .10),
                     _controls(),
+                    const SizedBox(height: 12),
+                    _bypassButton(),
                     const SizedBox(height: 12),
                     OutlinedButton(
                       onPressed: _information,

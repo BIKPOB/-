@@ -53,6 +53,10 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
     await capture(tester, 'main');
+    final bypass = find.text(Platform.isWindows ? 'Обход сайтов' : 'Обход приложений');
+    expect(bypass, findsOneWidget);
+    expect(tester.getTopLeft(bypass).dy, greaterThan(tester.getBottomLeft(find.text('Выбор сервера')).dy));
+    expect(tester.getTopLeft(find.text('Информация')).dy, greaterThan(tester.getBottomLeft(bypass).dy));
     expect(find.text('Обучение ИИ'), findsNothing);
     await tester.tap(find.byTooltip('Подключить VPN'));
     await tester.pumpAndSettle();

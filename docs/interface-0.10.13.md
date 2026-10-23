@@ -4,7 +4,7 @@ Source: Figma IByPptb32Dorj2KzgOVGKC, page 0:1. SVGs exported directly from orig
 
 Flutter motion: 420 ms ease-out slide/fade for panels, animated settings expansion, state crossfades. Reduced motion uses zero duration for primary transitions. Connection progress is indeterminate because native engines do not publish a reliable percentage. Startup waits for initialization and never holds a fake timer.
 
-Main: stopwatch for the current connected session, data rates, power, AI, server menu, information. Stopwatch excludes trial connections during AI selection and resets after disconnect. Process restarts reset the stopwatch. Full diagnostics and bypass settings remain in Information; learning and quick/deep selection live in AI settings.
+Main: stopwatch for the current connected session, data rates, power, AI, server menu, bypass button, information. The bypass button opens app exclusions on Android and site exclusions on Windows. Stopwatch excludes trial connections during AI selection and resets after disconnect. Process restarts reset the stopwatch. Full diagnostics and bypass settings remain in Information; learning and quick/deep selection live in AI settings.
 
 Android home-screen widget uses a 2:1 composition. Buttons bring the app to the foreground before invoking an action (system VPN permissions and existing foreground-only selection remain respected). Snapshot refreshed at most every five seconds by Flutter, and on native health checks / launcher refresh. Old snapshots are labelled for verification rather than treated as current traffic. Widget is not an independent background VPN controller.
 
