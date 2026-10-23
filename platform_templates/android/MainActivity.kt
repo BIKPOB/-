@@ -6,13 +6,14 @@ import io.flutter.embedding.android.FlutterActivity
 class MainActivity : FlutterActivity() {
     private var browserResult: io.flutter.plugin.common.MethodChannel.Result? = null
     private lateinit var wg: WgBridge
+    private var widgetChannel: io.flutter.plugin.common.MethodChannel? = null
     private val resolverWorker = java.util.concurrent.Executors.newFixedThreadPool(3)
     private val candidateWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val probeWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     override fun configureFlutterEngine(engine: io.flutter.embedding.engine.FlutterEngine) {
         super.configureFlutterEngine(engine)
-        io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/widget")
-            .setMethodCallHandler { call, result ->
+        widgetChannel = io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/widget")
+        widgetChannel?.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "update" -> { QuietWidget.update(applicationContext, call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()); result.success(null) }
                     "consumeAction" -> { val action = intent?.getStringExtra("widget_action"); intent?.removeExtra("widget_action"); result.success(action) }
@@ -194,8 +195,10 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.hasExtra("widget_action")) widgetChannel?.invokeMethod("actionAvailable", null)
     }
     override fun cleanUpFlutterEngine(engine: io.flutter.embedding.engine.FlutterEngine) {
+        widgetChannel?.setMethodCallHandler(null); widgetChannel = null
         browserResult?.error("cancelled", "Окно приложения пересоздано. Откройте источник повторно.", null); browserResult = null
         if (::wg.isInitialized) wg.detach()
         WgSession.sink = null

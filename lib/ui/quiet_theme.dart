@@ -24,16 +24,16 @@ final quietTheme = ThemeData(
 );
 
 extension on TextTheme {
-  TextTheme mapQuietFont() => copyWith(
-    bodyMedium: bodyMedium?.copyWith(
+  TextTheme mapQuietFont() {
+    TextStyle? light(TextStyle? style) => style?.copyWith(
       fontWeight: FontWeight.w300,
-      fontVariations: const [FontVariation('wdth', 87.5)],
-    ),
-    bodyLarge: bodyLarge?.copyWith(
-      fontWeight: FontWeight.w300,
-      fontVariations: const [FontVariation('wdth', 87.5)],
-    ),
-  );
+      fontVariations: const [FontVariation('wdth', 87.5), FontVariation('wght', 300)]);
+    return copyWith(
+      bodySmall: light(bodySmall), bodyMedium: light(bodyMedium), bodyLarge: light(bodyLarge),
+      labelSmall: light(labelSmall), labelMedium: light(labelMedium), labelLarge: light(labelLarge),
+      titleSmall: light(titleSmall), titleMedium: light(titleMedium), titleLarge: light(titleLarge),
+      headlineSmall: light(headlineSmall), headlineMedium: light(headlineMedium), headlineLarge: light(headlineLarge));
+  }
 }
 
 TextStyle quietText(
@@ -66,11 +66,13 @@ class QuietAction extends StatelessWidget {
     required this.child,
     this.onTap,
     this.color,
+    this.radius,
   });
   final String label;
   final Widget child;
   final VoidCallback? onTap;
   final Color? color;
+  final BorderRadius? radius;
   @override
   Widget build(BuildContext context) => Semantics(
     button: true,
@@ -80,7 +82,7 @@ class QuietAction extends StatelessWidget {
       message: label,
       child: Material(
         color: color ?? Colors.transparent,
-        borderRadius: BorderRadius.circular(100),
+        borderRadius: radius ?? BorderRadius.circular(100),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onTap,

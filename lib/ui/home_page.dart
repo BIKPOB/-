@@ -64,6 +64,11 @@ class _HomePageState extends State<HomePage>
     if (vm.engine is DesktopCapabilities) windowManager.addListener(this);
     WidgetsBinding.instance.addObserver(this);
     vm.addListener(_observe);
+    if (Platform.isAndroid) {
+      _widgetChannel.setMethodCallHandler((call) async {
+        if (call.method == 'actionAvailable') await _consumeWidgetAction();
+      });
+    }
     if (Platform.isWindows) trayManager.addListener(this);
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && _session.isRunning) setState(() {});
@@ -95,6 +100,7 @@ class _HomePageState extends State<HomePage>
     if (vm.engine is DesktopCapabilities) windowManager.removeListener(this);
     _clock?.cancel();
     vm.removeListener(_observe);
+    if (Platform.isAndroid) _widgetChannel.setMethodCallHandler(null);
     if (Platform.isWindows) trayManager.removeListener(this);
     vm.dispose();
     super.dispose();
@@ -250,8 +256,8 @@ class _HomePageState extends State<HomePage>
     }
   }
 
-  Future<void> _initialize() async {
-    if (Platform.isWindows) {
+  Future<void> _initializeTray() async {
+    if (Platform.isWindows && vm.engine is DesktopCapabilities) {
       try {
         await trayManager.setIcon('assets/design/app_icon.ico');
         await trayManager.setToolTip('Quiet VPN');
@@ -268,6 +274,10 @@ class _HomePageState extends State<HomePage>
         /* Keep normal window available if the shell rejects the tray icon. */
       }
     }
+  }
+
+  Future<void> _initialize() async {
+    unawaited(_initializeTray());
     await vm.initialize();
     if (!mounted) return;
     setState(() => _initialized = true);
@@ -359,6 +369,7 @@ class _HomePageState extends State<HomePage>
               maxWidth: 660,
               maxHeight: MediaQuery.sizeOf(c).height * .9,
             ),
+            height: color == quietRed ? null : MediaQuery.sizeOf(c).height * .9,
             margin: const EdgeInsets.all(12),
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -714,6 +725,7 @@ class _HomePageState extends State<HomePage>
                                 ? 'Проверить резерв'
                                 : 'ИИ-поиск',
                             color: quietGreen,
+                            radius: const BorderRadius.horizontal(left: Radius.circular(100)),
                             onTap: !vm.ready || vm.busy && !vm.autoSelecting
                                 ? null
                                 : _runAi,
@@ -813,7 +825,7 @@ class _HomePageState extends State<HomePage>
   );
   Widget _mainScreen() => LayoutBuilder(
     builder: (context, bounds) {
-      final height = bounds.maxHeight.clamp(680.0, 900.0);
+      final height = bounds.maxHeight.clamp(780.0, 900.0);
       return SingleChildScrollView(
         child: Center(
           child: ConstrainedBox(
@@ -841,7 +853,7 @@ class _HomePageState extends State<HomePage>
                         ),
                       ],
                     ),
-                    Spacer(flex: 3),
+                    SizedBox(height: height * .307 - 62),
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
@@ -891,7 +903,7 @@ class _HomePageState extends State<HomePage>
                         ],
                       ),
                     ),
-                    Spacer(flex: 2),
+                    SizedBox(height: height * .10),
                     _controls(),
                     const SizedBox(height: 12),
                     OutlinedButton(
@@ -900,7 +912,7 @@ class _HomePageState extends State<HomePage>
                         foregroundColor: Colors.white70,
                         side: const BorderSide(color: quietNavy, width: 2),
                       ),
-                      child: const Text('ⓘ  Информация'),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [quietAsset('info', 14), const SizedBox(width: 6), const Text('Информация')]),
                     ),
                     if (vm.reconnectAdvice != null)
                       TextButton(
@@ -1026,6 +1038,7 @@ class _HomePageState extends State<HomePage>
       return;
     }
     if (!mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
     setState(() => _compact = true);
     await windowManager.setSize(const Size(480, 280));
     await windowManager.setAlignment(Alignment.bottomRight);

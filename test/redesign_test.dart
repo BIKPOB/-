@@ -28,6 +28,8 @@ void main() {
   setUpAll(() async {
     final loader = FontLoader('Bahnschrift')..addFont(rootBundle.load('assets/fonts/Bahnschrift.ttf'));
     await loader.load();
+    final icons = FontLoader('MaterialIcons')..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
+    await icons.load();
   });
   testWidgets('empty power opens error, learning lives inside settings', (
     tester,
@@ -46,7 +48,7 @@ void main() {
       baselineMonitor: IdleBaselineMonitor(),
       networkReader: () async => 'wifi',
     );
-    await tester.pumpWidget(RepaintBoundary(key: previewKey, child: MaterialApp(theme: quietTheme, home: HomePage(vm))));
+    await tester.pumpWidget(RepaintBoundary(key: previewKey, child: MaterialApp(debugShowCheckedModeBanner: false, theme: quietTheme, home: HomePage(vm))));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
@@ -81,7 +83,7 @@ void main() {
       baselineMonitor: IdleBaselineMonitor(),
       networkReader: () async => 'wifi',
     );
-    await tester.pumpWidget(RepaintBoundary(key: previewKey, child: MaterialApp(theme: quietTheme, home: HomePage(vm))));
+    await tester.pumpWidget(RepaintBoundary(key: previewKey, child: MaterialApp(debugShowCheckedModeBanner: false, theme: quietTheme, home: HomePage(vm))));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     expect(find.text('fixture'), findsNothing);

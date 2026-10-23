@@ -51,7 +51,7 @@ class QuietWidget : AppWidgetProvider() {
             paint.shader = LinearGradient(800f, 0f, 0f, 400f, intArrayOf(Color.rgb(1,6,50), Color.rgb(6,130,114)), null, Shader.TileMode.CLAMP)
             canvas.drawRoundRect(0f, 0f, 800f, 400f, 26f, 26f, paint); paint.shader = null
             val type = try { Typeface.createFromAsset(context.assets, "flutter_assets/assets/fonts/Bahnschrift.ttf") } catch (_: Exception) { Typeface.DEFAULT }
-            paint.typeface = Typeface.create(type, 300, false); paint.setFontVariationSettings("'wght' 300, 'wdth' 87.5"); paint.color = Color.WHITE
+            paint.typeface = Typeface.create(type, Typeface.NORMAL); paint.setFontVariationSettings("'wght' 300, 'wdth' 87.5"); paint.color = Color.WHITE
             fun text(value: String, x: Float, y: Float, size: Float) {
                 paint.textSize = size
                 while (paint.measureText(value) > 435 && paint.textSize > 20) paint.textSize -= 1
