@@ -325,6 +325,7 @@ class _HomePageState extends State<HomePage>
       barrierColor: Colors.black38,
       transitionDuration: _motion,
       pageBuilder: (c, animation, secondary) => SafeArea(
+        bottom: false,
         child: Align(
           alignment: Alignment.bottomCenter,
           child: Container(
@@ -333,11 +334,11 @@ class _HomePageState extends State<HomePage>
               maxHeight: MediaQuery.sizeOf(c).height * .9,
             ),
             height: color == quietRed ? null : MediaQuery.sizeOf(c).height * .9,
-            margin: const EdgeInsets.all(12),
-            padding: const EdgeInsets.all(20),
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+            padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.viewPaddingOf(c).bottom),
             decoration: BoxDecoration(
               color: color,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             ),
             child: Material(
               color: Colors.transparent,
@@ -618,219 +619,131 @@ class _HomePageState extends State<HomePage>
     ),
   );
 
-  Widget _dock() {
-    final progress = vm.searchProgress;
-    final now = DateTime.now();
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
-      decoration: BoxDecoration(
-        border: Border.all(color: quietGreen, width: 2),
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
+  // Page 2, 48:1343. Coordinates are the Figma geometry divided by ten.
+  // The decorative frame continues below the viewport; controls stay above
+  // the system navigation inset. Do not scale each icon independently.
+  Widget _dock() => LayoutBuilder(builder: (context, bounds) {
+    final scale = bounds.maxWidth / 376.8;
+    final inset = MediaQuery.viewPaddingOf(context).bottom;
+    final height = (_settings ? 174.0 : 129.8) * scale + inset;
+    return SizedBox(
+      key: const ValueKey('main-dock'),
+      height: height,
+      child: Stack(
+        clipBehavior: Clip.hardEdge,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: AnimatedSize(
-                  duration: _motion,
-                  curve: Curves.easeInOutCubic,
-                  alignment: Alignment.bottomCenter,
-                  child: _settings
-                      ? _aiSettings()
-                      : Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              decoration: BoxDecoration(
-                                color: quietGreen,
-                                borderRadius: BorderRadius.circular(30),
-                              ),
-                              child: Row(
-                                children: [
-                                  Expanded(
-                                    child: QuietAction(
-                                      label: vm.autoSelecting
-                                          ? 'Остановить подбор'
-                                          : vm.canDisconnect
-                                          ? 'Проверить резерв'
-                                          : 'ИИ-поиск',
-                                      onTap:
-                                          !vm.ready ||
-                                              vm.busy && !vm.autoSelecting
-                                          ? null
-                                          : _runAi,
-                                      child: Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 10,
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            quietAsset(
-                                              vm.canDisconnect &&
-                                                      !vm.autoSelecting
-                                                  ? 'reserve'
-                                                  : 'ai',
-                                              20,
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: FittedBox(
-                                                fit: BoxFit.scaleDown,
-                                                alignment: Alignment.centerLeft,
-                                                child: Text(
-                                                  vm.autoSelecting
-                                                      ? 'ИИ поиск…'
-                                                      : vm.canDisconnect
-                                                      ? 'Подобрать резерв'
-                                                      : 'ИИ поиск',
-                                                  style: quietText(18),
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Настройки ИИ-поиска',
-                                    onPressed: () =>
-                                        setState(() => _settings = true),
-                                    icon: quietAsset('settings', 24),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            if (vm.autoSelecting && vm.searching)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: progress.divisions == 0
-                                    ? const LinearProgressIndicator(
-                                        color: Colors.white,
-                                        backgroundColor: quietGreen,
-                                      )
-                                    : DividedProgress(
-                                        divisions: progress.divisions,
-                                        completed: progress.steps(now),
-                                      ),
-                              ),
-                            const SizedBox(height: 8),
-                            Row(
-                              children: [
-                                Expanded(
-                                  flex: 4,
-                                  child: _navButton(
-                                    'Информация',
-                                    'info',
-                                    _information,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  flex: 3,
-                                  child: _navButton(
-                                    'Сервера',
-                                    'search',
-                                    _servers,
-                                    tooltip: 'Выбор сервера',
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  flex: 3,
-                                  child: _navButton(
-                                    'Обход',
-                                    'bypass',
-                                    vm.ready &&
-                                            !_working &&
-                                            (Platform.isAndroid ||
-                                                vm.engine is SiteBypassHost)
-                                        ? _openBypass
-                                        : null,
-                                    tooltip: Platform.isWindows
-                                        ? 'Обход сайтов'
-                                        : 'Обход приложений',
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
+          Positioned(
+            left: 10.5 * scale, right: 10.5 * scale, top: 0,
+            bottom: -200 * scale,
+            child: DecoratedBox(
+              key: const ValueKey('dock-frame'),
+              decoration: BoxDecoration(
+                border: Border.all(color: quietGreen, width: 2 * scale),
+                borderRadius: BorderRadius.circular(23.885 * scale),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 0, right: 0, top: 0,
+            height: (_settings ? 174.0 : 129.8) * scale,
+            child: FittedBox(
+              alignment: Alignment.topCenter,
+              child: SizedBox(
+                width: 376.8, height: _settings ? 174 : 129.8,
+                child: Stack(children: [
+                  if (_settings)
+                    Positioned(left: 26.75, top: 18.8, width: 259.2,
+                      child: _aiSettings())
+                  else ...[
+                    Positioned(left: 26.75, top: 18.787,
+                      width: 230.919, height: 22.958,
+                      child: QuietAction(
+                        label: vm.autoSelecting ? 'Остановить подбор' :
+                          vm.canDisconnect ? 'Проверить резерв' : 'ИИ-поиск',
+                        color: quietGreen,
+                        radius: const BorderRadius.horizontal(left: Radius.circular(23.8)),
+                        onTap: !vm.ready || vm.busy && !vm.autoSelecting ? null : _runAi,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 6.6),
+                          child: Row(children: [
+                            quietAsset(vm.canDisconnect && !vm.autoSelecting ? 'reserve' : 'ai', 16.976),
+                            const SizedBox(width: 3.7),
+                            Expanded(child: Text(vm.autoSelecting ? 'ИИ поиск…' :
+                              vm.canDisconnect ? 'Подобрать резерв' : 'ИИ поиск',
+                              style: quietText(12.8), maxLines: 1)),
+                          ]),
                         ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 64,
-                height: 80,
-                child: QuietAction(
-                  label: vm.autoSelecting
-                      ? 'Остановить подбор'
-                      : vm.canDisconnect
-                      ? 'Отключить VPN'
-                      : 'Подключить VPN',
-                  onTap: !vm.ready || vm.busy && !vm.autoSelecting
-                      ? null
-                      : _power,
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 500),
-                    switchInCurve: Curves.easeIn,
-                    child: _working
-                        ? const SizedBox(
-                            key: ValueKey('connecting'),
-                            width: 64,
-                            height: 64,
-                            child: ConnectingControl(),
-                          )
-                        : SizedBox(
-                            key: ValueKey(vm.canDisconnect),
-                            width: 64,
-                            height: 64,
-                            child: quietAsset(
-                              vm.canDisconnect ? 'power_on' : 'power_off',
-                              64,
-                            ),
-                          ),
+                      ),
+                    ),
+                    Positioned(left: 257.669, top: 18.787,
+                      width: 28.281, height: 22.958,
+                      child: QuietAction(
+                        key: const ValueKey('ai-settings-button'),
+                        label: 'Настройки ИИ-поиска',
+                        radius: const BorderRadius.horizontal(right: Radius.circular(23.8)),
+                        onTap: () => setState(() => _settings = true),
+                        child: quietAsset('settings', 28.281),
+                      ),
+                    ),
+                    Positioned(left: 26.663, top: 50.473, width: 103.963, height: 26.814,
+                      child: _navButton('Информация', 'info', _information, color: quietNavy)),
+                    Positioned(left: 142.984, top: 50.473, width: 68.866, height: 26.814,
+                      child: _navButton('Сервера', 'search', _servers, tooltip: 'Выбор сервера')),
+                    Positioned(left: 224.209, top: 50.473, width: 61.654, height: 26.814,
+                      child: _navButton('Обход', 'bypass',
+                        vm.ready && !_working && (Platform.isAndroid || vm.engine is SiteBypassHost)
+                          ? _openBypass : null,
+                        tooltip: Platform.isWindows ? 'Обход сайтов' : 'Обход приложений')),
+                    if (vm.autoSelecting && vm.searching)
+                      Positioned(left: 26.75, top: 88, width: 259.2,
+                        child: vm.searchProgress.divisions == 0
+                          ? const LinearProgressIndicator(color: Colors.white, backgroundColor: quietGreen)
+                          : DividedProgress(divisions: vm.searchProgress.divisions,
+                              completed: vm.searchProgress.steps(DateTime.now()))),
+                  ],
+                  Positioned(left: 296.979, top: 18.606, width: 56.556, height: 56.556,
+                    child: QuietAction(
+                      key: const ValueKey('power-button'),
+                      label: vm.autoSelecting ? 'Остановить подбор' :
+                        vm.canDisconnect ? 'Отключить VPN' : 'Подключить VPN',
+                      onTap: !vm.ready || vm.busy && !vm.autoSelecting ? null : _power,
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 500),
+                        switchInCurve: Curves.easeIn,
+                        child: _working
+                          ? const SizedBox(key: ValueKey('connecting'), width: 56.556,
+                              height: 56.556, child: ConnectingControl())
+                          : SizedBox(key: ValueKey(vm.canDisconnect), width: 56.556, height: 56.556,
+                              child: quietAsset(vm.canDisconnect ? 'power_on' : 'power_off', 56.556)),
+                      ),
+                    ),
                   ),
-                ),
+                ]),
               ),
-            ],
+            ),
           ),
         ],
       ),
     );
-  }
+  });
 
-  Widget _navButton(
-    String label,
-    String asset,
-    VoidCallback? action, {
-    String? tooltip,
+  Widget _navButton(String label, String asset, VoidCallback? action, {
+    String? tooltip, Color color = quietGreen,
   }) => Container(
     decoration: BoxDecoration(
-      border: Border.all(color: quietGreen, width: 1.5),
-      borderRadius: BorderRadius.circular(24),
+      border: Border.all(color: color, width: 2),
+      borderRadius: BorderRadius.circular(23.885),
     ),
     child: QuietAction(
-      label: tooltip ?? label,
-      onTap: action,
+      label: tooltip ?? label, onTap: action,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              quietAsset(asset, 14),
-              const SizedBox(width: 4),
-              Text(label, style: quietText(14, color: quietGreen)),
-            ],
-          ),
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 4.8),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          SizedBox(width: asset == 'info' ? 2 : asset == 'bypass' ? 6.1 : 14.4,
+            child: quietAsset(asset, 14.4)),
+          SizedBox(width: asset == 'info' ? 7.4 : 2),
+          Flexible(child: Text(label, maxLines: 1, style: quietText(12.8, color: color))),
+        ]),
       ),
     ),
   );
@@ -960,6 +873,7 @@ class _HomePageState extends State<HomePage>
       body: DecoratedBox(
         decoration: const BoxDecoration(gradient: quietGradient),
         child: SafeArea(
+          bottom: false,
           child: AnimatedSwitcher(
             duration: _motion,
             child: !_initialized

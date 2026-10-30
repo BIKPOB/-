@@ -42,6 +42,10 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    tester.view.padding = const FakeViewPadding(bottom: 24);
+    tester.view.viewPadding = const FakeViewPadding(bottom: 24);
+    addTearDown(tester.view.resetPadding);
+    addTearDown(tester.view.resetViewPadding);
     final engine = ControlledEngine();
     final vm = VpnViewModel(
       engine,
@@ -66,6 +70,26 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
     await capture(tester, 'main');
+    final dock = tester.getRect(find.byKey(const ValueKey('main-dock')));
+    expect(dock.bottom, 844);
+    expect(tester.getRect(find.byKey(const ValueKey('dock-frame'))).bottom, greaterThan(844));
+    final settings = tester.getRect(find.byKey(const ValueKey('ai-settings-button')));
+    final power = tester.getRect(find.byKey(const ValueKey('power-button')));
+    expect(power.width / settings.height, closeTo(56.556 / 22.958, .01));
+    expect(power.top, closeTo(settings.top, 1));
+    expect(settings.right, lessThan(power.left));
+    expect(tester.widget<Text>(find.text('Информация')).style!.color, quietNavy);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byTooltip('Выбор сервера'));
+    await tester.pumpAndSettle();
+    await capture(tester, 'servers-phone');
+    final panel = tester.widgetList<Container>(find.byType(Container)).firstWhere(
+      (w) => w.decoration is BoxDecoration && (w.decoration! as BoxDecoration).color == quietGreen);
+    final decoration = panel.decoration! as BoxDecoration;
+    expect(decoration.borderRadius, const BorderRadius.vertical(top: Radius.circular(24)));
+    expect(tester.getRect(find.byWidget(panel)).bottom, 844);
+    await tester.tap(find.byTooltip('Закрыть'));
+    await tester.pumpAndSettle();
     expect(find.text('Обход'), findsOneWidget);
     expect(find.byTooltip('Выбор сервера'), findsOneWidget);
     expect(find.text('Информация'), findsOneWidget);
