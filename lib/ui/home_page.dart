@@ -31,6 +31,7 @@ class _HomePageState extends State<HomePage>
       _trayReady = false;
   final _chatScroll = ScrollController();
   int _seenMessages = 0;
+  bool _seenLive = false;
   Timer? _clock;
   bool _closing = false;
   @override
@@ -66,8 +67,9 @@ class _HomePageState extends State<HomePage>
     vm.addListener(_observe);
     if (Platform.isWindows) trayManager.addListener(this);
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && (vm.sessionClock.startedAt != null || vm.autoSelecting))
+      if (mounted && (vm.sessionClock.startedAt != null || vm.autoSelecting)) {
         setState(() {});
+      }
     });
     unawaited(_initialize());
   }
@@ -225,11 +227,16 @@ class _HomePageState extends State<HomePage>
 
   void _observe() {
     final last = vm.messages.isEmpty ? 0 : vm.messages.last.id;
-    if (_seenMessages == last) return;
+    final live =
+        vm.canDisconnect &&
+        !vm.autoSelecting &&
+        vm.sessionClock.startedAt != null;
+    if (_seenMessages == last && live == _seenLive) return;
     _seenMessages = last;
+    _seenLive = live;
     final follow =
         !_chatScroll.hasClients || _chatScroll.position.extentAfter < 120;
-    if (follow)
+    if (follow) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_chatScroll.hasClients) return;
         unawaited(
@@ -240,6 +247,7 @@ class _HomePageState extends State<HomePage>
           ),
         );
       });
+    }
   }
 
   Future<void> _initializeTray() async {
@@ -698,7 +706,7 @@ class _HomePageState extends State<HomePage>
                                 ],
                               ),
                             ),
-                            if (vm.autoSelecting)
+                            if (vm.autoSelecting && vm.searching)
                               Padding(
                                 padding: const EdgeInsets.only(top: 8),
                                 child: progress.divisions == 0
@@ -891,8 +899,9 @@ class _HomePageState extends State<HomePage>
                   if (vm.autoSelecting)
                     ChatBubble(
                       key: const ValueKey('search-progress'),
-                      text:
-                          'Подключение · ${vm.searchProgress.label(DateTime.now())}',
+                      text: vm.searching
+                          ? 'Подключение · ${vm.searchProgress.label(DateTime.now())}'
+                          : vm.reserveStatus,
                     ),
                   if (vm.canDisconnect &&
                       !vm.autoSelecting &&

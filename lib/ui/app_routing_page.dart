@@ -33,11 +33,12 @@ class _AppRoutingPageState extends State<AppRoutingPage> {
         loading = false;
       });
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           loading = false;
           error = 'Не удалось загрузить приложения. Откройте экран повторно.';
         });
+      }
     }
   }
 
@@ -62,12 +63,13 @@ class _AppRoutingPageState extends State<AppRoutingPage> {
       );
       Navigator.pop(context);
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           saving = false;
           error =
               'Не удалось сохранить. Если приложение удалено, откройте список повторно.';
         });
+      }
     }
   }
 

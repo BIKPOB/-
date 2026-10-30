@@ -241,6 +241,7 @@ class VpnViewModel extends ChangeNotifier {
   }
   final _searchVisited = <String>{};
   DateTime? _searchDeadline;
+  bool get searching => _searchDeadline != null;
   PublicCatalogResult? _searchCatalog;
   bool _roundCanContinue = false;
   Future<void> autoConnect({bool deep = false}) async {

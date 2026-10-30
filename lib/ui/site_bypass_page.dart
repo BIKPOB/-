@@ -50,17 +50,19 @@ class _SiteBypassPageState extends State<SiteBypassPage> {
       );
       Navigator.pop(context);
     } on FormatException catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           saving = false;
           error = e.message;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           saving = false;
           error = 'Не удалось сохранить список. Попробуйте ещё раз.';
         });
+      }
     }
   }
 
