@@ -626,7 +626,11 @@ class _HomePageState extends State<HomePage>
     final scale = bounds.maxWidth / 376.8;
     final inset = MediaQuery.viewPaddingOf(context).bottom;
     final height = (_settings ? 174.0 : 129.8) * scale + inset;
-    return SizedBox(
+    return AnimatedSize(
+      duration: _motion,
+      alignment: Alignment.bottomCenter,
+      curve: Curves.easeInOutCubic,
+      child: SizedBox(
       key: const ValueKey('main-dock'),
       height: height,
       child: Stack(
@@ -724,6 +728,7 @@ class _HomePageState extends State<HomePage>
           ),
         ],
       ),
+      ),
     );
   });
 
@@ -738,12 +743,15 @@ class _HomePageState extends State<HomePage>
       label: tooltip ?? label, onTap: action,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4.8),
-        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
           SizedBox(width: asset == 'info' ? 2 : asset == 'bypass' ? 6.1 : 14.4,
             child: quietAsset(asset, 14.4)),
           SizedBox(width: asset == 'info' ? 7.4 : 2),
-          Flexible(child: Text(label, maxLines: 1, style: quietText(12.8, color: color))),
-        ]),
+          Text(label, maxLines: 1, style: quietText(12.8, color: color)),
+          ]),
+        ),
       ),
     ),
   );

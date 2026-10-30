@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quiet_vpn/core/models.dart';
+import 'package:quiet_vpn/data/public_catalog.dart';
 import 'package:quiet_vpn/core/server_monitor.dart';
 import 'package:quiet_vpn/ui/home_page.dart';
 import 'package:quiet_vpn/ui/quiet_theme.dart';
@@ -54,6 +55,7 @@ void main() {
         probe: (_) async => const HealthResult(Reachability.reachable, 1),
       ),
       baselineMonitor: IdleBaselineMonitor(),
+      catalogLoader: () async => const PublicCatalogResult([], false, 0),
       networkReader: () async => 'wifi',
     );
     await tester.pumpWidget(
@@ -119,6 +121,7 @@ void main() {
         probe: (_) async => const HealthResult(Reachability.reachable, 1),
       ),
       baselineMonitor: IdleBaselineMonitor(),
+      catalogLoader: () async => const PublicCatalogResult([], false, 0),
       networkReader: () async => 'wifi',
     );
     await tester.pumpWidget(
