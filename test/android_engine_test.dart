@@ -49,6 +49,10 @@ void main() {
       messenger.setMockMethodCallHandler(MethodChannel(name), (_) async => null);
     }
     messenger.setMockMethodCallHandler(const MethodChannel('flutter_v2ray_client'), (call) async {
+      if (call.method == 'initializeV2Ray') {
+        expect(call.arguments['notificationIconResourceType'], 'drawable');
+        expect(call.arguments['notificationIconResourceName'], 'ic_stat_quiet');
+      }
       if (call.method == 'stopV2Ray') { stops++; stage = 'DISCONNECTED'; }
       return null;
     });

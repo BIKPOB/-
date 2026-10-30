@@ -15,7 +15,7 @@ def notification_method(channel, notification_id, label):
         manager.createNotificationChannel(new android.app.NotificationChannel(channel,
             "Quiet VPN", android.app.NotificationManager.IMPORTANCE_LOW));
         android.app.Notification.Builder notification = new android.app.Notification.Builder(this, channel)
-            .setSmallIcon(android.R.drawable.stat_sys_warning)
+            .setSmallIcon(getResources().getIdentifier("ic_stat_quiet", "drawable", getPackageName()))
             .setContentTitle("Quiet VPN")
             .setContentText("%s")
             .setOngoing(true);

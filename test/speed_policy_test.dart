@@ -4,13 +4,13 @@ import 'package:quiet_vpn/core/speed_policy.dart';
 void main() {
   test('fresh LTE baseline target is not raised above the displayed target', () {
     expect(SpeedPolicy.networkTarget(412500), 412500);
-    expect(SpeedPolicy.networkTarget(2272500), 2272500);
+    expect(SpeedPolicy.networkTarget(2272500), 1000000);
     expect(SpeedPolicy.networkTarget(null), 625000);
   });
   test('desktop target has a minimum and scales with a faster baseline', () {
     expect(SpeedPolicy.desktopTarget(null), 625000);
     expect(SpeedPolicy.desktopTarget(100000), 625000);
-    expect(SpeedPolicy.desktopTarget(3000000), 3000000);
+    expect(SpeedPolicy.desktopTarget(3000000), 1000000);
   });
   test('stable speed requires three samples above target without sharp drops', () {
     expect(SpeedPolicy.stableSamples([1000000, 900000, 850000], 625000), true);

@@ -13,6 +13,7 @@ import 'site_bypass_page.dart';
 import '../core/site_bypass.dart';
 import 'latency_indicator.dart';
 import 'quiet_theme.dart';
+import 'chat_motion.dart';
 import 'package:tray_manager/tray_manager.dart';
 
 class HomePage extends StatefulWidget {
@@ -24,13 +25,12 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage>
     with WidgetsBindingObserver, WindowListener, TrayListener {
-  static const _widgetChannel = MethodChannel('quietvpn/widget');
   bool _settings = false,
       _deep = false,
       _initialized = false,
-      _compact = false,
       _trayReady = false;
-  final _session = Stopwatch();
+  final _chatScroll = ScrollController();
+  int _seenMessages = 0;
   Timer? _clock;
   bool _closing = false;
   @override
@@ -64,14 +64,10 @@ class _HomePageState extends State<HomePage>
     if (vm.engine is DesktopCapabilities) windowManager.addListener(this);
     WidgetsBinding.instance.addObserver(this);
     vm.addListener(_observe);
-    if (Platform.isAndroid) {
-      _widgetChannel.setMethodCallHandler((call) async {
-        if (call.method == 'actionAvailable') await _consumeWidgetAction();
-      });
-    }
     if (Platform.isWindows) trayManager.addListener(this);
     _clock = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && _session.isRunning) setState(() {});
+      if (mounted && (vm.sessionClock.startedAt != null || vm.autoSelecting))
+        setState(() {});
     });
     unawaited(_initialize());
   }
@@ -84,7 +80,6 @@ class _HomePageState extends State<HomePage>
     switch (state) {
       case AppLifecycleState.resumed:
         vm.setForeground(true);
-        if (Platform.isAndroid) unawaited(_consumeWidgetAction());
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
@@ -100,7 +95,7 @@ class _HomePageState extends State<HomePage>
     if (vm.engine is DesktopCapabilities) windowManager.removeListener(this);
     _clock?.cancel();
     vm.removeListener(_observe);
-    if (Platform.isAndroid) _widgetChannel.setMethodCallHandler(null);
+    _chatScroll.dispose();
     if (Platform.isWindows) trayManager.removeListener(this);
     vm.dispose();
     super.dispose();
@@ -126,21 +121,15 @@ class _HomePageState extends State<HomePage>
         'Резерв: ${vm.reserveStatus}\n'
         'ИИ: ${vm.autoStatus ?? 'не запускался'}\n${vm.autoAttemptReports.join('\n\n')}';
     if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Диагностика'),
-        content: SingleChildScrollView(child: SelectableText(report)),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              await Clipboard.setData(ClipboardData(text: report));
-            },
-            child: const Text('Копировать'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Закрыть'),
+    await _panel(
+      'Диагностика',
+      Column(
+        children: [
+          Expanded(child: SingleChildScrollView(child: SelectableText(report))),
+          OutlinedButton.icon(
+            onPressed: () => Clipboard.setData(ClipboardData(text: report)),
+            icon: const Icon(Icons.copy),
+            label: const Text('Копировать отчёт'),
           ),
         ],
       ),
@@ -230,30 +219,27 @@ class _HomePageState extends State<HomePage>
       ? Duration.zero
       : const Duration(milliseconds: 420);
   String get _elapsed {
-    final seconds = _session.elapsed.inSeconds;
+    final seconds = vm.sessionClock.elapsed.inSeconds;
     return '${(seconds ~/ 3600).toString().padLeft(2, '0')}:${(seconds ~/ 60 % 60).toString().padLeft(2, '0')}:${(seconds % 60).toString().padLeft(2, '0')}';
   }
 
   void _observe() {
-    if (vm.state == ConnectionState.connected && !vm.autoSelecting) {
-      if (!_session.isRunning) _session.start();
-    } else {
-      _session.stop();
-      _session.reset();
-    }
-    if (Platform.isAndroid) {
-      unawaited(
-        _widgetChannel
-            .invokeMethod<void>('update', {
-              'status': _status,
-              'active': vm.state == ConnectionState.connected,
-              'download': formatTrafficRate(vm.traffic.download),
-              'upload': formatTrafficRate(vm.traffic.upload),
-              'reserve': vm.reserveEnabled,
-            })
-            .catchError((Object _) {}),
-      );
-    }
+    final last = vm.messages.isEmpty ? 0 : vm.messages.last.id;
+    if (_seenMessages == last) return;
+    _seenMessages = last;
+    final follow =
+        !_chatScroll.hasClients || _chatScroll.position.extentAfter < 120;
+    if (follow)
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_chatScroll.hasClients) return;
+        unawaited(
+          _chatScroll.animateTo(
+            _chatScroll.position.maxScrollExtent,
+            duration: _motion,
+            curve: Curves.easeOutCubic,
+          ),
+        );
+      });
   }
 
   Future<void> _initializeTray() async {
@@ -281,30 +267,6 @@ class _HomePageState extends State<HomePage>
     await vm.initialize();
     if (!mounted) return;
     setState(() => _initialized = true);
-    if (Platform.isAndroid) await _consumeWidgetAction();
-  }
-
-  Future<void> _consumeWidgetAction() async {
-    if (!_initialized || !mounted) return;
-    String? action;
-    try {
-      action = await _widgetChannel.invokeMethod<String>('consumeAction');
-    } on PlatformException {
-      return;
-    } on MissingPluginException {
-      return;
-    }
-    if (!mounted || action == null) return;
-    switch (action) {
-      case 'power':
-        await _power();
-      case 'search':
-        await _servers();
-      case 'ai':
-        await _runAi();
-      case 'reserve':
-        setState(() => _settings = true);
-    }
   }
 
   Future<void> _power() async {
@@ -318,16 +280,9 @@ class _HomePageState extends State<HomePage>
       return;
     }
     if (vm.selected == null) {
-      await _panel(
-        'Выберите сервер',
-        const Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'Выберите сервер для подключения или начните ИИ поиск',
-            style: TextStyle(fontSize: 30),
-          ),
-        ),
-        color: quietRed,
+      vm.postMessage(
+        'Выберите сервер для подключения или начните ИИ поиск',
+        error: true,
       );
       return;
     }
@@ -354,7 +309,6 @@ class _HomePageState extends State<HomePage>
     Widget content, {
     Color color = quietNavy,
   }) async {
-    if (_compact) await _showFull();
     if (!mounted) return;
     await showGeneralDialog<void>(
       context: context,
@@ -363,7 +317,8 @@ class _HomePageState extends State<HomePage>
       barrierColor: Colors.black38,
       transitionDuration: _motion,
       pageBuilder: (c, animation, secondary) => SafeArea(
-        child: Center(
+        child: Align(
+          alignment: Alignment.bottomCenter,
           child: Container(
             constraints: BoxConstraints(
               maxWidth: 660,
@@ -409,7 +364,7 @@ class _HomePageState extends State<HomePage>
           opacity: curve,
           child: SlideTransition(
             position: Tween(
-              begin: const Offset(0, .08),
+              begin: const Offset(0, 1),
               end: Offset.zero,
             ).animate(curve),
             child: child,
@@ -543,6 +498,7 @@ class _HomePageState extends State<HomePage>
         shrinkWrap: true,
         children: [
           Text(_status, style: quietText(26)),
+          Text('Время подключения: $_elapsed'),
           Text(
             vm.activeServer?.name ?? vm.selected?.name ?? 'Сервер не выбран',
           ),
@@ -580,7 +536,7 @@ class _HomePageState extends State<HomePage>
             'Быстрый подбор: до 15 секунд на поиск; остановка движка может занять дополнительное время. Глубокий: до 8 VPN-профилей за раунд, до 4 раундов и 12 минут. Во время подбора оставьте приложение открытым.',
           ),
           const Text(
-            'Скорость до тестового узла не гарантирует доступность всех сайтов. Цель учитывает свежий замер сети; без него — 5 Мбит/с. Медленный VPN не сохраняется как результат автоподбора.',
+            'Скорость до тестового узла не гарантирует доступность всех сайтов. Цель учитывает свежий замер сети, но не превышает 1 МБ/с (8 Мбит/с); без замера — 5 Мбит/с. Медленный VPN не сохраняется как результат автоподбора.',
           ),
           const Text(
             'Фоновый анализ без VPN: до 8 МиБ/сутки в лимитной сети, до 32 МиБ в безлимитной. Проверки качества VPN: до 3 МиБ/час. Резерв: до 24/96 МиБ/час соответственно, плюс служебный трафик.',
@@ -599,20 +555,23 @@ class _HomePageState extends State<HomePage>
     ),
   );
   Widget _aiSettings() => Container(
-    padding: const EdgeInsets.all(12),
+    key: const ValueKey('ai-settings'),
+    padding: const EdgeInsets.all(8),
     decoration: BoxDecoration(
-      border: Border.all(color: quietGreen, width: 2),
+      color: quietGreen,
       borderRadius: BorderRadius.circular(24),
     ),
     child: Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Row(
           children: [
-            const Expanded(child: Text('ИИ резерв')),
             Switch(
               value: vm.reserveEnabled,
+              activeColor: quietNavy,
               onChanged: _working ? null : vm.setReserveEnabled,
             ),
+            const Expanded(child: Text('Поиск резерва')),
             IconButton(
               tooltip: 'Закрыть настройки ИИ',
               onPressed: () => setState(() => _settings = false),
@@ -620,429 +579,358 @@ class _HomePageState extends State<HomePage>
             ),
           ],
         ),
-        TextButton.icon(
-          onPressed: _learning,
-          icon: const Icon(Icons.psychology_outlined),
-          label: const Text('Обучение ИИ'),
-        ),
-        FittedBox(
-          fit: BoxFit.scaleDown,
-          child: SegmentedButton<bool>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(value: false, label: Text('Быстрый')),
-              ButtonSegment(value: true, label: Text('Глубокий')),
-            ],
-            selected: {_deep},
-            onSelectionChanged: _working
-                ? null
-                : (value) => setState(() => _deep = value.first),
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white, width: 2),
+                ),
+                onPressed: _working
+                    ? null
+                    : () => setState(() => _deep = !_deep),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 200),
+                  child: Text(
+                    _deep ? 'Глубокий поиск' : 'Быстрый поиск',
+                    key: ValueKey(_deep),
+                  ),
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: 'Обучение ИИ',
+              onPressed: _learning,
+              icon: quietAsset('learning', 30),
+            ),
+          ],
         ),
       ],
     ),
   );
-  Widget _controls() => Row(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Expanded(
-        flex: 1,
-        child: QuietAction(
-          label: vm.autoSelecting
-              ? 'Остановить подбор'
-              : vm.canDisconnect
-              ? 'Отключить VPN'
-              : 'Подключить VPN',
-          onTap: !vm.ready || vm.busy && !vm.autoSelecting ? null : _power,
-          child: AnimatedSwitcher(
-            duration: _motion,
-            child: _working
-                ? const AspectRatio(
-                    key: ValueKey('working'),
-                    aspectRatio: 1,
-                    child: Padding(
-                      padding: EdgeInsets.all(30),
-                      child: CircularProgressIndicator(color: Colors.white),
-                    ),
-                  )
-                : AspectRatio(
-                    key: ValueKey(vm.canDisconnect),
-                    aspectRatio: 1,
-                    child: quietAsset(
-                      vm.canDisconnect ? 'power_on' : 'power_off',
-                      108,
-                    ),
-                  ),
-          ),
-        ),
+
+  Widget _dock() {
+    final progress = vm.searchProgress;
+    final now = DateTime.now();
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
+      decoration: BoxDecoration(
+        border: Border.all(color: quietGreen, width: 2),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
       ),
-      const SizedBox(width: 12),
-      Expanded(
-        flex: 2,
-        child: Column(
-          children: [
-            AnimatedSize(
-              duration: _motion,
-              curve: Curves.easeInOutCubic,
-              alignment: Alignment.topCenter,
-              child: _settings
-                  ? _aiSettings()
-                  : Row(
-                      children: [
-                        Expanded(
-                          child: QuietAction(
-                            label: vm.autoSelecting
-                                ? 'Остановить подбор'
-                                : vm.canDisconnect
-                                ? 'Проверить резерв'
-                                : 'ИИ-поиск',
-                            color: quietGreen,
-                            radius: const BorderRadius.horizontal(left: Radius.circular(100)),
-                            onTap: !vm.ready || vm.busy && !vm.autoSelecting
-                                ? null
-                                : _runAi,
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 12,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: AnimatedSize(
+                  duration: _motion,
+                  curve: Curves.easeInOutCubic,
+                  alignment: Alignment.bottomCenter,
+                  child: _settings
+                      ? _aiSettings()
+                      : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              decoration: BoxDecoration(
+                                color: quietGreen,
+                                borderRadius: BorderRadius.circular(30),
                               ),
                               child: Row(
                                 children: [
-                                  quietAsset(
-                                    vm.canDisconnect ? 'reserve' : 'ai',
-                                    30,
-                                  ),
-                                  const SizedBox(width: 6),
                                   Expanded(
-                                    child: FittedBox(
-                                      fit: BoxFit.scaleDown,
-                                      child: Text(
-                                        vm.autoSelecting
-                                            ? 'Стоп'
-                                            : vm.canDisconnect
-                                            ? 'ИИ резерв'
-                                            : 'ИИ поиск',
-                                        style: quietText(25),
+                                    child: QuietAction(
+                                      label: vm.autoSelecting
+                                          ? 'Остановить подбор'
+                                          : vm.canDisconnect
+                                          ? 'Проверить резерв'
+                                          : 'ИИ-поиск',
+                                      onTap:
+                                          !vm.ready ||
+                                              vm.busy && !vm.autoSelecting
+                                          ? null
+                                          : _runAi,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 10,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            quietAsset(
+                                              vm.canDisconnect &&
+                                                      !vm.autoSelecting
+                                                  ? 'reserve'
+                                                  : 'ai',
+                                              20,
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: FittedBox(
+                                                fit: BoxFit.scaleDown,
+                                                alignment: Alignment.centerLeft,
+                                                child: Text(
+                                                  vm.autoSelecting
+                                                      ? 'ИИ поиск…'
+                                                      : vm.canDisconnect
+                                                      ? 'Подобрать резерв'
+                                                      : 'ИИ поиск',
+                                                  style: quietText(18),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Настройки ИИ-поиска',
+                                    onPressed: () =>
+                                        setState(() => _settings = true),
+                                    icon: quietAsset('settings', 24),
                                   ),
                                 ],
                               ),
                             ),
-                          ),
-                        ),
-                        QuietAction(
-                          label: 'Настройки ИИ-поиска',
-                          onTap: () => setState(() => _settings = true),
-                          child: quietAsset('settings', 54),
-                        ),
-                      ],
-                    ),
-            ),
-            const SizedBox(height: 12),
-            AnimatedSwitcher(
-              duration: _motion,
-              child: _working
-                  ? SizedBox(
-                      key: const ValueKey('progress'),
-                      height: 48,
-                      child: Row(
-                        children: [
-                          quietAsset('search', 36),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                            child: LinearProgressIndicator(
-                              color: quietGreen,
-                              minHeight: 12,
-                              borderRadius: BorderRadius.all(
-                                Radius.circular(12),
+                            if (vm.autoSelecting)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: progress.divisions == 0
+                                    ? const LinearProgressIndicator(
+                                        color: Colors.white,
+                                        backgroundColor: quietGreen,
+                                      )
+                                    : DividedProgress(
+                                        divisions: progress.divisions,
+                                        completed: progress.steps(now),
+                                      ),
                               ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : QuietAction(
-                      key: const ValueKey('servers'),
-                      label: 'Выбор сервера',
-                      color: quietGreen,
-                      onTap: _servers,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 10,
-                        ),
-                        child: Row(
-                          children: [
-                            quietAsset('search', 30),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  'Выбор сервера',
-                                  style: quietText(25),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  flex: 4,
+                                  child: _navButton(
+                                    'Информация',
+                                    'info',
+                                    _information,
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  flex: 3,
+                                  child: _navButton(
+                                    'Сервера',
+                                    'search',
+                                    _servers,
+                                    tooltip: 'Выбор сервера',
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  flex: 3,
+                                  child: _navButton(
+                                    'Обход',
+                                    'bypass',
+                                    vm.ready &&
+                                            !_working &&
+                                            (Platform.isAndroid ||
+                                                vm.engine is SiteBypassHost)
+                                        ? _openBypass
+                                        : null,
+                                    tooltip: Platform.isWindows
+                                        ? 'Обход сайтов'
+                                        : 'Обход приложений',
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
-                      ),
-                    ),
-            ),
-          ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 64,
+                height: 80,
+                child: QuietAction(
+                  label: vm.autoSelecting
+                      ? 'Остановить подбор'
+                      : vm.canDisconnect
+                      ? 'Отключить VPN'
+                      : 'Подключить VPN',
+                  onTap: !vm.ready || vm.busy && !vm.autoSelecting
+                      ? null
+                      : _power,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 500),
+                    switchInCurve: Curves.easeIn,
+                    child: _working
+                        ? const SizedBox(
+                            key: ValueKey('connecting'),
+                            width: 64,
+                            height: 64,
+                            child: ConnectingControl(),
+                          )
+                        : SizedBox(
+                            key: ValueKey(vm.canDisconnect),
+                            width: 64,
+                            height: 64,
+                            child: quietAsset(
+                              vm.canDisconnect ? 'power_on' : 'power_off',
+                              64,
+                            ),
+                          ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _navButton(
+    String label,
+    String asset,
+    VoidCallback? action, {
+    String? tooltip,
+  }) => Container(
+    decoration: BoxDecoration(
+      border: Border.all(color: quietGreen, width: 1.5),
+      borderRadius: BorderRadius.circular(24),
+    ),
+    child: QuietAction(
+      label: tooltip ?? label,
+      onTap: action,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              quietAsset(asset, 14),
+              const SizedBox(width: 4),
+              Text(label, style: quietText(14, color: quietGreen)),
+            ],
+          ),
         ),
       ),
-    ],
+    ),
   );
+
   Future<void> _openBypass() async {
     if (!vm.ready || _working) return;
     final Widget page;
     if (vm.engine is SiteBypassHost) {
-      page = SiteBypassPage(host: vm.engine as SiteBypassHost, vpnActive: vm.canDisconnect);
+      page = SiteBypassPage(
+        host: vm.engine as SiteBypassHost,
+        vpnActive: vm.canDisconnect,
+      );
     } else if (Platform.isAndroid) {
       page = AppRoutingPage(vpnActive: vm.canDisconnect);
     } else {
       return;
     }
-    await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => page));
-  }
-
-  Widget _bypassButton() {
-    final label = Platform.isWindows ? 'Обход сайтов' : 'Обход приложений';
-    return QuietAction(label: label, color: quietGreen,
-      onTap: vm.ready && !_working && (Platform.isAndroid || vm.engine is SiteBypassHost) ? _openBypass : null,
-      child: Padding(padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          const Icon(Icons.alt_route, color: Colors.white, size: 26),
-          const SizedBox(width: 10), Flexible(child: Text(label, style: quietText(24))),
-        ])));
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(builder: (_) => page),
+    );
   }
 
   Widget _mainScreen() => LayoutBuilder(
-    builder: (context, bounds) {
-      final height = bounds.maxHeight.clamp(780.0, 900.0);
-      return SingleChildScrollView(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 470),
-            child: SizedBox(
-              height: height + (_settings ? 120 : 0) + (vm.reconnectAdvice != null ? 48 : 0),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Column(
-                  children: [
-                    const SizedBox(height: 20),
-                    Row(
-                      children: [
-                        const Spacer(),
-                        quietAsset('logo', 42),
-                        Expanded(
-                          child: Align(
-                            alignment: Alignment.centerRight,
-                            child: IconButton(
-                              tooltip: 'Диагностика',
-                              onPressed: _diagnostics,
-                              icon: quietAsset('bug', 24),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: height * .307 - 62),
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: quietGreen),
-                        borderRadius: BorderRadius.circular(24),
-                      ),
-                      child: Column(
-                        children: [
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Row(
-                              children: [
-                                const Text('Использование данных'),
-                                const SizedBox(width: 18),
-                                quietAsset('download', 24),
-                                Text(formatTrafficRate(vm.traffic.download)),
-                                quietAsset('upload', 24),
-                                Text(formatTrafficRate(vm.traffic.upload)),
-                              ],
-                            ),
-                          ),
-                          const Divider(color: Colors.white, height: 24),
-                          Row(
-                            children: [
-                              quietAsset('timer', 36),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  alignment: Alignment.centerLeft,
-                                  child: Text(
-                                    'Время\nиспользования',
-                                    style: quietText(26),
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                _elapsed,
-                                style: quietText(
-                                  24,
-                                  color: quietGreen,
-                                  bold: true,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+    builder: (context, bounds) => Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: Column(
+          children: [
+            SizedBox(height: (bounds.maxHeight * .085).clamp(20, 80)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              child: Row(
+                children: [
+                  const Expanded(child: SizedBox()),
+                  quietAsset('logo', 48),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: IconButton(
+                        tooltip: 'Диагностика',
+                        onPressed: _diagnostics,
+                        icon: quietAsset('bug', 24),
                       ),
                     ),
-                    SizedBox(height: height * .10),
-                    _controls(),
-                    const SizedBox(height: 12),
-                    _bypassButton(),
-                    const SizedBox(height: 12),
-                    OutlinedButton(
-                      onPressed: _information,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white70,
-                        side: const BorderSide(color: quietNavy, width: 2),
-                      ),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [quietAsset('info', 14), const SizedBox(width: 6), const Text('Информация')]),
-                    ),
-                    if (vm.reconnectAdvice != null)
-                      TextButton(
-                        onPressed: _information,
-                        child: const Text(
-                          'Связь нестабильна — переподключение',
-                        ),
-                      ),
-                    if (vm.autoStatus != null && !_working)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: GestureDetector(
-                          onTap: _information,
-                          child: Text(
-                            vm.autoStatus!,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      ),
-                    Spacer(flex: 2),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-          ),
-        ),
-      );
-    },
-  );
-  Widget _compactScreen() => Padding(
-    padding: const EdgeInsets.all(18),
-    child: Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              quietAsset('logo', 38),
-              const Spacer(),
-              Text(_status, style: quietText(30)),
-              const SizedBox(height: 12),
-              Text(
-                '↓ ${formatTrafficRate(vm.traffic.download)}   ↑ ${formatTrafficRate(vm.traffic.upload)}',
-              ),
-              const Spacer(),
-              TextButton(
-                onPressed: _showFull,
-                child: const Text('Открыть приложение'),
-              ),
-            ],
-          ),
-        ),
-        SizedBox(
-          width: 150,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Row(
+            Expanded(
+              child: ListView(
+                controller: _chatScroll,
+                padding: EdgeInsets.fromLTRB(
+                  24,
+                  (bounds.maxHeight * .12).clamp(20, 110),
+                  12,
+                  16,
+                ),
                 children: [
-                  Expanded(
-                    child: QuietAction(
-                      label: 'Подключение',
-                      onTap: _power,
-                      child: quietAsset(
-                        vm.canDisconnect ? 'power_on' : 'power_off',
-                        64,
+                  for (final entry in vm.messages)
+                    ChatBubble(
+                      key: ValueKey(entry.id),
+                      text: entry.text,
+                      error: entry.error,
+                    ),
+                  if (vm.autoSelecting)
+                    ChatBubble(
+                      key: const ValueKey('search-progress'),
+                      text:
+                          'Подключение · ${vm.searchProgress.label(DateTime.now())}',
+                    ),
+                  if (vm.canDisconnect &&
+                      !vm.autoSelecting &&
+                      vm.sessionClock.startedAt != null)
+                    ChatBubble(
+                      key: const ValueKey('live-connection'),
+                      text:
+                          '${vm.state == ConnectionState.connected ? 'Подключено' : 'Проверка связи'} · $_elapsed\n'
+                          'Скорость: ↓ ${formatTrafficRate(vm.traffic.download)}  ↑ ${formatTrafficRate(vm.traffic.upload)}',
+                    ),
+                  if (vm.reconnectAdvice != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: FilledButton(
+                        onPressed: _working
+                            ? null
+                            : () => vm.reconnectFromAdvice(),
+                        child: const Text('Переподключиться'),
                       ),
                     ),
-                  ),
-                  Expanded(
-                    child: QuietAction(
-                      label: 'Серверы',
-                      onTap: _servers,
-                      child: quietAsset('search', 44),
-                    ),
-                  ),
                 ],
               ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: QuietAction(
-                      label: 'ИИ-поиск',
-                      onTap: _runAi,
-                      child: quietAsset('ai', 44),
-                    ),
-                  ),
-                  Expanded(
-                    child: QuietAction(
-                      label: 'Резерв и настройки',
-                      onTap: () async {
-                        await _showFull();
-                        if (mounted) setState(() => _settings = true);
-                      },
-                      child: quietAsset('reserve', 44),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+            ),
+            _dock(),
+          ],
         ),
-      ],
+      ),
     ),
   );
   Future<void> _showFull() async {
-    setState(() => _compact = false);
     await windowManager.setAlwaysOnTop(false);
-    await windowManager.setSize(const Size(480, 850));
-    await windowManager.center();
     await windowManager.show();
     await windowManager.focus();
   }
 
   @override
-  void onTrayIconMouseDown() async {
-    if (!mounted) return;
-    if (_compact && await windowManager.isVisible()) {
-      await windowManager.hide();
-      return;
-    }
-    if (!mounted) return;
-    Navigator.of(context).popUntil((route) => route.isFirst);
-    setState(() => _compact = true);
-    await windowManager.setSize(const Size(480, 280));
-    await windowManager.setAlignment(Alignment.bottomRight);
-    await windowManager.setAlwaysOnTop(true);
-    await windowManager.show();
-    await windowManager.focus();
+  void onTrayIconMouseDown() {
+    unawaited(_showFull());
   }
 
   @override
@@ -1070,11 +958,9 @@ class _HomePageState extends State<HomePage>
                     key: const ValueKey('loading'),
                     child: FractionallySizedBox(
                       widthFactor: .75,
-                      child: quietAsset('loading', 220),
+                      child: const LoadingMark(),
                     ),
                   )
-                : _compact
-                ? _compactScreen()
                 : _mainScreen(),
           ),
         ),

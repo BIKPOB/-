@@ -30,8 +30,8 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost {
       if (_active == 'wireguard' && !_starting && _xrayState == 'CONNECTED') _active = 'vless';
       if (_active != 'wireguard' && !_stopping) _proxyEvent();
     }, onError: (_) => _emit(ConnectionState.error, 'Ошибка Xray')));
-    await _xray.invokeMethod<void>('initializeV2Ray', {'notificationIconResourceType':'mipmap',
-      'notificationIconResourceName':'ic_launcher', 'providerBundleIdentifier':'', 'groupIdentifier':''});
+    await _xray.invokeMethod<void>('initializeV2Ray', {'notificationIconResourceType':'drawable',
+      'notificationIconResourceName':'ic_stat_quiet', 'providerBundleIdentifier':'', 'groupIdentifier':''});
     await reconcile();
   }
   void _wgEvent(dynamic stage) {

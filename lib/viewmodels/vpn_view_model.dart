@@ -1,3 +1,4 @@
+import '../core/presentation_state.dart';
 import '../core/handover_policy.dart';
 import '../core/search_rotation.dart';
 import 'dart:async';
@@ -53,6 +54,22 @@ class VpnViewModel extends ChangeNotifier {
   VpnServer? activeServer;
   bool busy = false, ready = false;
   bool autoSelecting = false, connectionVerified = false;
+  final sessionClock = SessionClock();
+  final searchProgress = SearchProgress();
+  final List<ConnectionMessage> _messages = [];
+  List<ConnectionMessage> get messages => List.unmodifiable(_messages);
+  int _messageId = 0;
+  String? _lastActivity, _lastAdvice;
+  ConnectionState? _lastState;
+  void postMessage(String text, {bool error = false}) {
+    _appendMessage(text, error: error);
+    _notify();
+  }
+  void _appendMessage(String text, {bool error = false}) {
+    if (_messages.isNotEmpty && _messages.last.text == text) return;
+    _messages.add(ConnectionMessage(++_messageId, text, error: error));
+    if (_messages.length > 100) _messages.removeAt(0);
+  }
   String? autoStatus;
   int _autoEpoch = 0;
   AdaptiveSelector _selector = AdaptiveSelector();
@@ -163,7 +180,7 @@ class VpnViewModel extends ChangeNotifier {
           final current = await _network();
           if (context.sameConnection(current) && result?.fresh(current, DateTime.now()) == true) {
             baseline = result;
-            baselineStatus = '${result!.label} · цель VPN ${(result.target * 8 / 1000000).toStringAsFixed(1)} Мбит/с (60%)';
+            baselineStatus = '${result!.label} · цель VPN ${(SpeedPolicy.networkTarget(result.target) * 8 / 1000000).toStringAsFixed(1)} Мбит/с (60%, не выше 1 МБ/с)';
           } else {
             baseline = null;
             baselineStatus = 'Ваша сеть: ${current.label} · ${_baselineMonitor.status}';
@@ -229,6 +246,7 @@ class VpnViewModel extends ChangeNotifier {
   Future<void> autoConnect({bool deep = false}) async {
     if (!ready || busy || autoSelecting || _nativeNeedsStop || _stopping || _quickDraining) return;
     autoSelecting = true;
+    searchProgress.start(deep, DateTime.now());
     _searchVisited.clear();
     _searchCatalog = null;
     _searchDeadline = DateTime.now().add(deep ? const Duration(minutes:12) : const Duration(seconds:15));
@@ -237,6 +255,7 @@ class VpnViewModel extends ChangeNotifier {
     try {
       for (var round=1; round<=rounds; round++) {
         if (_disposed || !DateTime.now().isBefore(_searchDeadline!)) break;
+        searchProgress.beginRound(round);
         _roundCanContinue = false;
         final visited = _searchVisited.length;
         final expectedEpoch = _autoEpoch + 1;
@@ -499,6 +518,8 @@ class VpnViewModel extends ChangeNotifier {
           return;
         }
       }
+      searchProgress.total = ordered.length;
+      searchProgress.completed = 0;
       final finalists = <({VpnServer server, double utility, int speed, bool qualified})>[];
       autoPlan = '${_selectionTarget == null && !_requiresSpeed ? '' : 'Цель скорости: ${(targetBytesPerSecond * 8 / 1000000).toStringAsFixed(1)} Мбит/с · '}${deep ? 'Глубокий' : 'Быстрый'} подбор · план: ${ordered.map((s) => s.protocol).join(' → ')}';
       autoAttemptReports.add(autoPlan);
@@ -570,7 +591,10 @@ class VpnViewModel extends ChangeNotifier {
         final utility = medianSpeed == null ? 0.0 :
           (.75 * (medianSpeed / (medianSpeed + 524288)) +
            .25 * (speeds.first / max(1, speeds.last))).toDouble();
+        searchProgress.completed = attempt;
         final attemptResult = success ? 'успех' : usable ? 'работает, ниже цели' : 'не подтверждено';
+        _appendMessage('Попытка $attempt/${ordered.length} · ${server.protocol} · $attemptResult', error: !success);
+        _notify();
         autoAttemptReports.add('Попытка $attempt · ${server.protocol} · $attemptResult · ${server.source}\n${message ?? connectionStage ?? 'Нет подробностей'}');
         if (sameNetwork && !context.ambiguous && !duringVpn.ambiguous) {
           await _remember(server, context, latency[server.id]?.milliseconds,
@@ -867,6 +891,26 @@ class VpnViewModel extends ChangeNotifier {
   String? _qualityNoticeKey;
   void _notify() {
     if (_disposed) return;
+    if (state == ConnectionState.connected) sessionClock.connected();
+    if (!_nativeNeedsStop && (state == ConnectionState.disconnected || state == ConnectionState.error)) sessionClock.stopped();
+    if (autoStatus != null && autoStatus != _lastActivity) {
+      _lastActivity = autoStatus;
+      _appendMessage(autoStatus!, error: !autoSelecting && !connectionVerified);
+    }
+    if (state != _lastState) {
+      _lastState = state;
+      if (state == ConnectionState.error) {
+        _appendMessage(message ?? 'Не удалось подключиться', error: true);
+      } else if (!autoSelecting && state == ConnectionState.connecting) {
+        _appendMessage('Подключение…');
+      } else if (!autoSelecting && state == ConnectionState.disconnected && _messages.isNotEmpty) {
+        _appendMessage('VPN отключён');
+      }
+    }
+    if (reconnectAdvice != null && reconnectAdvice != _lastAdvice) {
+      _appendMessage(reconnectAdvice!, error: true);
+    }
+    _lastAdvice = reconnectAdvice;
     if (Platform.isAndroid) {
       final active = !autoSelecting && !_stopping && state == ConnectionState.connected;
       final speed = active ? measuredBytesPerSecond ?? 0 : 0;
@@ -1040,6 +1084,7 @@ class VpnViewModel extends ChangeNotifier {
       if (parsed.needsAuth && auth == null) throw StateError('Укажите логин и пароль профиля');
       if (credentials != null) await store.saveCredentials(server.id, credentials);
       if (_disposed || _stopping || (selectedAutomatically && selectionEpoch != _autoEpoch)) return;
+      sessionClock.stopped();
       _nativeNeedsStop = true; activeServer = server;
       state = ConnectionState.connecting;
       connectionVerified = false; measuredBytesPerSecond = null;
@@ -1203,6 +1248,7 @@ class VpnViewModel extends ChangeNotifier {
             .invokeMethod<void>('reportDrop').catchError((Object _) {}));
       }
     }
+    sessionClock.stopped();
     _clearConfirmation();
     traffic.reset(); _trafficTimer?.cancel();
     _stopping = true; _nativeConnected = false; _connectionEpoch++; _connectTimeout?.cancel(); _connectTimeout = null;
@@ -1223,6 +1269,7 @@ class VpnViewModel extends ChangeNotifier {
     if (!automatic) _cancelReserve();
     if (busy || _stopping) return;
     reconnectAdvice = null;
+    sessionClock.stopped();
     _clearConfirmation();
     traffic.reset(); _trafficTimer?.cancel();
     busy = true; _stopping = true; _nativeConnected = false; _connectionEpoch++;

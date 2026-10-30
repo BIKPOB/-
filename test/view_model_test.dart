@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:quiet_vpn/ui/home_page.dart';
+import 'package:quiet_vpn/ui/chat_motion.dart';
 import 'package:flutter/services.dart';
 import 'package:quiet_vpn/core/models.dart';
 import 'package:quiet_vpn/core/server_monitor.dart';
@@ -245,6 +246,29 @@ void main() {
     } finally { vm.dispose(); await engine.dispose(); }
   });
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('resume verification preserves session start, disconnect clears it', () async {
+    final engine = ControlledEngine();
+    engine.release.complete();
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      baselineMonitor: IdleBaselineMonitor(), networkReader: () async => 'wifi');
+    try {
+      await vm.initialize(); vm.select(server.id); await vm.connect(null);
+      engine.controller.add(const EngineEvent(ConnectionState.connected, 'verified', true));
+      await Future<void>.delayed(Duration.zero);
+      final started = vm.sessionClock.startedAt;
+      expect(started, isNotNull);
+      engine.controller.add(const EngineEvent(ConnectionState.connecting, 'rechecking'));
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.sessionClock.startedAt, started);
+      engine.controller.add(const EngineEvent(ConnectionState.connected, 'verified', true));
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.sessionClock.startedAt, started);
+      await vm.disconnect();
+      expect(vm.sessionClock.startedAt, isNull);
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+
   testWidgets('quick deadline returns after 15 seconds and rejects late catalog completion', (tester) async {
     final engine = ControlledEngine();
     final catalog = Completer<PublicCatalogResult>();
@@ -521,10 +545,10 @@ void main() {
     await tester.pump();
     final search=vm.autoConnect();await tester.pump();
     expect(vm.autoSelecting,true);
-    expect(find.text('Стоп'),findsOneWidget);
+    expect(find.text('ИИ поиск…'),findsOneWidget);
     expect(find.text('Выберите сервер'),findsNothing);
     expect(find.text('Автоподбор или свой сервер'),findsNothing);
-    expect(find.byType(LinearProgressIndicator),findsOneWidget);
+    expect(find.byType(DividedProgress),findsOneWidget);
     expect(find.byType(FloatingActionButton),findsNothing);
     await vm.cancelAutoSelection();
     catalog.complete(const PublicCatalogResult([],false,0));

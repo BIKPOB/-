@@ -7,7 +7,14 @@ const quietRed = Color(0xFFA7434F);
 const quietGradient = LinearGradient(
   begin: Alignment.topRight,
   end: Alignment.bottomLeft,
-  colors: [quietNavy, Color(0xFF068272)],
+  colors: [
+    Color(0xFF06092A),
+    Color(0xFF06092A),
+    Color(0xFF07293F),
+    Color(0xFF084B56),
+    Color(0xFF0A8C81),
+  ],
+  stops: [0, .707, .851, .913, 1],
 );
 final quietTheme = ThemeData(
   useMaterial3: true,
@@ -27,12 +34,25 @@ extension on TextTheme {
   TextTheme mapQuietFont() {
     TextStyle? light(TextStyle? style) => style?.copyWith(
       fontWeight: FontWeight.w300,
-      fontVariations: const [FontVariation('wdth', 87.5), FontVariation('wght', 300)]);
+      fontVariations: const [
+        FontVariation('wdth', 87.5),
+        FontVariation('wght', 300),
+      ],
+    );
     return copyWith(
-      bodySmall: light(bodySmall), bodyMedium: light(bodyMedium), bodyLarge: light(bodyLarge),
-      labelSmall: light(labelSmall), labelMedium: light(labelMedium), labelLarge: light(labelLarge),
-      titleSmall: light(titleSmall), titleMedium: light(titleMedium), titleLarge: light(titleLarge),
-      headlineSmall: light(headlineSmall), headlineMedium: light(headlineMedium), headlineLarge: light(headlineLarge));
+      bodySmall: light(bodySmall),
+      bodyMedium: light(bodyMedium),
+      bodyLarge: light(bodyLarge),
+      labelSmall: light(labelSmall),
+      labelMedium: light(labelMedium),
+      labelLarge: light(labelLarge),
+      titleSmall: light(titleSmall),
+      titleMedium: light(titleMedium),
+      titleLarge: light(titleLarge),
+      headlineSmall: light(headlineSmall),
+      headlineMedium: light(headlineMedium),
+      headlineLarge: light(headlineLarge),
+    );
   }
 }
 

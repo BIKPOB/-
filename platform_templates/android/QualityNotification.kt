@@ -26,7 +26,7 @@ object QualityNotification {
             val advice = "Повторите подбор VPN-сервера или попробуйте другую сеть Wi-Fi / мобильного интернета."
             val text = "Последний замер: $measured Мбит/с, цель: $desired Мбит/с. $advice"
             val builder = Notification.Builder(context, channel)
-                .setSmallIcon(android.R.drawable.stat_sys_warning)
+                .setSmallIcon(R.drawable.ic_stat_quiet)
                 .setContentTitle("Quiet VPN: пониженная скорость")
                 .setContentText(advice)
                 .setStyle(Notification.BigTextStyle().bigText(text))

@@ -15,7 +15,8 @@ import 'view_model_test.dart'
 final previewKey = GlobalKey();
 Future<void> capture(WidgetTester tester, String name) async {
   await tester.runAsync(() async {
-    final boundary = previewKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+    final boundary =
+        previewKey.currentContext!.findRenderObject()! as RenderRepaintBoundary;
     final image = await boundary.toImage();
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
     final file = File('build/ui-preview/$name.png');
@@ -24,11 +25,14 @@ Future<void> capture(WidgetTester tester, String name) async {
     image.dispose();
   });
 }
+
 void main() {
   setUpAll(() async {
-    final loader = FontLoader('Bahnschrift')..addFont(rootBundle.load('assets/fonts/Bahnschrift.ttf'));
+    final loader = FontLoader('Bahnschrift')
+      ..addFont(rootBundle.load('assets/fonts/Bahnschrift.ttf'));
     await loader.load();
-    final icons = FontLoader('MaterialIcons')..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
+    final icons = FontLoader('MaterialIcons')
+      ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
     await icons.load();
   });
   testWidgets('empty power opens error, learning lives inside settings', (
@@ -48,15 +52,23 @@ void main() {
       baselineMonitor: IdleBaselineMonitor(),
       networkReader: () async => 'wifi',
     );
-    await tester.pumpWidget(RepaintBoundary(key: previewKey, child: MaterialApp(debugShowCheckedModeBanner: false, theme: quietTheme, home: HomePage(vm))));
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: previewKey,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: quietTheme,
+          home: HomePage(vm),
+        ),
+      ),
+    );
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
     await capture(tester, 'main');
-    final bypass = find.text(Platform.isWindows ? 'Обход сайтов' : 'Обход приложений');
-    expect(bypass, findsOneWidget);
-    expect(tester.getTopLeft(bypass).dy, greaterThan(tester.getBottomLeft(find.text('Выбор сервера')).dy));
-    expect(tester.getTopLeft(find.text('Информация')).dy, greaterThan(tester.getBottomLeft(bypass).dy));
+    expect(find.text('Обход'), findsOneWidget);
+    expect(find.byTooltip('Выбор сервера'), findsOneWidget);
+    expect(find.text('Информация'), findsOneWidget);
     expect(find.text('Обучение ИИ'), findsNothing);
     await tester.tap(find.byTooltip('Подключить VPN'));
     await tester.pumpAndSettle();
@@ -66,12 +78,10 @@ void main() {
     );
     await capture(tester, 'error');
     expect(engine.connects, 0);
-    await tester.tap(find.byTooltip('Закрыть'));
-    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Настройки ИИ-поиска'));
     await tester.pumpAndSettle();
     await capture(tester, 'settings');
-    expect(find.text('Обучение ИИ'), findsOneWidget);
+    expect(find.byTooltip('Обучение ИИ'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     await engine.dispose();
@@ -87,7 +97,16 @@ void main() {
       baselineMonitor: IdleBaselineMonitor(),
       networkReader: () async => 'wifi',
     );
-    await tester.pumpWidget(RepaintBoundary(key: previewKey, child: MaterialApp(debugShowCheckedModeBanner: false, theme: quietTheme, home: HomePage(vm))));
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: previewKey,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: quietTheme,
+          home: HomePage(vm),
+        ),
+      ),
+    );
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
     expect(find.text('fixture'), findsNothing);

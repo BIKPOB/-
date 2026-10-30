@@ -62,7 +62,6 @@ object VpnHealthMonitor {
     @Synchronized fun reportDrop(context: Context) = warn(context,
         "VPN потерял соединение. Откройте Quiet VPN и переподключитесь или запустите подбор другого сервера.")
     private fun warn(context: Context, text: String) {
-        QuietWidget.connectionWarning(context)
         notice = text
         prefs(context).edit().putString("notice", text).apply()
         try {
@@ -74,7 +73,7 @@ object VpnHealthMonitor {
             val action = PendingIntent.getActivity(context, ID, launch,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             manager.notify(ID, Notification.Builder(context, channel)
-                .setSmallIcon(android.R.drawable.stat_sys_warning)
+                .setSmallIcon(R.drawable.ic_stat_quiet)
                 .setContentTitle("Quiet VPN: требуется проверка соединения")
                 .setContentText(text).setStyle(Notification.BigTextStyle().bigText(text))
                 .setContentIntent(action).addAction(Notification.Action.Builder(null,
@@ -112,7 +111,6 @@ object VpnHealthMonitor {
         } finally { deadline.cancel(false); connection.disconnect(); if (pending === connection) pending = null }
     }
     private fun probeCycle(context: Context, token: Int) {
-        QuietWidget.refresh(context)
         if (token != epoch) return
         val cm = context.getSystemService(ConnectivityManager::class.java)
         val network = watchedNetwork?.takeIf {

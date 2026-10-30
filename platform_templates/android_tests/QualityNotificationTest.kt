@@ -28,6 +28,8 @@ class QualityNotificationTest {
         QualityNotification.update(context, true, 100000, 625000)
         val warning = manager.activeNotifications.first { it.id == QualityNotification.ID }.notification
         assertTrue(warning.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString().contains("другую сеть"))
+        assertEquals(R.drawable.ic_stat_quiet, warning.smallIcon.resId)
+        assertNotNull(context.getDrawable(R.drawable.ic_stat_quiet))
         assertEquals(300000L, warning.timeoutAfter)
         QualityNotification.update(context, true, 700000, 625000)
         assertNull(manager.activeNotifications.firstOrNull { it.id == QualityNotification.ID })
