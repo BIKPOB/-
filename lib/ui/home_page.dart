@@ -625,7 +625,11 @@ class _HomePageState extends State<HomePage>
   Widget _dock() => LayoutBuilder(builder: (context, bounds) {
     final scale = bounds.maxWidth / 376.8;
     final inset = MediaQuery.viewPaddingOf(context).bottom;
-    final height = (_settings ? 174.0 : 129.8) * scale + inset;
+    // Page 2 already leaves empty space beneath the controls. Only add
+    // inset space when system navigation is taller than that designed space.
+    final bottomRoom = (_settings ? 24.0 : 52.0) * scale;
+    final extraInset = (inset - bottomRoom).clamp(0.0, double.infinity);
+    final height = (_settings ? 174.0 : 129.8) * scale + extraInset;
     return AnimatedSize(
       duration: _motion,
       alignment: Alignment.bottomCenter,
