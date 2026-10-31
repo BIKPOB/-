@@ -77,6 +77,8 @@ void main() {
       ),
     );
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await capture(tester, 'loading');
     await tester.pump(const Duration(seconds: 1));
     await tester.pumpAndSettle();
     await capture(tester, 'main');
@@ -111,6 +113,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));
     await capture(tester, 'connecting');
+    await tester.pump(const Duration(milliseconds: 500));
+    await capture(tester, 'connecting-quarter-turn');
     vm.autoSelecting = false;
     vm.autoStatus = null;
     vm.filterProtocol(null);

@@ -207,6 +207,32 @@ class BaseNetworkErrorEngine extends ControlledEngine {
   }
 }
 void main() {
+  test('foreign VPN blocks quick and manual connection before starting a tunnel', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    const channel = MethodChannel('quietvpn/catalog-cache');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async =>
+      call.method == 'networkContext' ? {'type': 'wifi', 'vpnPresent': true} : null);
+    final engine = ControlledEngine();
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.notMeasured)),
+      baselineMonitor: IdleBaselineMonitor(),
+      catalogLoader: () async => const PublicCatalogResult([], false, 0));
+    try {
+      await vm.initialize();
+      await vm.autoConnect();
+      expect(vm.autoSelecting, isFalse);
+      expect(engine.connects, 0);
+      expect(vm.messages.last.text, contains('Отключите сторонний VPN'));
+      await vm.connect(null);
+      expect(engine.connects, 0);
+      expect(vm.messages.where((m) => m.text.contains('Отключите сторонний VPN')).length, 1);
+    } finally {
+      vm.dispose(); await engine.dispose();
+      messenger.setMockMethodCallHandler(channel, null);
+    }
+  });
+
   test('quick selection skips TCP preflight and attempts the real tunnel', () async {
     final engine = FailedEngine();
     var probes = 0;
