@@ -15,7 +15,7 @@ import 'view_model_test.dart'
 
 class PreviewViewModel extends VpnViewModel {
   PreviewViewModel(super.engine, super.store, super.monitor, {
-    super.baselineMonitor, super.catalogLoader, super.networkReader,
+    super.baselineMonitor, super.catalogLoader, super.networkReader, super.backgroundMonitor,
   });
   @override
   bool get searching => autoSelecting;
@@ -62,6 +62,7 @@ void main() {
       ServerMonitor(
         probe: (_) async => const HealthResult(Reachability.reachable, 1),
       ),
+      backgroundMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
       baselineMonitor: IdleBaselineMonitor(),
       catalogLoader: () async => const PublicCatalogResult([], false, 0),
       networkReader: () async => 'wifi',
@@ -147,6 +148,7 @@ void main() {
       ServerMonitor(
         probe: (_) async => const HealthResult(Reachability.reachable, 1),
       ),
+      backgroundMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
       baselineMonitor: IdleBaselineMonitor(),
       catalogLoader: () async => const PublicCatalogResult([], false, 0),
       networkReader: () async => 'wifi',
