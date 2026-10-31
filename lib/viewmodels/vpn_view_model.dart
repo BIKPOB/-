@@ -244,8 +244,18 @@ class VpnViewModel extends ChangeNotifier {
   bool get searching => _searchDeadline != null;
   PublicCatalogResult? _searchCatalog;
   bool _roundCanContinue = false;
+  Future<bool> _externalVpnBlocksConnection() async {
+    if (_nativeNeedsStop || canDisconnect) return false;
+    final current = await _network();
+    networkContext = current;
+    if (!current.vpnPresent) return false;
+    postMessage('Отключите сторонний VPN, затем повторите подключение в Quiet VPN.', error: true);
+    return true;
+  }
   Future<void> autoConnect({bool deep = false}) async {
     if (!ready || busy || autoSelecting || _nativeNeedsStop || _stopping || _quickDraining) return;
+    if (await _externalVpnBlocksConnection()) return;
+    if (_disposed || busy || autoSelecting || _nativeNeedsStop) return;
     autoSelecting = true;
     searchProgress.start(deep, DateTime.now());
     _searchVisited.clear();
@@ -1068,6 +1078,8 @@ class VpnViewModel extends ChangeNotifier {
     if (!automatic) _cancelReserve();
     final server = selected;
     if (!ready || busy || _stopping || _quickDraining || _nativeNeedsStop || server == null) return;
+    if (!automatic && await _externalVpnBlocksConnection()) return;
+    if (_disposed || busy || _nativeNeedsStop) return;
     final selectionEpoch = _autoEpoch;
     final selectedAutomatically = autoSelecting;
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();

@@ -272,7 +272,7 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _initialize() async {
     unawaited(_initializeTray());
-    await vm.initialize();
+    await Future.wait([vm.initialize(), Future<void>.delayed(const Duration(milliseconds: 1100))]);
     if (!mounted) return;
     setState(() => _initialized = true);
   }
@@ -345,7 +345,7 @@ class _HomePageState extends State<HomePage>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
+                  if (title.isNotEmpty) Row(
                     children: [
                       Expanded(child: Text(title, style: quietText(24))),
                       IconButton(
@@ -355,7 +355,7 @@ class _HomePageState extends State<HomePage>
                       ),
                     ],
                   ),
-                  const Divider(color: Colors.white),
+                  if (title.isNotEmpty) const Divider(color: Colors.white),
                   Flexible(child: content),
                 ],
               ),
@@ -384,33 +384,40 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _servers() => _panel(
-    'Выбор сервера',
+    '',
     ListenableBuilder(
       listenable: vm,
       builder: (c, _) => Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Wrap(
-            spacing: 6,
-            children: [
-              ChoiceChip(
-                label: const Text('Все'),
-                selected: vm.protocolFilter == null,
-                onSelected: (_) => vm.filterProtocol(null),
-              ),
-              for (final p in protocols.entries)
-                ChoiceChip(
-                  label: Text(p.value),
-                  selected: vm.protocolFilter == p.key,
-                  onSelected: (_) => vm.filterProtocol(p.key),
-                ),
-              IconButton(
-                tooltip: 'Проверить адреса',
-                onPressed: vm.refreshLatency,
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
-          ),
+          SizedBox(width: double.infinity, child: FittedBox(child: SizedBox(
+            width: 327.3, height: 51.3,
+            child: Column(children: [
+              SizedBox(height: 41.8, child: Row(children: [
+                SizedBox(width: 71.8, child: Tooltip(message: 'Закрыть',
+                  child: GestureDetector(onTap: () => Navigator.pop(c),
+                    child: Text('Сервера', style: quietText(12.8))))),
+                for (final p in protocols.entries) ...[
+                  const SizedBox(width: 7.2),
+                  GestureDetector(
+                    onTap: () => vm.filterProtocol(vm.protocolFilter == p.key ? null : p.key),
+                    child: Semantics(button: true, selected: vm.protocolFilter == p.key,
+                      child: Container(width: p.value == 'WireGuard' ? 71.145 : p.value == 'VLESS' ? 45.92 : 87.383,
+                        height: 22.275, alignment: Alignment.center,
+                        decoration: BoxDecoration(border: Border.all(color: Colors.white),
+                          color: vm.protocolFilter == p.key ? quietNavy : Colors.transparent,
+                          borderRadius: BorderRadius.circular(23.885)),
+                        child: Text(p.value, style: quietText(12.8)))),
+                  ),
+                ],
+                const SizedBox(width: 7.2),
+                GestureDetector(onTap: vm.refreshLatency,
+                  child: Tooltip(message: 'Проверить адреса', child: quietAsset('refresh', 22.275))),
+              ])),
+              const SizedBox(height: 5.7),
+              const SizedBox(width: 324.649, child: Divider(height: 1, thickness: 1, color: Colors.white)),
+            ]),
+          ))),
           const SizedBox(height: 12),
           Flexible(
             child: ListView(
@@ -563,59 +570,43 @@ class _HomePageState extends State<HomePage>
       ),
     ),
   );
-  Widget _aiSettings() => Container(
-    key: const ValueKey('ai-settings'),
-    padding: const EdgeInsets.all(8),
-    decoration: BoxDecoration(
-      color: quietGreen,
-      borderRadius: BorderRadius.circular(24),
-    ),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            Switch(
-              value: vm.reserveEnabled,
-              activeColor: quietNavy,
-              onChanged: _working ? null : vm.setReserveEnabled,
-            ),
-            const Expanded(child: Text('Поиск резерва')),
-            IconButton(
-              tooltip: 'Закрыть настройки ИИ',
-              onPressed: () => setState(() => _settings = false),
-              icon: const Icon(Icons.close),
-            ),
-          ],
+  Widget _aiSettings() => SizedBox(
+    key: const ValueKey('ai-settings'), width: 259.2, height: 58.5,
+    child: DecoratedBox(
+      decoration: BoxDecoration(color: quietGreen, borderRadius: BorderRadius.circular(11.5)),
+      child: Stack(children: [
+        Positioned(left: 3.879, top: 3.029, width: 107.1, height: 23.9,
+          child: Semantics(label: 'Поиск резерва', toggled: vm.reserveEnabled,
+            child: GestureDetector(onTap: _working ? null : () => vm.setReserveEnabled(!vm.reserveEnabled),
+              child: Container(decoration: BoxDecoration(border: Border.all(color: Colors.white, width: 2),
+                borderRadius: BorderRadius.circular(23.885)),
+                child: AnimatedAlign(duration: _motion,
+                  alignment: vm.reserveEnabled ? Alignment.centerRight : Alignment.centerLeft,
+                  child: Container(width: 44.473, height: 17.436, margin: const EdgeInsets.symmetric(horizontal: 1.2),
+                    decoration: BoxDecoration(color: vm.reserveEnabled ? Colors.white : quietNavy,
+                      borderRadius: BorderRadius.circular(23.885))))))),
         ),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  side: const BorderSide(color: Colors.white, width: 2),
-                ),
-                onPressed: _working
-                    ? null
-                    : () => setState(() => _deep = !_deep),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 200),
-                  child: Text(
-                    _deep ? 'Глубокий поиск' : 'Быстрый поиск',
-                    key: ValueKey(_deep),
-                  ),
-                ),
-              ),
-            ),
-            IconButton(
-              tooltip: 'Обучение ИИ',
-              onPressed: _learning,
-              icon: quietAsset('learning', 30),
-            ),
-          ],
-        ),
-      ],
+        Positioned(left: 120.742, top: 7.279,
+          child: Text('Поиск резерва', style: quietText(12.8))),
+        Positioned(left: 235.7, top: 4.743, width: 17.936, height: 17.936,
+          child: Tooltip(message: 'Закрыть настройки ИИ', child: GestureDetector(
+            onTap: () => setState(() => _settings = false), child: quietAsset('close', 17.936)))),
+        Positioned(left: 3.879, top: 30.917, width: 191.526, height: 23.885,
+          child: Semantics(label: 'Режим поиска', value: _deep ? 'Глубокий поиск' : 'Быстрый поиск', button: true,
+            child: GestureDetector(onTap: _working ? null : () => setState(() => _deep = !_deep),
+              child: Container(padding: const EdgeInsets.all(3.2),
+                decoration: BoxDecoration(border: Border.all(color: Colors.white, width: 2),
+                  borderRadius: BorderRadius.circular(23.885)),
+                child: AnimatedAlign(duration: _motion,
+                  alignment: _deep ? Alignment.centerLeft : Alignment.centerRight,
+                  child: Container(width: 87.7, alignment: Alignment.center,
+                    decoration: BoxDecoration(color: _deep ? quietNavy : Colors.white,
+                      borderRadius: BorderRadius.circular(23.885)),
+                    child: Text(_deep ? 'Глубокий поиск' : 'Быстрый поиск',
+                      style: quietText(12.8, color: _deep ? Colors.white : quietGreen), maxLines: 1, softWrap: false))))))),
+        Positioned(left: 235.69, top: 30.917, width: 19.5, height: 20.96,
+          child: Tooltip(message: 'Обучение ИИ', child: GestureDetector(onTap: _learning, child: quietAsset('learning', 20.96)))),
+      ]),
     ),
   );
 
@@ -627,9 +618,9 @@ class _HomePageState extends State<HomePage>
     final inset = MediaQuery.viewPaddingOf(context).bottom;
     // Page 2 already leaves empty space beneath the controls. Only add
     // inset space when system navigation is taller than that designed space.
-    final bottomRoom = (_settings ? 24.0 : 52.0) * scale;
+    final bottomRoom = 52.0 * scale;
     final extraInset = (inset - bottomRoom).clamp(0.0, double.infinity);
-    final height = (_settings ? 174.0 : 129.8) * scale + extraInset;
+    final height = 129.8 * scale + extraInset;
     return AnimatedSize(
       duration: _motion,
       alignment: Alignment.bottomCenter,
@@ -653,7 +644,7 @@ class _HomePageState extends State<HomePage>
           ),
           Positioned(
             left: 0, right: 0, top: 0,
-            height: (_settings ? 174.0 : 129.8) * scale,
+            height: 129.8 * scale,
             child: FittedBox(
               alignment: Alignment.topCenter,
               child: SizedBox(

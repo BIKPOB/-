@@ -1,6 +1,8 @@
-<svg width="564" height="564" viewBox="0 0 564 564" fill="none" xmlns="http://www.w3.org/2000/svg">
-<circle cx="116.903" cy="116.903" r="273.208" fill="#010632"/>
-<circle cx="446.556" cy="446.558" r="273.208" fill="#299171"/>
-<circle cx="116.903" cy="446.558" r="273.208" fill="white"/>
-<circle cx="446.556" cy="116.903" r="273.208" fill="#A7434E"/>
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="876.068" height="876.07" viewBox="0 0 876.068 876.07" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Group 42">
+<circle id="Ellipse 1" cx="273.208" cy="273.208" r="273.208" fill="#010632"/>
+<circle id="Ellipse 2" cx="602.86" cy="602.862" r="273.208" fill="#299171"/>
+<circle id="Ellipse 3" cx="273.208" cy="602.862" r="273.208" fill="white"/>
+<circle id="Ellipse 4" cx="602.86" cy="273.208" r="273.208" fill="#A7434E"/>
+</g>
 </svg>

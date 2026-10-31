@@ -1,5 +1,6 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'quiet_theme.dart';
 
 /// Page 2's four 500 ms linear glow rotations; pause glyph stays upright.
@@ -33,20 +34,47 @@ class _ConnectingControlState extends State<ConnectingControl>
 
   @override
   Widget build(BuildContext context) => ClipOval(
-    child: Stack(
-      alignment: Alignment.center,
-      children: [
-        RotationTransition(
-          turns: _turn,
-          child: OverflowBox(maxWidth: 87.607, maxHeight: 87.607,
-            child: ImageFiltered(imageFilter: ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6),
-              child: quietAsset('connecting_glow', 87.607))),
-        ),
-        ColorFiltered(colorFilter: const ColorFilter.mode(quietNavy, BlendMode.srcIn),
-          child: quietAsset('pause', 56.356)),
-      ],
+    child: ColorFiltered(
+      colorFilter: _invert,
+      child: Stack(alignment: Alignment.center, children: [
+        ColorFiltered(colorFilter: _invert,
+          child: Stack(fit: StackFit.expand, children: [
+            const ColoredBox(color: quietGreen),
+            RotationTransition(turns: _turn,
+              child: OverflowBox(maxWidth: 87.607, maxHeight: 87.607,
+                child: ImageFiltered(imageFilter: ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+                  child: quietAsset('connecting_glow', 87.607)))),
+            const ColoredBox(color: Color(0x33299171)),
+          ])),
+        _AdditiveLayer(child: ColorFiltered(colorFilter: _invert,
+          child: SizedBox(width: 19.584, height: 27.929,
+            child: quietAsset('pause_glyph', 27.929)))),
+      ]),
     ),
   );
+}
+
+// Figma plus-darker: max(0, source + destination - 1).
+// Flutter has additive blending, so invert both inputs, add, then invert
+// the isolated result. This preserves the moving background inside the glyph.
+const _invert = ColorFilter.matrix([
+  -1, 0, 0, 0, 255,
+  0, -1, 0, 0, 255,
+  0, 0, -1, 0, 255,
+  0, 0, 0, 1, 0,
+]);
+class _AdditiveLayer extends SingleChildRenderObjectWidget {
+  const _AdditiveLayer({required super.child});
+  @override
+  RenderObject createRenderObject(BuildContext context) => _RenderAdditiveLayer();
+}
+class _RenderAdditiveLayer extends RenderProxyBox {
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    context.canvas.saveLayer(offset & size, Paint()..blendMode = BlendMode.plus);
+    super.paint(context, offset);
+    context.canvas.restore();
+  }
 }
 
 class LoadingMark extends StatefulWidget {
