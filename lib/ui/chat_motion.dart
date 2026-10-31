@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'quiet_theme.dart';
 
@@ -38,9 +39,11 @@ class _ConnectingControlState extends State<ConnectingControl>
         RotationTransition(
           turns: _turn,
           child: OverflowBox(maxWidth: 87.607, maxHeight: 87.607,
-            child: quietAsset('connecting_glow', 87.607)),
+            child: ImageFiltered(imageFilter: ui.ImageFilter.blur(sigmaX: 6, sigmaY: 6),
+              child: quietAsset('connecting_glow', 87.607))),
         ),
-        quietAsset('pause', 56.356),
+        ColorFiltered(colorFilter: const ColorFilter.mode(quietNavy, BlendMode.srcIn),
+          child: quietAsset('pause', 56.356)),
       ],
     ),
   );
