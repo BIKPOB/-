@@ -671,7 +671,15 @@ class _HomePageState extends State<HomePage>
                         color: quietGreen,
                         radius: const BorderRadius.horizontal(left: Radius.circular(23.8)),
                         onTap: !vm.ready || vm.busy && !vm.autoSelecting ? null : _runAi,
-                        child: Padding(
+                        child: Stack(fit: StackFit.expand, children: [
+                          if (vm.autoSelecting && vm.searching && vm.searchProgress.divisions > 0)
+                            Align(alignment: Alignment.centerLeft,
+                              child: FractionallySizedBox(
+                                widthFactor: vm.searchProgress.fraction(DateTime.now()) ?? 0,
+                                heightFactor: 1,
+                                child: Container(decoration: BoxDecoration(color: quietNavy, borderRadius: BorderRadius.circular(11.479))),
+                              )),
+                          Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 6.6),
                           child: Row(children: [
                             quietAsset(vm.canDisconnect && !vm.autoSelecting ? 'reserve' : 'ai', 16.976),
@@ -680,7 +688,8 @@ class _HomePageState extends State<HomePage>
                               vm.canDisconnect ? 'Подобрать резерв' : 'ИИ поиск',
                               style: quietText(12.8), maxLines: 1)),
                           ]),
-                        ),
+                          ),
+                        ]),
                       ),
                     ),
                     Positioned(left: 257.669, top: 18.787,
@@ -702,12 +711,6 @@ class _HomePageState extends State<HomePage>
                         vm.ready && !_working && (Platform.isAndroid || vm.engine is SiteBypassHost)
                           ? _openBypass : null,
                         tooltip: Platform.isWindows ? 'Обход сайтов' : 'Обход приложений')),
-                    if (vm.autoSelecting && vm.searching)
-                      Positioned(left: 26.75, top: 88, width: 259.2,
-                        child: vm.searchProgress.divisions == 0
-                          ? const LinearProgressIndicator(color: Colors.white, backgroundColor: quietGreen)
-                          : DividedProgress(divisions: vm.searchProgress.divisions,
-                              completed: vm.searchProgress.steps(DateTime.now()))),
                   ],
                   Positioned(left: 296.979, top: 18.606, width: 56.556, height: 56.556,
                     child: QuietAction(
@@ -805,12 +808,13 @@ class _HomePageState extends State<HomePage>
                 ],
               ),
             ),
+            SizedBox(height: (bounds.maxHeight * .12).clamp(20, 110)),
             Expanded(
               child: ListView(
                 controller: _chatScroll,
                 padding: EdgeInsets.fromLTRB(
                   24,
-                  (bounds.maxHeight * .12).clamp(20, 110),
+                  0,
                   12,
                   16,
                 ),
@@ -825,7 +829,7 @@ class _HomePageState extends State<HomePage>
                     ChatBubble(
                       key: const ValueKey('search-progress'),
                       text: vm.searching
-                          ? 'Подключение · ${vm.searchProgress.label(DateTime.now())}'
+                          ? (vm.searchProgress.divisions == 0 ? 'Подготовка очереди…' : 'Подключение · ${vm.searchProgress.label(DateTime.now())}')
                           : vm.reserveStatus,
                     ),
                   if (vm.canDisconnect &&

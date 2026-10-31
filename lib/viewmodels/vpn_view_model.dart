@@ -896,11 +896,12 @@ class VpnViewModel extends ChangeNotifier {
     if (!_nativeNeedsStop && (state == ConnectionState.disconnected || state == ConnectionState.error)) sessionClock.stopped();
     if (autoStatus != null && autoStatus != _lastActivity) {
       _lastActivity = autoStatus;
-      _appendMessage(autoStatus!, error: !autoSelecting && !connectionVerified);
+      // Live search updates belong to one changing bubble, not chat history.
+      if (!autoSelecting) _appendMessage(autoStatus!, error: !connectionVerified);
     }
     if (state != _lastState) {
       _lastState = state;
-      if (state == ConnectionState.error) {
+      if (state == ConnectionState.error && !autoSelecting) {
         _appendMessage(message ?? 'Не удалось подключиться', error: true);
       } else if (!autoSelecting && state == ConnectionState.connecting) {
         _appendMessage('Подключение…');

@@ -92,6 +92,20 @@ void main() {
     expect(tester.getRect(find.byWidget(panel)).bottom, 844);
     await tester.tap(find.byTooltip('Закрыть'));
     await tester.pumpAndSettle();
+    final messageCount = vm.messages.length;
+    vm.autoSelecting = true;
+    for (var second = 1; second <= 15; second++) {
+      vm.autoStatus = 'Параллельная проверка HTTPS: $second/100 с';
+      vm.filterProtocol(null);
+    }
+    expect(vm.messages.length, messageCount);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    await capture(tester, 'connecting');
+    vm.autoSelecting = false;
+    vm.autoStatus = null;
+    vm.filterProtocol(null);
+    await tester.pumpAndSettle();
     expect(find.text('Обход'), findsOneWidget);
     expect(find.byTooltip('Выбор сервера'), findsOneWidget);
     expect(find.text('Информация'), findsOneWidget);
