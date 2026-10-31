@@ -28,6 +28,8 @@ class _HomePageState extends State<HomePage>
   bool _settings = false,
       _deep = false,
       _initialized = false,
+      _startupReady = false,
+      _logoFinished = false,
       _trayReady = false;
   final _chatScroll = ScrollController();
   int _seenMessages = 0;
@@ -272,9 +274,9 @@ class _HomePageState extends State<HomePage>
 
   Future<void> _initialize() async {
     unawaited(_initializeTray());
-    await Future.wait([vm.initialize(), Future<void>.delayed(const Duration(milliseconds: 1100))]);
+    await vm.initialize();
     if (!mounted) return;
-    setState(() => _initialized = true);
+    setState(() { _startupReady = true; _initialized = _logoFinished; });
   }
 
   Future<void> _power() async {
@@ -391,7 +393,7 @@ class _HomePageState extends State<HomePage>
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(width: double.infinity, child: FittedBox(child: SizedBox(
-            width: 327.3, height: 51.3,
+            width: 327.35, height: 51.3,
             child: Column(children: [
               SizedBox(height: 41.8, child: Row(children: [
                 SizedBox(width: 71.8, child: Tooltip(message: 'Закрыть',
@@ -594,7 +596,7 @@ class _HomePageState extends State<HomePage>
         Positioned(left: 3.879, top: 30.917, width: 191.526, height: 23.885,
           child: Semantics(label: 'Режим поиска', value: _deep ? 'Глубокий поиск' : 'Быстрый поиск', button: true,
             child: GestureDetector(onTap: _working ? null : () => setState(() => _deep = !_deep),
-              child: Container(padding: const EdgeInsets.all(3.2),
+              child: Container(padding: const EdgeInsets.all(1.2),
                 decoration: BoxDecoration(border: Border.all(color: Colors.white, width: 2),
                   borderRadius: BorderRadius.circular(23.885)),
                 child: AnimatedAlign(duration: _motion,
@@ -648,7 +650,7 @@ class _HomePageState extends State<HomePage>
             child: FittedBox(
               alignment: Alignment.topCenter,
               child: SizedBox(
-                width: 376.8, height: _settings ? 174 : 129.8,
+                width: 376.8, height: 129.8,
                 child: Stack(children: [
                   if (_settings)
                     Positioned(left: 26.75, top: 18.8, width: 259.2,
@@ -889,7 +891,9 @@ class _HomePageState extends State<HomePage>
                     key: const ValueKey('loading'),
                     child: FractionallySizedBox(
                       widthFactor: .75,
-                      child: const LoadingMark(),
+                      child: LoadingMark(onComplete: () {
+                        if (mounted) setState(() { _logoFinished = true; _initialized = _startupReady; });
+                      }),
                     ),
                   )
                 : _mainScreen(),

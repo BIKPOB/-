@@ -568,6 +568,8 @@ void main() {
       catalogLoader:()=>catalog.future,networkReader:()async=>'wifi');
     await tester.pumpWidget(MaterialApp(home:HomePage(vm)));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1100));
+    await tester.pump();
     final search=vm.autoConnect();await tester.pump();
     expect(vm.autoSelecting,true);
     expect(find.text('ИИ поиск…'),findsOneWidget);

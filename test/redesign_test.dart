@@ -163,6 +163,7 @@ void main() {
     );
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
     expect(find.text('fixture'), findsNothing);
     await tester.ensureVisible(find.byTooltip('Выбор сервера'));
     await tester.tap(find.byTooltip('Выбор сервера'));

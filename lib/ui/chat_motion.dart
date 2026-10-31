@@ -110,7 +110,8 @@ class _ConnectingPainter extends CustomPainter {
 }
 
 class LoadingMark extends StatefulWidget {
-  const LoadingMark({super.key});
+  const LoadingMark({super.key, this.onComplete});
+  final VoidCallback? onComplete;
   @override
   State<LoadingMark> createState() => _LoadingMarkState();
 }
@@ -121,6 +122,17 @@ class _LoadingMarkState extends State<LoadingMark>
     vsync: this,
     duration: const Duration(milliseconds: 1000),
   );
+  @override
+  void initState() {
+    super.initState();
+    _animation.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) widget.onComplete?.call();
+        });
+      }
+    });
+  }
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
