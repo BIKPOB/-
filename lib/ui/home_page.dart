@@ -675,6 +675,7 @@ class _HomePageState extends State<HomePage>
                           if (vm.autoSelecting && vm.searching && vm.searchProgress.divisions > 0)
                             Align(alignment: Alignment.centerLeft,
                               child: FractionallySizedBox(
+                                key: const ValueKey('search-button-progress'),
                                 widthFactor: vm.searchProgress.fraction(DateTime.now()) ?? 0,
                                 heightFactor: 1,
                                 child: Container(decoration: BoxDecoration(color: quietNavy, borderRadius: BorderRadius.circular(11.479))),

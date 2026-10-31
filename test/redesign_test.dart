@@ -13,6 +13,14 @@ import 'package:quiet_vpn/viewmodels/vpn_view_model.dart';
 import 'view_model_test.dart'
     show ControlledEngine, EmptyProfiles, MemoryProfiles, IdleBaselineMonitor;
 
+class PreviewViewModel extends VpnViewModel {
+  PreviewViewModel(super.engine, super.store, super.monitor, {
+    super.baselineMonitor, super.catalogLoader, super.networkReader,
+  });
+  @override
+  bool get searching => autoSelecting;
+}
+
 final previewKey = GlobalKey();
 Future<void> capture(WidgetTester tester, String name) async {
   await tester.runAsync(() async {
@@ -48,7 +56,7 @@ void main() {
     addTearDown(tester.view.resetPadding);
     addTearDown(tester.view.resetViewPadding);
     final engine = ControlledEngine();
-    final vm = VpnViewModel(
+    final vm = PreviewViewModel(
       engine,
       EmptyProfiles(),
       ServerMonitor(
@@ -94,6 +102,7 @@ void main() {
     await tester.pumpAndSettle();
     final messageCount = vm.messages.length;
     vm.autoSelecting = true;
+    vm.searchProgress.start(false, DateTime.now().subtract(const Duration(seconds: 10)));
     for (var second = 1; second <= 15; second++) {
       vm.autoStatus = 'Параллельная проверка HTTPS: $second/100 с';
       vm.filterProtocol(null);
@@ -128,7 +137,7 @@ void main() {
   });
   testWidgets('server list only appears in server panel', (tester) async {
     final engine = ControlledEngine();
-    final vm = VpnViewModel(
+    final vm = PreviewViewModel(
       engine,
       MemoryProfiles(),
       ServerMonitor(
