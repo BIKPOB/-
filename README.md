@@ -4,9 +4,9 @@
 
 ## Скачать готовое приложение
 
-- **[Android: APK 1.0.0](https://github.com/BIKPOB/-/releases/download/v1.0.0/quiet-vpn-1.0.0.apk)** — Android 8+, ARM64 / ARMv7.
-- **[Windows: установщик EXE 1.0.0](https://github.com/BIKPOB/-/releases/download/v1.0.0/quiet-vpn-1.0.0-windows-x64-setup.exe)** — Windows 10/11 x64.
-- [Релиз, примечания и контрольные суммы](https://github.com/BIKPOB/-/releases/tag/v1.0.0).
+- **[Android: APK 1.0.2](https://github.com/BIKPOB/-/releases/download/v1.0.2/quiet-vpn-1.0.2.apk)** — Android 8+, ARM64 / ARMv7.
+- **[Windows: установщик EXE 1.0.2](https://github.com/BIKPOB/-/releases/download/v1.0.2/quiet-vpn-1.0.2-windows-x64-setup.exe)** — Windows 10/11 x64.
+- [Релиз, примечания и контрольные суммы](https://github.com/BIKPOB/-/releases/tag/v1.0.2).
 
 В разделе **Assets** выбирайте `.apk` для телефона или `windows-x64-setup.exe` для компьютера. Архивы **Source code** содержат исходники, устанавливать их не нужно.
 
@@ -15,6 +15,10 @@ Windows требует права администратора для VPN. Ус�
 Flutter MVVM клиент для WireGuard/AmneziaWG, VLESS и Shadowsocks. Сохранены импорт профилей, публичные каталоги, быстрый и глубокий ИИ-подбор, локальное обучение, диагностика, проверка загрузки и счётчики трафика. Выбор приложений в обход VPN доступен только на Android.
 
 Релиз публикуется после успешных сборок Android и Windows из одного коммита, тестов и сверки контрольных сумм. [Результаты Actions](https://github.com/BIKPOB/-/actions). Сборочные тесты не гарантируют доступность публичных серверов через конкретного оператора.
+
+## Исправления интерфейса 1.0.2
+
+Шапка списка серверов и компактные настройки ИИ приведены к Page 2 Figma. Восстановлены наложение цветов внутри знака паузы и полный показ загрузочной анимации. Перед ручным подключением и ИИ-поиском появляется предупреждение о стороннем VPN.
 
 ## Интерфейс и исправления 1.0.0
 
