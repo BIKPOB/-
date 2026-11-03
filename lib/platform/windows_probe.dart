@@ -199,7 +199,7 @@ class WindowsProbe {
           'bytesPerSecond': speed, 'detail': 'Windows VPN: DNS, HTTPS и ${bytes ~/ 1024} КиБ за ${download.elapsedMilliseconds} мс · ${(speed * 8 / 1000000).toStringAsFixed(2)} Мбит/с'};
       })().timeout(const Duration(seconds: 27));
     } catch (e) {
-      return {'delay': -1, 'quality': false, 'detail': 'Проверка через интерфейс VPN: $phase · ${e is HttpException ? e.message : e.runtimeType} · ${clock.elapsedMilliseconds} мс · $bytes байт'};
+      return {'delay': -1, 'quality': false, 'detail': 'Проверка через интерфейс VPN: $phase · ${e is HttpException ? e.message : e is SocketException ? 'SocketException · код ОС ${e.osError?.errorCode ?? 'нет'} · ${token != _generation ? 'проверка отменена' : 'ошибка сети'}' : e.runtimeType} · ${clock.elapsedMilliseconds} мс · $bytes байт'};
     } finally { client.close(force: true); if (identical(_client, client)) _client = null; }
   }
 }

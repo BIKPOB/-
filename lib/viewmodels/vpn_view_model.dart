@@ -619,7 +619,7 @@ class VpnViewModel extends ChangeNotifier {
         }
         final medianSpeed = speeds.isEmpty ? null : speeds[speeds.length ~/ 2];
         final usable = state == ConnectionState.connected && !repeatFailed &&
-            medianSpeed != null && medianSpeed > 0 && sameNetwork;
+            medianSpeed != null && medianSpeed > 0 && speeds.every((speed) => speed > 0) && sameNetwork;
         // Short repeated downloads measure consistency, not long-session stability.
         final utility = medianSpeed == null ? 0.0 :
           (.75 * (medianSpeed / (medianSpeed + 524288)) +
@@ -634,7 +634,7 @@ class VpnViewModel extends ChangeNotifier {
             success ? 'verified' : usable ? 'usable' : medianSpeed != null ? 'slow_or_unstable' : 'unconfirmed',
             speed: medianSpeed, reward: medianSpeed == null || repeatFailed ? null : .2 + .8 * utility);
         }
-        if (usable && !context.ambiguous && (!_requiresSpeed || success)) {
+        if (usable && !context.ambiguous && (!_requiresSpeed || success || deep)) {
           finalists.add((server: server, utility: utility, speed: speeds.first, qualified: success));
           autoAttemptReports.add('${speeds.length} замер(а): ${speeds.map((n) => '${(n / 1024).round()} КиБ/с').join(', ')}');
         }
@@ -659,7 +659,7 @@ class VpnViewModel extends ChangeNotifier {
         // Keep the best live tunnel when comparison is complete: reconnecting
         // a public endpoint can fail even immediately after a successful sample.
         final comparisonDone = finalists.where((candidate) => !_requiresSpeed || candidate.qualified).length >= 2 || server == ordered.last || searchClock.elapsed >= budget;
-        if (deep && usable && (!_requiresSpeed || success) && !context.ambiguous && comparisonDone &&
+        if (deep && usable && !context.ambiguous && comparisonDone &&
             finalists.every((candidate) => _requiresSpeed ? candidate.speed <= speeds.first : candidate.utility <= utility)) {
           connectionVerified = success;
           measuredBytesPerSecond = medianSpeed;

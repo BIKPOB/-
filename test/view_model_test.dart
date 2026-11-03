@@ -398,6 +398,24 @@ void main() {
       } finally { vm.dispose(); await engine.dispose(); }
     });
   }
+  test('deep search retains a working slow desktop tunnel when no faster candidate exists', () async {
+    final engine = SlowDesktopEngine();
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      baselineMonitor: IdleBaselineMonitor(),
+      catalogLoader: () async => const PublicCatalogResult([], false, 0),
+      autoMonitor: ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)));
+    try {
+      await vm.initialize(); await vm.autoConnect(deep: true);
+      expect(engine.connects, 1);
+      expect(engine.disconnects, 0);
+      expect(vm.canDisconnect, isTrue);
+      expect(vm.connectionVerified, isFalse);
+      expect(vm.measuredBytesPerSecond, 387500);
+      expect(vm.autoStatus, contains('ниже цели'));
+      await vm.disconnect();
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   test('desktop never preserves a 3.1 Mbit reserve against an 18.2 Mbit goal', () async {
     final engine=SlowDesktopEngine();
     final vm=VpnViewModel(engine,MemoryProfiles(),ServerMonitor(),
