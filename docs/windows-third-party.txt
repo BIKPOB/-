@@ -1,0 +1,19 @@
+Quiet VPN Windows bundled engines
+
+Xray-core (MPL-2.0): built from source commit c77a4d0e4932a53f3eeafafdfef877b56fd660ad.
+https://github.com/XTLS/Xray-core/tree/c77a4d0e4932a53f3eeafafdfef877b56fd660ad
+No source modifications. LICENSE included as Xray.txt.
+
+AmneziaWG Windows 3.1.0 (MIT): unmodified amneziawg.exe extracted from the official AMD64 MSI.
+https://github.com/amnezia-vpn/amneziawg-windows-client/tree/3.1.0
+https://github.com/amnezia-vpn/amneziawg-windows-client/releases/tag/3.1.0
+COPYING included as AmneziaWG.txt.
+
+Wintun 0.14.1: official signed binary; redistribution license included as Wintun.txt.
+https://www.wintun.net/
+
+Microsoft Edge WebView2: official signed bootstrapper, optional installer task.
+https://developer.microsoft.com/microsoft-edge/webview2/
+It downloads the runtime from Microsoft and requires Internet access.
+
+Flutter and plugins: versions recorded in DEPENDENCIES.lock in the CI artifact.
