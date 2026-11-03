@@ -206,7 +206,50 @@ class BaseNetworkErrorEngine extends ControlledEngine {
     throw PlatformException(code: 'BASE_NETWORK', message: 'Нет однозначной базовой сети');
   }
 }
+class StalledSearchEngine extends ControlledEngine {
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async { connects++; }
+}
 void main() {
+  test('network ownership distinguishes our VPN from a foreign VPN', () {
+    expect(NetworkContext.fromMap({'vpnPresent':true, 'ownVpn':true, 'foreignVpn':false}).hasForeignVpn, isFalse);
+    expect(NetworkContext.fromMap({'vpnPresent':true, 'ownVpn':true, 'foreignVpn':true}).hasForeignVpn, isTrue);
+    expect(NetworkContext.fromMap({'vpnPresent':true}).hasForeignVpn, isTrue);
+  });
+  test('own VPN route does not trigger foreign-VPN warning on reconnect', () async {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    const channel = MethodChannel('quietvpn/catalog-cache');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async =>
+      call.method == 'networkContext' ? {'type':'wifi','vpnPresent':true,'ownVpn':true,'foreignVpn':false} : null);
+    final engine = FailedEngine();
+    final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(), baselineMonitor: IdleBaselineMonitor(),
+      catalogLoader: () async => const PublicCatalogResult([],false,0));
+    try {
+      await vm.initialize(); await vm.reconnectFromAdvice();
+      expect(engine.connects, 1);
+      expect(vm.messages.any((m)=>m.text.contains('Отключите сторонний VPN')), isFalse);
+    } finally { vm.dispose(); await engine.dispose(); messenger.setMockMethodCallHandler(channel,null); }
+  });
+  testWidgets('quick search moves to the next stalled candidate within five seconds', (tester) async {
+    final engine = StalledSearchEngine();
+    final other = VpnServer.fromJson({...server.toJson(), 'id':'other', 'host':'9.9.9.9',
+      'profile':server.profile.replaceAll('8.8.8.8','9.9.9.9')});
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.notMeasured)),
+      baselineMonitor: IdleBaselineMonitor(), networkReader: () async => 'wifi',
+      catalogLoader: () async => PublicCatalogResult([other],false,0));
+    await vm.initialize();
+    final search=vm.autoConnect(); await tester.pump();
+    expect(engine.connects,1);
+    await tester.pump(const Duration(seconds:5)); await tester.pump(const Duration(milliseconds:200));
+    expect(engine.disconnects,greaterThanOrEqualTo(1));
+    expect(engine.connects,2);
+    await tester.pump(const Duration(seconds:5)); await tester.pump(const Duration(milliseconds:200));
+    await search;
+    expect(vm.autoSelecting,isFalse);
+    vm.dispose(); await engine.dispose();
+  });
+
   test('foreign VPN blocks quick and manual connection before starting a tunnel', () async {
     TestWidgetsFlutterBinding.ensureInitialized();
     const channel = MethodChannel('quietvpn/catalog-cache');

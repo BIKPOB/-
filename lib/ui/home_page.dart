@@ -309,7 +309,7 @@ class _HomePageState extends State<HomePage>
       await vm.checkReserve();
       return;
     }
-    if (_deep) await vm.enableNetworkAnalysis();
+    if (_deep) await vm.enableNetworkAnalysis(refresh: false);
     if (!mounted) return;
     await vm.autoConnect(deep: _deep);
   }
@@ -823,7 +823,7 @@ class _HomePageState extends State<HomePage>
                     ChatBubble(
                       key: const ValueKey('search-progress'),
                       text: vm.searching
-                          ? (vm.searchProgress.divisions == 0 ? 'Подготовка очереди…' : 'Подключение · ${vm.searchProgress.label(DateTime.now())}')
+                          ? (vm.searchProgress.divisions == 0 ? (vm.autoStatus ?? 'Подготовка очереди…') : 'Подключение · ${vm.searchProgress.label(DateTime.now())}')
                           : vm.reserveStatus,
                     ),
                   if (vm.canDisconnect &&

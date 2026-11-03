@@ -142,6 +142,18 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost {
           await Future<void>.delayed(const Duration(milliseconds: 250));
         }
       }
+      // The service may report DISCONNECTED before ConnectivityManager has
+      // removed its VPN network. Do not let the next search see our old route.
+      for (var i = 0; i < 20; i++) {
+        Map<dynamic, dynamic>? snapshot;
+        try {
+          snapshot = await const MethodChannel('quietvpn/catalog-cache')
+              .invokeMapMethod<dynamic, dynamic>('networkContext');
+        } on MissingPluginException { break; }
+        if (snapshot?['ownVpn'] != true) break;
+        if (i == 19) throw StateError('Системный маршрут Quiet VPN ещё отключается');
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
       _counters = null; _emit(ConnectionState.disconnected);
     } finally { _stopping = false; }
   }

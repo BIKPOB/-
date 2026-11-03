@@ -21,14 +21,19 @@ object NetworkSnapshot {
     }
     fun read(context: Context, extended: Boolean = false): Map<String, Any?> {
         val cm = context.getSystemService(ConnectivityManager::class.java)
-        val vpnPresent = cm.allNetworks.any { cm.getNetworkCapabilities(it)?.hasTransport(NC.TRANSPORT_VPN) == true }
+        val vpns = cm.allNetworks.mapNotNull { cm.getNetworkCapabilities(it) }
+            .filter { it.hasTransport(NC.TRANSPORT_VPN) }
+        val vpnPresent = vpns.isNotEmpty()
+        val ownVpn = Build.VERSION.SDK_INT >= 30 && vpns.any { it.ownerUid == android.os.Process.myUid() }
+        val foreignVpn = if (Build.VERSION.SDK_INT >= 30)
+            vpns.any { it.ownerUid != android.os.Process.myUid() } else null
         val physical = cm.allNetworks.mapNotNull { n -> cm.getNetworkCapabilities(n)?.let { n to it } }
             .filter { it.second.hasCapability(NC.NET_CAPABILITY_INTERNET) && !it.second.hasTransport(NC.TRANSPORT_VPN) }
         val chosen = try { BaseNetwork.select(cm) } catch (_: BaseNetworkException) { null }
         if (chosen == null) return mapOf(
             "type" to if (physical.isEmpty()) "offline" else "other",
             "session" to physical.map { it.first.networkHandle }.sorted().joinToString(","),
-            "ambiguous" to physical.isNotEmpty(), "vpnPresent" to vpnPresent
+            "ambiguous" to physical.isNotEmpty(), "vpnPresent" to vpnPresent, "ownVpn" to ownVpn, "foreignVpn" to foreignVpn
         )
         val (network, caps) = chosen
         val signal = if (Build.VERSION.SDK_INT >= 29) caps.signalStrength.takeIf { it != Int.MIN_VALUE } else null
@@ -63,7 +68,7 @@ object NetworkSnapshot {
         }
         return mapOf(
             "historyKey" to NetworkIdentity.read(context, caps),
-            "vpnPresent" to vpnPresent,
+            "vpnPresent" to vpnPresent, "ownVpn" to ownVpn, "foreignVpn" to foreignVpn,
             "extended" to extended,
             "phoneGranted" to (context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED),
             "wifiMhz" to wifi?.frequency?.takeIf { it > 0 },
