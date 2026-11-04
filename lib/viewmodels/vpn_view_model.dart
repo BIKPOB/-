@@ -189,6 +189,9 @@ class VpnViewModel extends ChangeNotifier {
           await _stopHealthChecks();
           final context = await _network();
           if (_disposed || (!_desktop && !_foreground) || autoSelecting || _nativeNeedsStop || busy) return;
+          if (_healthContext != null && !_healthContext!.sameConnection(context)) {
+            _protocolHealth.clear(); _backgroundHealth.clear(); health.clear();
+          }
           networkContext = context;
           if (networkAnalysis?.fresh(context,DateTime.now()) != true) {
             networkAnalysis = null;
@@ -1013,7 +1016,7 @@ class VpnViewModel extends ChangeNotifier {
   }
   void refreshLatency() {
     if (engine is CandidateHost) {
-      _protocolHealth.clear(); _backgroundHealth.clear();
+      _protocolHealth.clear(); _backgroundHealth.clear(); health.clear();
       _scheduleBackgroundPreflight(immediate: true); _notify(); return;
     }
     _probeEpoch++; monitor.cancel();
@@ -1070,11 +1073,11 @@ class VpnViewModel extends ChangeNotifier {
         bool live() => token == _backgroundEpoch && !_disposed && !autoSelecting && !busy && !_nativeNeedsStop && (_foreground || _desktop);
         if (!live()) return;
         if (context.vpnPresent || context.ambiguous || context.type == 'offline') {
-          _protocolHealth.clear(); _backgroundHealth.clear();
+          _protocolHealth.clear(); _backgroundHealth.clear(); health.clear();
           backgroundStatus = 'Проверка серверов: ожидание прямого маршрута без VPN'; return;
         }
         if (_healthContext?.sameConnection(context) != true) {
-          _protocolHealth.clear(); _backgroundHealth.clear();
+          _protocolHealth.clear(); _backgroundHealth.clear(); health.clear();
         }
         _healthContext = context;
         _healthCatalog ??= (await _catalogLoader()).servers;

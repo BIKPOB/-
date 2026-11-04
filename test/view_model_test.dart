@@ -506,10 +506,12 @@ void main() {
     } finally { vm.dispose(); await engine.dispose(); }
   });
   testWidgets('background HTTPS verifies catalog and imported profiles without TCP grades', (tester) async {
-    final engine=ProxyLabEngine(), lab=HealthLabFixture(ProxyLabEngine());
+    final engine=ProxyLabEngine();
+    final lab=HealthLabFixture(engine);
+    var network='wifi';
     final vm=VpnViewModel(engine,MemoryProfiles(),ServerMonitor(),
       healthLabFactory:(_)=>lab, networkAnalyzer:CountingNetworkAnalyzer(),baselineMonitor:IdleBaselineMonitor(),
-      catalogLoader:() async=>const PublicCatalogResult([],false,0),networkReader:()async=>'wifi');
+      catalogLoader:() async=>const PublicCatalogResult([],false,0),networkReader:()async=>network);
     try {
       await vm.initialize();
       await tester.pump(const Duration(seconds:1));
@@ -522,6 +524,10 @@ void main() {
       expect(vm.backgroundStatus,contains('подтверждено 1'));
       await tester.pump(const Duration(seconds:10));
       expect(lab.calls,1,reason:'Fresh results must not be rechecked');
+      network='mobile';
+      await tester.pump(const Duration(seconds:10));
+      await tester.pump();
+      expect(vm.serverHealth(server)?.protocolVerified,isNot(isTrue),reason:'Old-network aliases must be cleared');
     } finally { vm.dispose(); await engine.dispose(); }
   });
   test('quick selection keeps the first measured slow connection without reconnecting', () async {
