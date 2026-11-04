@@ -86,6 +86,20 @@ class ProxyLabEngine extends MeasuredEngine implements CandidateHost {
   @override Future<void> startCandidates(String configuration) async {throw StateError('Not used in manual test');}
   @override Future<void> stopCandidates() async {}
 }
+class HealthLabFixture extends CandidateLab {
+  HealthLabFixture(super.host);
+  int calls=0;
+  @override Future<List<CandidateResult>> run(List<VpnServer> candidates,{required bool deep,
+    required bool metered,bool healthOnly=false,int target=131072,NetworkAnalysis? analysis,
+    SelectionPolicy policy=const SelectionPolicy(),required Future<bool> Function() routeValid,
+    required void Function(String) status,void Function(CandidateResult)? onResult,
+    Future<void> Function(List<VpnServer>)? onAttempt}) async {
+    expect(healthOnly,isTrue);
+    expect(await routeValid(),isTrue);
+    calls++;
+    return [for(final server in candidates) CandidateResult(server,42,[],null)];
+  }
+}
 class IdleBaselineMonitor extends BaselineMonitor {
   @override Future<void> pause(bool value) async {}
   @override Future<NetworkBaseline?> tick(NetworkContext context,
@@ -491,28 +505,23 @@ void main() {
       await vm.disconnect();
     } finally { vm.dispose(); await engine.dispose(); }
   });
-  testWidgets('fresh background endpoint check is reused by selection', (tester) async {
-    final engine = MeasuredEngine();
-    var backgroundProbes = 0, selectionProbes = 0;
-    final vm = VpnViewModel(engine, MemoryProfiles(),
-      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
-      catalogLoader: () async => const PublicCatalogResult([], false, 0), networkReader: () async => 'wifi',
-      backgroundMonitor: ServerMonitor(probe: (_) async {
-        backgroundProbes++; return const HealthResult(Reachability.reachable, 12);
-      }),
-      autoMonitor: ServerMonitor(probe: (_) async {
-        selectionProbes++; return const HealthResult(Reachability.reachable, 99);
-      }));
+  testWidgets('background HTTPS verifies catalog and imported profiles without TCP grades', (tester) async {
+    final engine=ProxyLabEngine(), lab=HealthLabFixture(ProxyLabEngine());
+    final vm=VpnViewModel(engine,MemoryProfiles(),ServerMonitor(),
+      healthLabFactory:(_)=>lab, networkAnalyzer:CountingNetworkAnalyzer(),baselineMonitor:IdleBaselineMonitor(),
+      catalogLoader:() async=>const PublicCatalogResult([],false,0),networkReader:()async=>'wifi');
     try {
       await vm.initialize();
-      await tester.pump(const Duration(seconds: 3));
+      await tester.pump(const Duration(seconds:1));
       await tester.pump();
-      expect(backgroundProbes, 1);
-      expect(vm.backgroundStatus, contains('доступно 1'));
-      await vm.autoConnect();
-      expect(selectionProbes, 0);
-      expect(vm.state, ConnectionState.connected);
-      await vm.disconnect();
+      await tester.pump(const Duration(seconds:10));
+      await tester.pump();
+      expect(lab.calls,1);
+      expect(vm.serverHealth(server)?.protocolVerified,isTrue);
+      expect(vm.serverHealth(server)?.milliseconds,42);
+      expect(vm.backgroundStatus,contains('подтверждено 1'));
+      await tester.pump(const Duration(seconds:10));
+      expect(lab.calls,1,reason:'Fresh results must not be rechecked');
     } finally { vm.dispose(); await engine.dispose(); }
   });
   test('quick selection keeps the first measured slow connection without reconnecting', () async {
@@ -608,7 +617,8 @@ void main() {
     var network='wifi';
     final vm=VpnViewModel(engine,EmptyProfiles(),
       ServerMonitor(probe:(_) async=>const HealthResult(Reachability.reachable,1)),
-      networkAnalyzer:analyzer,baselineMonitor:IdleBaselineMonitor(),networkReader:()async=>network);
+      networkAnalyzer:analyzer,baselineMonitor:IdleBaselineMonitor(),networkReader:()async=>network,
+      catalogLoader:()async=>const PublicCatalogResult([],false,0));
     await tester.pumpWidget(MaterialApp(home:HomePage(vm)));
     await tester.pump();
     expect(find.text('Исследовать Wi-Fi / LTE / Ethernet'),findsNothing);

@@ -31,9 +31,9 @@ import '../core/site_bypass.dart';
 class VpnViewModel extends ChangeNotifier {
   VpnViewModel(this.engine, this.store, this.monitor, {
     Future<PublicCatalogResult> Function()? catalogLoader, NetworkAnalyzer? networkAnalyzer, BaselineMonitor? baselineMonitor,
-    CandidateLab Function(ReserveCandidateHost)? reserveLabFactory, DateTime Function()? reserveClock,
+    CandidateLab Function(CandidateHost)? healthLabFactory, CandidateLab Function(ReserveCandidateHost)? reserveLabFactory, DateTime Function()? reserveClock,
     Future<String> Function()? networkReader, ServerMonitor? autoMonitor, ServerMonitor? backgroundMonitor,
-  }) : _baselineMonitor=baselineMonitor??BaselineMonitor(), _networkAnalyzer=networkAnalyzer??NetworkAnalyzer(), _reserveLabFactory=reserveLabFactory, _reserveNow=reserveClock??DateTime.now,
+  }) : _healthLabFactory=healthLabFactory, _baselineMonitor=baselineMonitor??BaselineMonitor(), _networkAnalyzer=networkAnalyzer??NetworkAnalyzer(), _reserveLabFactory=reserveLabFactory, _reserveNow=reserveClock??DateTime.now,
        _catalogLoader = catalogLoader ?? PublicCatalog().load,
        _quickCatalogLoader = catalogLoader ?? PublicCatalog().local,
        _networkReader = networkReader, _autoMonitor = autoMonitor ?? ServerMonitor(tcpOnly: true),
@@ -81,6 +81,7 @@ class VpnViewModel extends ChangeNotifier {
   Timer? _backgroundTimer;
   int _backgroundEpoch = 0;
   String? backgroundStatus;
+  final CandidateLab Function(CandidateHost)? _healthLabFactory;
   CandidateLab? _healthLab;
   Future<void>? _healthPending, _healthStopping;
   List<VpnServer>? _healthCatalog;
@@ -184,7 +185,8 @@ class VpnViewModel extends ChangeNotifier {
     if (_disposed || !ready || (!Platform.isWindows && !_foreground)) return;
     _baselineTimer = Timer(Duration(seconds: immediate ? 1 : 30), () async {
       try {
-        if (!autoSelecting && !_nativeNeedsStop && !busy && _healthPending == null) {
+        if (!autoSelecting && !_nativeNeedsStop && !busy) {
+          await _stopHealthChecks();
           final context = await _network();
           if (_disposed || (!_desktop && !_foreground) || autoSelecting || _nativeNeedsStop || busy) return;
           networkContext = context;
@@ -211,7 +213,7 @@ class VpnViewModel extends ChangeNotifier {
           }
         }
       } catch (_) { baselineStatus = 'Прямой замер временно недоступен; наблюдение продолжается'; }
-      finally { if (!_disposed) { _notify(); _scheduleBaseline(); } }
+      finally { if (!_disposed) { _notify(); _scheduleBaseline(); _scheduleBackgroundPreflight(); } }
     });
   }
   static const _networkChannel = MethodChannel('quietvpn/catalog-cache');
@@ -1107,7 +1109,7 @@ class VpnViewModel extends ChangeNotifier {
         });
         final batch = candidates.take(context.metered == true ? 1 : 3).toList();
         backgroundStatus = 'HTTPS через сервер: $backgroundChecked/$backgroundTotal · проверка ${batch.length}'; _notify();
-        final lab = CandidateLab(engine as CandidateHost); _healthLab = lab;
+        final lab = _healthLabFactory?.call(engine as CandidateHost) ?? CandidateLab(engine as CandidateHost); _healthLab = lab;
         final results = await lab.run(batch,deep:false,metered:context.metered != false,healthOnly:true,
           policy:const SelectionPolicy(fastCandidates:3,fastSeconds:30),
           routeValid:() async {
