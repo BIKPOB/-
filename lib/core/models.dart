@@ -24,7 +24,10 @@ class VpnServer {
 }
 
 class HealthResult {
-  const HealthResult(this.state, [this.milliseconds, this.method = '']);
+  const HealthResult(this.state, [this.milliseconds, this.method = '', this.checkedAt]);
+  final DateTime? checkedAt;
+  bool get protocolVerified => state == Reachability.reachable && method == 'HTTPS через сервер' && checkedAt != null &&
+    DateTime.now().difference(checkedAt!) >= Duration.zero && DateTime.now().difference(checkedAt!) < const Duration(minutes: 15);
   final String method;
   final Reachability state;
   final int? milliseconds;

@@ -23,6 +23,13 @@ class XrayFailure {
       'cannot create a file when that file already exists': 'VPN-адаптер или ресурс уже существует',
       'the device is not ready': 'VPN-адаптер ещё не готов',
       'forwarding is on': 'Пересылка пакетов или мобильная точка доступа создаёт петлю маршрутизации',
+      'the system cannot find the file specified': 'Не найден файл или компонент Windows',
+      'the system cannot find the path specified': 'Не найден путь к компоненту Windows',
+      'element not found': 'Сетевой интерфейс или его компонент не найден',
+      'the parameter is incorrect': 'Windows отклонила параметры сетевого интерфейса',
+      'the object already exists': 'Сетевой объект уже существует',
+      'a device attached to the system is not functioning': 'Ошибка устройства VPN',
+      'there are no more endpoints available': 'Служба фильтрации Windows недоступна',
       'failed to create adapter': 'Не удалось создать VPN-адаптер',
       'failed to build': 'Конфигурация не принята движком',
       'failed to load': 'Конфигурация не загружена',
@@ -32,4 +39,22 @@ class XrayFailure {
     }
     return null;
   }
+}
+
+/// Per-process log state. Only allowlisted reasons leave the process boundary.
+/// Read both streams to completion before reporting an exit.
+class XraySessionLog {
+  int bytes = 0;
+  bool started = false;
+  final reasons = <String>{};
+  String _tail = '';
+  void add(String text) {
+    final combined = _tail + text;
+    if (RegExp(r'Xray [^\r\n]* started').hasMatch(combined)) started = true;
+    final reason = XrayFailure.explain(combined);
+    if (reason != null) reasons.add(reason);
+    if (combined.contains('Failed to start:')) reasons.add('Ошибка запуска Xray');
+    _tail = combined.length > 4096 ? combined.substring(combined.length - 4096) : combined;
+  }
+  String get summary => reasons.isEmpty ? 'Причина не классифицирована' : reasons.join('; ');
 }

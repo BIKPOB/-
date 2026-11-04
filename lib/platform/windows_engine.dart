@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 import '../core/models.dart';
@@ -32,20 +31,16 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
   }
   Process? _xray;
   bool _active = false, _stopping = false;
-  int _epoch = 0, _logBytes = 0;
-  final _errors = <String>{};
-  String _logTail = '';
-  void _capture(List<int> bytes) {
-    _logBytes += bytes.length;
-    final text = utf8.decode(bytes, allowMalformed: true).toLowerCase();
-    final combined = _logTail + text;
-    final reason = XrayFailure.explain(combined);
-    if (reason != null) _errors.add(reason);
-    _logTail = combined.substring(max(0, combined.length - 512));
-    const categories = {'failed to build': 'Ошибка конфигурации', 'failed to load': 'Ошибка загрузки конфигурации', 'failed to start': 'Ошибка запуска Xray', 'failed': 'Xray сообщил об ошибке запуска/соединения', 'invalid': 'Некорректные параметры/ответ', 'unsupported': 'Неподдерживаемый параметр', 'timeout': 'Таймаут', 'deadline exceeded': 'Таймаут операции', 'connection refused': 'Сервер отказал', 'connection reset': 'Соединение сброшено', 'no such host': 'DNS не разрешён', 'certificate': 'Ошибка сертификата', 'bad handshake': 'Ошибка согласования', 'eof': 'Соединение закрыто'};
-    for (final entry in categories.entries) { if (text.contains(entry.key)) _errors.add(entry.value); }
+  int _epoch = 0;
+  XraySessionLog _log = XraySessionLog();
+  String _candidateDetail = 'Проверочный Xray не запускался';
+  Future<void> _captureStream(Stream<List<int>> stream, XraySessionLog log, {void Function()? onStarted}) async {
+    await for (final text in stream.map((bytes) { log.bytes += bytes.length; return bytes; })
+        .transform(const Utf8Decoder(allowMalformed: true))) {
+      log.add(text);
+      if (log.started) onStarted?.call();
+    }
   }
-  String get _errorSummary => _errors.isEmpty ? 'Причина не классифицирована' : _errors.join('; ');
   String _protocol = '', _detail = 'Windows VPN не запускался';
   String? _privateDir;
   String get _alias => _protocol == 'wireguard' ? 'QuietVPN-AWG' : WindowsConfig.adapter;
@@ -159,11 +154,23 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
     final p=await Process.start(_file('xray.exe'), ['run','-config','stdin:'],
       workingDirectory:'$_root\\engines',runInShell:false);
     _candidateCore=p;
-    unawaited(p.stdout.drain<void>());unawaited(p.stderr.drain<void>());
+    final log = XraySessionLog();
+    final output = Future.wait([_captureStream(p.stdout,log),_captureStream(p.stderr,log)]);
+    final exited = p.exitCode.then((code) async {
+      await output;
+      _candidateDetail = 'Проверочный Xray: код $code; ${log.summary}';
+      return code;
+    });
     p.stdin.write(configuration);await p.stdin.flush();await p.stdin.close();
-    await CandidatePorts.wait(configuration);
-    if(await p.exitCode.timeout(const Duration(milliseconds:1),onTimeout:()=>-9999)!=-9999) {
-      throw StateError('Проверочный Xray завершился');
+    try { await CandidatePorts.wait(configuration); }
+    catch (_) {
+      if (await exited.timeout(const Duration(milliseconds:100),onTimeout:()=>-9999) != -9999) {
+        throw CandidateStartException(_candidateDetail);
+      }
+      rethrow;
+    }
+    if(await exited.timeout(const Duration(milliseconds:1),onTimeout:()=>-9999)!=-9999) {
+      throw CandidateStartException(_candidateDetail);
     }
   }
   @override Future<void> stopCandidates() async {
@@ -182,7 +189,7 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
     }
     await _verifyBundle();
     if (token != _epoch) return;
-    _protocol = profile.protocol; _active = true; _logBytes = 0; _errors.clear(); _logTail = '';
+    _protocol = profile.protocol; _active = true; _log = XraySessionLog();
     _emit(ConnectionState.connecting, 'Windows: запуск ${profile.protocol}');
     try {
       if (profile.protocol == 'wireguard') {
@@ -198,22 +205,43 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
       } else {
         final addresses = await InternetAddress.lookup(profile.host).timeout(const Duration(seconds: 8));
         if (addresses.isEmpty) throw StateError('DNS сервера недоступен');
-        final config = WindowsConfig.xray(profile.text, addresses.first.address, bypassSites: _bypassSites);
+        await _system('cleanup');
+        if (token != _epoch) return;
+        final network = await _system('network');
+        if (network['ambiguous'] != false || network['foreignVpn'] != false || network['physicalInterface'] is! String) {
+          throw StateError('Не подтверждён однозначный физический маршрут для Xray');
+        }
+        if (network['forwarding'] == true) {
+          throw StateError('На исходящем интерфейсе включена пересылка пакетов. Отключите мобильную точку доступа/общий доступ перед запуском VPN.');
+        }
+        final endpoint = addresses.firstWhere((a) => a.type == InternetAddressType.IPv4, orElse: () => addresses.first);
+        final config = WindowsConfig.xray(profile.text, endpoint.address, bypassSites: _bypassSites,
+          physicalInterface: network['physicalInterface'] as String, ipv6: network['ipv6'] == true);
         await _validateConfig(config);
         if (token != _epoch) return;
         final p = await Process.start(_file('xray.exe'), ['run', '-config', 'stdin:'],
           workingDirectory: '$_root\\engines', runInShell: false);
         if (token != _epoch) { p.kill(); await p.exitCode; return; }
         _xray = p;
-        p.stdout.listen(_capture);
-        p.stderr.listen(_capture);
-        p.stdin.write(jsonEncode(config)); await p.stdin.flush(); await p.stdin.close();
-        unawaited(p.exitCode.then((code) {
-          if (identical(_xray, p)) _xray = null;
-          if (token == _epoch && !_stopping) {
-            _emit(ConnectionState.error, 'Xray завершился, код $code; журнал: $_logBytes байт; $_errorSummary');
-          }
+        final log = _log;
+        final started = Completer<bool>();
+        String? startupFailure;
+        void onStarted() { if (!started.isCompleted) started.complete(true); }
+        final output = Future.wait([
+          _captureStream(p.stdout,log,onStarted:onStarted),
+          _captureStream(p.stderr,log,onStarted:onStarted),
+        ]);
+        unawaited(p.exitCode.then((code) async {
+          await output;
+          if (identical(_xray,p)) _xray = null;
+          startupFailure = 'Xray завершился, код $code; журнал: ${log.bytes} байт; ${log.summary}';
+          if (!started.isCompleted) started.complete(false);
+          if (log.started && token == _epoch && !_stopping) _emit(ConnectionState.error, startupFailure!);
         }));
+        p.stdin.write(jsonEncode(config)); await p.stdin.flush(); await p.stdin.close();
+        final ready = await started.future.timeout(const Duration(seconds:25),onTimeout:()=>false);
+        if (token != _epoch) return;
+        if (!ready) throw StateError(startupFailure ?? 'Xray не подтвердил завершение запуска; ${log.summary}');
       }
       unawaited(_verify(token));
     } catch (_) { rethrow; }
@@ -269,7 +297,7 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
     return info['ready'] == true ? TrafficCounters((info['received'] as num).toInt(), (info['sent'] as num).toInt()) : null;
   }
   @override Future<String> diagnostics() async => 'Quiet VPN · Windows ${Platform.operatingSystemVersion}\n'
-    'Движки: Xray / AmneziaWG\n$_detail\nЖурнал процесса Xray: $_logBytes байт (содержимое не экспортируется)';
+    'Движки: Xray / AmneziaWG\n$_detail\nЖурнал процесса Xray: ${_log.bytes} байт · ${_log.summary}\n$_candidateDetail';
   @override Future<void> reconcile() async {
     if (!_active) return;
     final info = await _system('tunnel');

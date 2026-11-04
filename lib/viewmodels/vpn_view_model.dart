@@ -81,6 +81,27 @@ class VpnViewModel extends ChangeNotifier {
   Timer? _backgroundTimer;
   int _backgroundEpoch = 0;
   String? backgroundStatus;
+  CandidateLab? _healthLab;
+  Future<void>? _healthPending, _healthStopping;
+  List<VpnServer>? _healthCatalog;
+  final Map<String, HealthResult> _protocolHealth = {};
+  NetworkContext? _healthContext;
+  int backgroundChecked = 0, backgroundTotal = 0;
+  HealthResult? serverHealth(VpnServer server) => _protocolHealth[ConnectionStrategy.profileKey(server)] ?? health[server.id];
+  void registerHealthCatalog(List<VpnServer> catalog) {
+    _healthCatalog = catalog;
+    _scheduleBackgroundPreflight(immediate: true);
+  }
+  Future<void> _stopHealthChecks() {
+    if (_healthStopping != null) return _healthStopping!;
+    _backgroundTimer?.cancel(); _backgroundEpoch++;
+    final lab = _healthLab, pending = _healthPending;
+    if (lab == null || pending == null) return Future<void>.value();
+    return _healthStopping = (() async {
+      await lab.cancel();
+      await pending;
+    })().whenComplete(() { _healthStopping = null; });
+  }
   final BaselineMonitor _baselineMonitor;
   Timer? _baselineTimer;
   NetworkBaseline? baseline;
@@ -163,7 +184,7 @@ class VpnViewModel extends ChangeNotifier {
     if (_disposed || !ready || (!Platform.isWindows && !_foreground)) return;
     _baselineTimer = Timer(Duration(seconds: immediate ? 1 : 30), () async {
       try {
-        if (!autoSelecting && !_nativeNeedsStop && !busy) {
+        if (!autoSelecting && !_nativeNeedsStop && !busy && _healthPending == null) {
           final context = await _network();
           if (_disposed || (!_desktop && !_foreground) || autoSelecting || _nativeNeedsStop || busy) return;
           networkContext = context;
@@ -373,6 +394,7 @@ class VpnViewModel extends ChangeNotifier {
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     bool cancelled() => token != _autoEpoch || _disposed;
     try {
+      await _stopHealthChecks();
       await _reserveLab?.cancel();
       if (cancelled()) return;
       final context = await _network();
@@ -414,6 +436,7 @@ class VpnViewModel extends ChangeNotifier {
         await _saveLab();
       }
       int priority(VpnServer server) {
+        if (_healthContext?.sameConnection(context) == true && serverHealth(server)?.protocolVerified == true) return 1;
         final speed = _selector.recentSpeed(server, context);
         if (_requiresSpeed && speed > 0 && speed < targetBytesPerSecond) return -1;
         return _selector.recentPriority(server, context);
@@ -456,7 +479,8 @@ class VpnViewModel extends ChangeNotifier {
         DateTime.now().difference(_backgroundMeasuredAt!) < const Duration(minutes: 3);
       final latency = <String, HealthResult>{
         if (cacheFresh) for (final server in candidates)
-          if (_backgroundHealth[server.id] case final value?) server.id: value,
+          if (_backgroundHealth[server.id] case final value?)
+            if (value.checkedAt == null || DateTime.now().difference(value.checkedAt!) < const Duration(minutes:15)) server.id: value,
       };
       final missing = candidates.where((server) => !latency.containsKey(server.id)).toList();
       if (deep && engine is! CandidateHost && missing.isNotEmpty) latency.addAll(await _autoMonitor.sample(missing));
@@ -986,6 +1010,10 @@ class VpnViewModel extends ChangeNotifier {
     _scheduleProbe(immediate: true); _scheduleBackgroundPreflight(immediate: true); _scheduleBaseline(immediate: true); _scheduleHealthStatus(); _notify();
   }
   void refreshLatency() {
+    if (engine is CandidateHost) {
+      _protocolHealth.clear(); _backgroundHealth.clear();
+      _scheduleBackgroundPreflight(immediate: true); _notify(); return;
+    }
     _probeEpoch++; monitor.cancel();
     _scheduleProbe(immediate: true);
   }
@@ -1007,6 +1035,9 @@ class VpnViewModel extends ChangeNotifier {
     if (visible) _scheduleBaseline(immediate: true);
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     if (!visible) _networkAnalyzer.cancel();
+    if (!visible) unawaited(_stopHealthChecks().then((_) {
+      if (_desktop && !_disposed) _scheduleBackgroundPreflight(immediate:true);
+    }));
     if (!visible && !_desktop && autoSelecting && !requestingNetworkPermission) {
       unawaited(cancelAutoSelection(reason: 'Подбор остановлен: приложение ушло в фон'));
     }
@@ -1025,44 +1056,93 @@ class VpnViewModel extends ChangeNotifier {
   }
   void _scheduleBackgroundPreflight({bool immediate = false}) {
     _backgroundTimer?.cancel();
-    if (!_foreground || _disposed || autoSelecting || _nativeNeedsStop || state == ConnectionState.connected) return;
+    if ((!_foreground && !_desktop) || _disposed || !ready || autoSelecting || busy ||
+        _nativeNeedsStop || _healthStopping != null || engine is! CandidateHost) return;
+    if (_healthPending != null) return;
     final token = ++_backgroundEpoch;
-    _backgroundTimer = Timer(Duration(seconds: immediate ? 3 : 120), () async {
+    _backgroundTimer = Timer(Duration(seconds: immediate ? 3 : networkContext.metered == false ? 1 : 10), () async {
+      final done = Completer<void>(); _healthPending = done.future;
       try {
+        if (analyzingNetwork) return;
         final context = await _network();
-        if (token != _backgroundEpoch || context.type == 'offline' || autoSelecting || _nativeNeedsStop) return;
-        final catalog = await _catalogLoader();
-        if (token != _backgroundEpoch || autoSelecting || _nativeNeedsStop) return;
-        final pool = [..._imports, ...catalog.servers].where((s) =>
-        !_searchVisited.contains(ConnectionStrategy.profileKey(s)) &&
-        !(engine is SiteBypassHost && (engine as SiteBypassHost).bypassSites.isNotEmpty && s.protocol == 'wireguard') &&
-        (!_desktop || s.protocol != 'vless' || ConnectionStrategy.protectedVless(s))).toList();
-      autoAttemptReports.add('База: ${catalog.status}\n'
-        '${['wireguard', 'vless', 'shadowsocks'].map((p) => '$p: ${pool.where((s) => s.protocol == p).length} профилей').join('; ')}');
-        final candidates = <VpnServer>[];
-        for (final protocol in ['wireguard', 'vless', 'shadowsocks']) {
-          final group = pool.where((server) => server.protocol == protocol).toList()
-            ..sort((a, b) {
-              final priority = _selector.recentPriority(b, context).compareTo(_selector.recentPriority(a, context));
-              return priority != 0 ? priority : _selector.recentSpeed(b, context).compareTo(_selector.recentSpeed(a, context));
-            });
-          candidates.addAll(PublicCatalog.diverse(group, limit: protocol == 'wireguard' ? 8 : 24));
+        bool live() => token == _backgroundEpoch && !_disposed && !autoSelecting && !busy && !_nativeNeedsStop && (_foreground || _desktop);
+        if (!live()) return;
+        if (context.vpnPresent || context.ambiguous || context.type == 'offline') {
+          _protocolHealth.clear(); _backgroundHealth.clear();
+          backgroundStatus = 'Проверка серверов: ожидание прямого маршрута без VPN'; return;
         }
-        backgroundStatus = 'Фоновая проверка ${candidates.length} адресов…'; _notify();
-        final measured = await _backgroundMonitor.sample(candidates);
-        if (token != _backgroundEpoch || autoSelecting || _nativeNeedsStop) return;
-        _backgroundHealth = measured; _backgroundContext = context; _backgroundMeasuredAt = DateTime.now();
-        final reachable = measured.values.where((value) => value.state == Reachability.reachable).length;
-        backgroundStatus = 'Фоновая проверка: доступно $reachable из ${measured.length}; свежие данные будут использованы при подборе';
-        _notify();
+        if (_healthContext?.sameConnection(context) != true) {
+          _protocolHealth.clear(); _backgroundHealth.clear();
+        }
+        _healthContext = context;
+        _healthCatalog ??= (await _catalogLoader()).servers;
+        if (!live()) return;
+        final unique = <String,VpnServer>{};
+        for (final server in [..._imports,..._healthCatalog!]) {
+          unique.putIfAbsent(ConnectionStrategy.profileKey(server),()=>server);
+        }
+        final now = DateTime.now();
+        final candidates = <VpnServer>[];
+        for (final entry in unique.entries) {
+          final server = entry.value;
+          if (server.protocol == 'wireguard') {
+            _protocolHealth[entry.key] = const HealthResult(Reachability.notMeasured,null,'WireGuard: требуется проверка туннеля');
+            continue;
+          }
+          final previous = _protocolHealth[entry.key];
+          if (previous?.checkedAt == null || now.difference(previous!.checkedAt!) >= const Duration(minutes:15)) candidates.add(server);
+        }
+        backgroundTotal = unique.values.where((s)=>s.protocol!='wireguard').length;
+        backgroundChecked = backgroundTotal - candidates.length;
+        if (candidates.isEmpty) {
+          backgroundStatus = 'HTTPS через сервер: проверено $backgroundChecked/$backgroundTotal · обновление через 15 минут';
+          return;
+        }
+        candidates.sort((a,b) {
+          final at = _protocolHealth[ConnectionStrategy.profileKey(a)]?.checkedAt;
+          final bt = _protocolHealth[ConnectionStrategy.profileKey(b)]?.checkedAt;
+          if (at == null) return bt == null ? 0 : -1;
+          if (bt == null) return 1;
+          return at.compareTo(bt);
+        });
+        final batch = candidates.take(context.metered == true ? 1 : 3).toList();
+        backgroundStatus = 'HTTPS через сервер: $backgroundChecked/$backgroundTotal · проверка ${batch.length}'; _notify();
+        final lab = CandidateLab(engine as CandidateHost); _healthLab = lab;
+        final results = await lab.run(batch,deep:false,metered:context.metered != false,healthOnly:true,
+          policy:const SelectionPolicy(fastCandidates:3,fastSeconds:30),
+          routeValid:() async {
+            if (!live()) return false;
+            final current = await _network();
+            return live() && !current.vpnPresent && !current.ambiguous && context.sameConnection(current);
+          },status:(_) {});
+        if (!live()) return;
+        final current = await _network();
+        if (!live() || current.vpnPresent || !context.sameConnection(current)) return;
+        for (final server in batch) {
+          final matches = results.where((result)=>result.server.id==server.id);
+          final result = matches.isEmpty ? null : matches.first;
+          final success = result != null && result.error == null && result.latencyMs != null;
+          final value = HealthResult(success ? Reachability.reachable : Reachability.unreachable,
+            result?.latencyMs, success ? 'HTTPS через сервер' : result?.error ?? 'Проверка не завершена', DateTime.now());
+          _protocolHealth[ConnectionStrategy.profileKey(server)] = value;
+          // Publish aliases for imported copies as well as catalog profiles.
+          for (final item in [..._imports,..._healthCatalog!].where((s)=>ConnectionStrategy.profileKey(s)==ConnectionStrategy.profileKey(server))) {
+            health[item.id] = value; _backgroundHealth[item.id] = value;
+          }
+        }
+        _backgroundContext = context; _backgroundMeasuredAt = DateTime.now();
+        backgroundChecked += batch.length;
+        backgroundStatus = 'HTTPS через сервер: $backgroundChecked/$backgroundTotal · подтверждено ${_protocolHealth.values.where((v)=>v.protocolVerified).length}';
       } catch (_) {
-        if (token == _backgroundEpoch) backgroundStatus = 'Фоновая проверка адресов временно недоступна';
+        if (token == _backgroundEpoch) backgroundStatus = 'Проверка серверов отложена: движок или маршрут недоступен';
       } finally {
-        if (token == _backgroundEpoch && !_disposed) _scheduleBackgroundPreflight();
+        _healthLab = null; _healthPending = null; done.complete();
+        if (!_disposed) { _notify(); if (token == _backgroundEpoch) _scheduleBackgroundPreflight(); }
       }
     });
   }
   void _scheduleProbe({bool immediate = false}) {
+    if (engine is CandidateHost) { _scheduleBackgroundPreflight(immediate: immediate); return; }
     _poll?.cancel();
     if (!_foreground || _disposed || autoSelecting) return;
     _poll = Timer(Duration(milliseconds: immediate ? 0 : 30000 + Random().nextInt(3000)), () async {
@@ -1107,6 +1187,7 @@ class VpnViewModel extends ChangeNotifier {
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     backgroundStatus = null; busy = true; message = null; _localNetworkFailure = false; _notify();
     try {
+      await _stopHealthChecks();
       if(!autoSelecting && engine is CandidateHost) {
         final context=await _network();networkContext=context;
         _selectionTarget=baseline?.fresh(context,DateTime.now())==true?baseline!.target:null;
@@ -1326,6 +1407,7 @@ class VpnViewModel extends ChangeNotifier {
   }
   @override void dispose() {
     _cancelReserve();
+    unawaited(_stopHealthChecks());
     _networkAnalyzer.cancel();unawaited(_candidateLab?.cancel());
     _healthTimer?.cancel();
     _baselineTimer?.cancel(); _baselineMonitor.dispose();

@@ -56,9 +56,13 @@ switch ($Operation) {
   # Inspect routes, not merely the presence of an Up virtual adapter.
   $virtual=@(Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and !$_.HardwareInterface })
   $external=@(Get-NetRoute -ErrorAction Stop | Where-Object { $_.InterfaceIndex -in $virtual.ifIndex -and !(Test-LocalOnlyPrefix $_.DestinationPrefix) })
+  $binding=Get-NetAdapterBinding -Name $a.Name -ComponentID ms_tcpip6 -ErrorAction SilentlyContinue
+  $disabled=(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\Tcpip6\Parameters' -Name DisabledComponents -ErrorAction SilentlyContinue).DisabledComponents
+  $ipv6=($binding.Enabled -eq $true -and (($disabled -band 255) -ne 255))
+  $forwarding=@(Get-NetIPInterface -InterfaceIndex $a.ifIndex -ErrorAction Stop | Where-Object Forwarding -eq Enabled).Count -gt 0
   $linkMbps=[int]([double]$a.ReceiveLinkSpeed / 1000000)
   if($linkMbps -le 0){$linkMbps=$null}
-  @{physicalInterface=[string]$a.Name;foreignVpn=(@($external | Where-Object InterfaceAlias -notin @('QuietVPN-Xray','QuietVPN-AWG')).Count -gt 0);type=$type;session=$session;linkMbps=$linkMbps;ownVpn=(@($external | Where-Object InterfaceAlias -in @('QuietVPN-Xray','QuietVPN-AWG')).Count -gt 0);vpnPresent=($external.Count -gt 0);ambiguous=($routes.Count -eq 0 -or ($routes.Count -gt 1 -and (Get-CombinedMetric $routes[0]) -eq (Get-CombinedMetric $routes[1])))} | ConvertTo-Json -Compress
+  @{physicalInterface=[string]$a.Name;ipv6=$ipv6;forwarding=$forwarding;foreignVpn=(@($external | Where-Object InterfaceAlias -notin @('QuietVPN-Xray','QuietVPN-AWG')).Count -gt 0);type=$type;session=$session;linkMbps=$linkMbps;ownVpn=(@($external | Where-Object InterfaceAlias -in @('QuietVPN-Xray','QuietVPN-AWG')).Count -gt 0);vpnPresent=($external.Count -gt 0);ambiguous=($routes.Count -eq 0 -or ($routes.Count -gt 1 -and (Get-CombinedMetric $routes[0]) -eq (Get-CombinedMetric $routes[1])))} | ConvertTo-Json -Compress
  }
  'tunnel' {
   $a=Get-NetAdapter -Name $Alias -ErrorAction SilentlyContinue
@@ -72,6 +76,15 @@ switch ($Operation) {
  'cleanup' {
   # Touch only the interface owned by this application, never physical adapters.
   $a=Get-NetAdapter -Name 'QuietVPN-Xray' -ErrorAction SilentlyContinue
-  if($a){ Get-NetRoute -InterfaceIndex $a.ifIndex -ErrorAction SilentlyContinue | Where-Object DestinationPrefix -in @('0.0.0.0/0','::/0','0.0.0.0/1','128.0.0.0/1','::/1','8000::/1') | Remove-NetRoute -Confirm:$false -ErrorAction Stop }
+  if($a){
+   # The owner process must have exited before this operation. Remove only our
+   # fixed adapter's configuration, including state left by forced termination.
+   Set-DnsClientServerAddress -InterfaceIndex $a.ifIndex -ResetServerAddresses -ErrorAction Stop
+   Get-NetIPAddress -InterfaceIndex $a.ifIndex -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -eq '172.29.211.1' -or $_.IPAddress -eq 'fd7a:115c:a1e0::1' } | Remove-NetIPAddress -Confirm:$false -ErrorAction Stop
+   Get-NetRoute -InterfaceIndex $a.ifIndex -ErrorAction SilentlyContinue | Where-Object DestinationPrefix -in @('0.0.0.0/0','::/0','0.0.0.0/1','128.0.0.0/1','::/1','8000::/1') | Remove-NetRoute -Confirm:$false -ErrorAction Stop
+   $remaining=@(Get-NetRoute -InterfaceIndex $a.ifIndex -ErrorAction SilentlyContinue | Where-Object DestinationPrefix -in @('0.0.0.0/0','::/0','0.0.0.0/1','128.0.0.0/1','::/1','8000::/1'))
+   $addresses=@(Get-NetIPAddress -InterfaceIndex $a.ifIndex -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -eq '172.29.211.1' -or $_.IPAddress -eq 'fd7a:115c:a1e0::1' })
+   if($remaining.Count -or $addresses.Count){throw 'Owned TUN cleanup not confirmed'}
+  }
  }
 }

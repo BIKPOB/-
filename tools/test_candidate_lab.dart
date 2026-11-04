@@ -155,6 +155,15 @@ Future<void> rotationIntegration() async {
   }
 }
 Future<void> main() async {
+  final healthHost=Host();
+  // The probe observes the same isolated core as the lab.
+  final actualProbe=Probe(healthHost);
+  final health=await CandidateLab(healthHost,probe:actualProbe).run(
+    [fixture(1),fixture(2),fixture(3)],deep:false,metered:true,healthOnly:true,
+    routeValid:()async=>true,status:(_){});
+  check(health.length==3 && health.every((r)=>r.latencyMs!=null && r.error==null),'HTTPS results lost');
+  check(actualProbe.rounds.isEmpty && health.every((r)=>r.speeds.isEmpty),'Background check downloaded speed payloads');
+  check(!healthHost.running,'Background core leaked');
   await rotationIntegration();
   await stalledTlsRegression();
   final candidates=[fixture(1),fixture(2),fixture(3)];

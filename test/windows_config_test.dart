@@ -4,6 +4,15 @@ import 'package:quiet_vpn/platform/windows_config.dart';
 import 'package:quiet_vpn/platform/windows_probe.dart';
 
 void main() {
+  test('selected physical network and disabled IPv6 retain leak protection', () {
+    final config = WindowsConfig.xray('vless://12345678-1234-1234-1234-123456789abc@example.com:443?security=tls',
+      '203.0.113.1',physicalInterface:'Ethernet',ipv6:false);
+    final settings = config['inbounds'][0]['settings'] as Map;
+    expect(settings['autoOutboundsInterface'],'Ethernet');
+    expect(settings['autoSystemRoutingTable'],['0.0.0.0/0']);
+    expect(settings['gateway'],['172.29.211.1/30']);
+    expect(settings['autoSystemWfpBlockLeak'],contains('misconfigtun'));
+  });
   test('unprotected public VLESS is rejected before starting Windows TUN', () {
     expect(() => WindowsConfig.xray(
       'vless://12345678-1234-1234-1234-123456789abc@example.com:443?security=none',

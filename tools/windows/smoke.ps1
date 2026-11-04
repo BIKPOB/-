@@ -17,6 +17,7 @@ $config=Join-Path $env:RUNNER_TEMP 'quiet-xray-smoke.json'
 } | ConvertTo-Json -Depth 12 | Set-Content $config -Encoding utf8
 & "$engines/xray.exe" run -test -config $config
 if($LASTEXITCODE -ne 0){throw 'Xray fixture config invalid'}
+foreach($cycle in 1..3) {
 $p=$null
 try {
  $p=Start-Process "$engines/xray.exe" -ArgumentList @('run','-config',('"'+$config+'"')) -WorkingDirectory $engines -PassThru -RedirectStandardError "$env:RUNNER_TEMP/xray-error.txt" -RedirectStandardOutput "$env:RUNNER_TEMP/xray-output.txt"
@@ -36,6 +37,7 @@ try {
  & $probe -Operation cleanup
  Remove-Item $config -ErrorAction SilentlyContinue
  Remove-Item Env:QUIET_TUNNEL_ADDRESS -ErrorAction SilentlyContinue
+}
 }
 # No real server credentials in CI: exercise the owned AWG service lifecycle only.
 $private=Join-Path $env:RUNNER_TEMP 'quiet-awg-smoke'

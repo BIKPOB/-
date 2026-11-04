@@ -4,7 +4,7 @@ import '../core/site_bypass.dart';
 
 class WindowsConfig {
   static const adapter = 'QuietVPN-Xray';
-  static Map<String, dynamic> xray(String profile, String endpoint, {List<String> bypassSites = const []}) {
+  static Map<String, dynamic> xray(String profile, String endpoint, {List<String> bypassSites = const [], String? physicalInterface, bool ipv6 = true}) {
     final parsed = ProxyProfile.parse(profile);
     if (parsed.protocol == 'vless' &&
         parsed.outbound['streamSettings']['security'] == 'none') {
@@ -15,9 +15,9 @@ class WindowsConfig {
     config['log'] = {'loglevel': 'info', 'access': 'none'};
     config['inbounds'] = [
       {'tag': 'tun', 'protocol': 'tun', 'settings': {
-        'name': adapter, 'mtu': 1280, 'gateway': ['172.29.211.1/30', 'fd7a:115c:a1e0::1/126'],
-        'dns': ['1.1.1.1', '8.8.8.8'], 'autoSystemRoutingTable': ['0.0.0.0/0', '::/0'],
-        'autoOutboundsInterface': 'auto', 'autoSystemWfpBlockLeak': ['dns', 'misconfigtun'],
+        'name': adapter, 'mtu': 1280, 'gateway': ['172.29.211.1/30', if (ipv6) 'fd7a:115c:a1e0::1/126'],
+        'dns': ['1.1.1.1', '8.8.8.8'], 'autoSystemRoutingTable': ['0.0.0.0/0', if (ipv6) '::/0'],
+        'autoOutboundsInterface': physicalInterface ?? 'auto', 'autoSystemWfpBlockLeak': ['dns', 'misconfigtun'],
       }},
     ];
     final sites = SiteBypass.parse(bypassSites.join('\n'));

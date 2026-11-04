@@ -13,6 +13,8 @@ class WindowsProbe {
   Socket? _dnsTcp;
   int _generation = 0;
   bool _usedDoh = false;
+  final List<String> _dnsFailures = [];
+  String _failure(Object error) => error is SocketException ? 'SocketException, код ОС ${error.osError?.errorCode ?? "нет"}' : error.runtimeType.toString();
   void cancel() { _generation++; _client?.close(force: true); _doh?.close(force: true); _dns?.close(); _dnsTcp?.destroy(); }
   static Uint8List query(String name, int id) => Uint8List.fromList([
     id >> 8, id & 255, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0,
@@ -66,7 +68,8 @@ class WindowsProbe {
   }
   Future<InternetAddress> _resolveClassic(String host, InternetAddress local) async {
     final token = _generation;
-    try { return await _resolveUdp(host, local); } catch (_) {
+    try { return await _resolveUdp(host, local); } catch (error) {
+      _dnsFailures.add('UDP DNS: ${_failure(error)}');
       if (token != _generation) throw const SocketException('Cancelled');
       final socket = await Socket.connect(InternetAddress('1.1.1.1'), 53,
           sourceAddress: local, timeout: const Duration(seconds: 2));
@@ -92,7 +95,8 @@ class WindowsProbe {
   }
   Future<InternetAddress> _resolve(String host, InternetAddress local) async {
     final token = _generation;
-    try { return await _resolveClassic(host, local); } catch (_) {
+    try { return await _resolveClassic(host, local); } catch (error) {
+      _dnsFailures.add('TCP DNS: ${_failure(error)}');
       if (token != _generation) throw const SocketException('Cancelled');
       // DNS-over-HTTPS fallback remains bound to the TUN address. It cannot
       // pass using the physical adapter and never disables TLS verification.
@@ -134,7 +138,7 @@ class WindowsProbe {
     }
   }
   Future<Map<String, dynamic>> measure(String address) async {
-    _usedDoh = false;
+    _usedDoh = false; _dnsFailures.clear();
     var phase = 'DNS';
     var bytes = 0;
     final token = _generation;
@@ -199,7 +203,7 @@ class WindowsProbe {
           'bytesPerSecond': speed, 'detail': 'Windows VPN: DNS, HTTPS и ${bytes ~/ 1024} КиБ за ${download.elapsedMilliseconds} мс · ${(speed * 8 / 1000000).toStringAsFixed(2)} Мбит/с'};
       })().timeout(const Duration(seconds: 27));
     } catch (e) {
-      return {'delay': -1, 'quality': false, 'detail': 'Проверка через интерфейс VPN: $phase · ${e is HttpException ? e.message : e is SocketException ? 'SocketException · код ОС ${e.osError?.errorCode ?? 'нет'} · ${token != _generation ? 'проверка отменена' : 'ошибка сети'}' : e.runtimeType} · ${clock.elapsedMilliseconds} мс · $bytes байт'};
+      return {'delay': -1, 'quality': false, 'detail': 'Проверка через интерфейс VPN: $phase · ${e is HttpException ? e.message : e is SocketException ? 'SocketException · код ОС ${e.osError?.errorCode ?? 'нет'} · ${token != _generation ? 'проверка отменена' : 'ошибка сети'}' : e.runtimeType} · ${clock.elapsedMilliseconds} мс · $bytes байт${_dnsFailures.isEmpty ? '' : ' · ${_dnsFailures.join('; ')} · последний этап DNS: DoH'}'};
     } finally { client.close(force: true); if (identical(_client, client)) _client = null; }
   }
 }

@@ -64,7 +64,7 @@ class CandidateLab {
     if(pending!=null) await pending;
   }
   Future<List<CandidateResult>> run(List<VpnServer> candidates,{required bool deep,
-      required bool metered, int target=131072, NetworkAnalysis? analysis, SelectionPolicy policy=const SelectionPolicy(), required Future<bool> Function() routeValid,
+      required bool metered, bool healthOnly=false, int target=131072, NetworkAnalysis? analysis, SelectionPolicy policy=const SelectionPolicy(), required Future<bool> Function() routeValid,
       required void Function(String) status, void Function(CandidateResult)? onResult,
       Future<void> Function(List<VpnServer>)? onAttempt}) async {
     final token=++_epoch;
@@ -81,7 +81,7 @@ class CandidateLab {
       if(token==_epoch) status('$phase · ${clock.elapsed.inSeconds}/${budget.inSeconds} с · результатов: ${results.length}');
     });
     var checkingRoute=false;
-    final routeTimer=Timer.periodic(const Duration(milliseconds:500),(_) async {
+    final routeTimer=Timer.periodic(Duration(milliseconds:healthOnly?3000:500),(_) async {
       if(checkingRoute || token!=_epoch) return;
       checkingRoute=true;
       try {
@@ -148,6 +148,10 @@ class CandidateLab {
               } catch(second) {if(live()) record(CandidateResult(e.server,null,[], 'HTTPS через прокси: ${first.runtimeType}/${second.runtimeType}'));}
             }
           }));
+          if (healthOnly) {
+            for (final e in passing) { if (live()) record(CandidateResult(e.server,e.latency,[],null)); }
+            return;
+          }
           passing.sort((a,b)=>a.latency.compareTo(b.latency));
           for(final e in passing) {
             if(!live() || !await validRoute()) return;

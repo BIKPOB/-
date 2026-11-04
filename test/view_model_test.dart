@@ -157,7 +157,7 @@ class ReserveLabFixture extends CandidateLab {
   final Completer<void>? gate;
   final entered=Completer<void>();
   @override Future<List<CandidateResult>> run(List<VpnServer> candidates,{required bool deep,
-    required bool metered,int target=131072,NetworkAnalysis? analysis,
+    required bool metered,bool healthOnly=false,int target=131072,NetworkAnalysis? analysis,
     SelectionPolicy policy=const SelectionPolicy(),required Future<bool> Function() routeValid,
     required void Function(String) status,void Function(CandidateResult)? onResult,
     Future<void> Function(List<VpnServer>)? onAttempt}) async {

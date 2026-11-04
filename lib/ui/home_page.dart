@@ -414,13 +414,14 @@ class _HomePageState extends State<HomePage>
                 ],
                 const SizedBox(width: 7.2),
                 GestureDetector(onTap: vm.refreshLatency,
-                  child: Tooltip(message: 'Проверить адреса', child: quietAsset('refresh', 22.275))),
+                  child: Tooltip(message: 'Проверить подключение серверов', child: quietAsset('refresh', 22.275))),
               ])),
               const SizedBox(height: 5.7),
               const SizedBox(width: 324.649, child: Divider(height: 1, thickness: 1, color: Colors.white)),
             ]),
           ))),
           const SizedBox(height: 12),
+          if (vm.backgroundStatus != null) Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text(vm.backgroundStatus!, style: quietText(12))),
           Flexible(
             child: ListView(
               shrinkWrap: true,
@@ -455,7 +456,7 @@ class _HomePageState extends State<HomePage>
                           Text(
                             '${protocols[server.protocol]} · ${server.country}',
                           ),
-                          LatencyIndicator(vm.health[server.id]),
+                          LatencyIndicator(vm.serverHealth(server)),
                         ],
                       ),
                       trailing: IconButton(
