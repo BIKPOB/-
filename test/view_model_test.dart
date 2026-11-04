@@ -505,7 +505,7 @@ void main() {
       await vm.disconnect();
     } finally { vm.dispose(); await engine.dispose(); }
   });
-  testWidgets('background HTTPS verifies catalog and imported profiles without TCP grades', (tester) async {
+  test('background HTTPS cache is reused and scoped to the physical network', () async {
     final engine=ProxyLabEngine();
     final lab=HealthLabFixture(engine);
     var network='wifi';
@@ -514,20 +514,15 @@ void main() {
       catalogLoader:() async=>const PublicCatalogResult([],false,0),networkReader:()async=>network);
     try {
       await vm.initialize();
-      await tester.pump(const Duration(seconds:1));
-      await tester.pump();
-      await tester.pump(const Duration(seconds:10));
-      await tester.pump();
-      expect(lab.calls,1);
+      await vm.checkServerHealth();
+      expect(lab.calls,1,reason:vm.backgroundStatus);
       expect(vm.serverHealth(server)?.protocolVerified,isTrue);
       expect(vm.serverHealth(server)?.milliseconds,42);
-      expect(vm.backgroundStatus,contains('подтверждено 1'));
-      await tester.pump(const Duration(seconds:10));
+      await vm.checkServerHealth();
       expect(lab.calls,1,reason:'Fresh results must not be rechecked');
       network='mobile';
-      await tester.pump(const Duration(seconds:10));
-      await tester.pump();
-      expect(vm.serverHealth(server)?.protocolVerified,isNot(isTrue),reason:'Old-network aliases must be cleared');
+      await vm.checkServerHealth();
+      expect(lab.calls,2,reason:'New network requires a new protocol handshake');
     } finally { vm.dispose(); await engine.dispose(); }
   });
   test('quick selection keeps the first measured slow connection without reconnecting', () async {

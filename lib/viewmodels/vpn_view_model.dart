@@ -1064,8 +1064,15 @@ class VpnViewModel extends ChangeNotifier {
     if ((!_foreground && !_desktop) || _disposed || !ready || autoSelecting || busy ||
         _nativeNeedsStop || _healthStopping != null || engine is! CandidateHost) { return; }
     if (_healthPending != null) return;
+    _backgroundTimer = Timer(Duration(seconds: immediate ? 3 : networkContext.metered == false ? 1 : 10),
+      () => unawaited(checkServerHealth()));
+  }
+  Future<void> checkServerHealth() async {
+    if (_disposed || !ready || busy || autoSelecting || _nativeNeedsStop ||
+        (!_foreground && !_desktop) || engine is! CandidateHost || _healthStopping != null) { return; }
+    if (_healthPending != null) { await _healthPending; return; }
+    _backgroundTimer?.cancel();
     final token = ++_backgroundEpoch;
-    _backgroundTimer = Timer(Duration(seconds: immediate ? 3 : networkContext.metered == false ? 1 : 10), () async {
       final done = Completer<void>(); _healthPending = done.future;
       try {
         if (analyzingNetwork) return;
@@ -1144,7 +1151,6 @@ class VpnViewModel extends ChangeNotifier {
         _healthLab = null; _healthPending = null; done.complete();
         if (!_disposed) { _notify(); if (token == _backgroundEpoch) _scheduleBackgroundPreflight(); }
       }
-    });
   }
   void _scheduleProbe({bool immediate = false}) {
     if (engine is CandidateHost) { _scheduleBackgroundPreflight(immediate: immediate); return; }
