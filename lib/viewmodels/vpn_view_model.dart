@@ -75,7 +75,7 @@ class VpnViewModel extends ChangeNotifier {
   AdaptiveSelector _selector = AdaptiveSelector();
   final ServerMonitor _autoMonitor;
   final ServerMonitor _backgroundMonitor;
-  Map<String, HealthResult> _backgroundHealth = {};
+  final Map<String, HealthResult> _backgroundHealth = {};
   DateTime? _backgroundMeasuredAt;
   NetworkContext? _backgroundContext;
   Timer? _backgroundTimer;
@@ -1035,9 +1035,9 @@ class VpnViewModel extends ChangeNotifier {
     if (visible) _scheduleBaseline(immediate: true);
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     if (!visible) _networkAnalyzer.cancel();
-    if (!visible) unawaited(_stopHealthChecks().then((_) {
-      if (_desktop && !_disposed) _scheduleBackgroundPreflight(immediate:true);
-    }));
+    if (!visible) { unawaited(_stopHealthChecks().then((_) {
+      if ((_foreground || _desktop) && !_disposed) _scheduleBackgroundPreflight(immediate:true);
+    })); }
     if (!visible && !_desktop && autoSelecting && !requestingNetworkPermission) {
       unawaited(cancelAutoSelection(reason: 'Подбор остановлен: приложение ушло в фон'));
     }
@@ -1057,7 +1057,7 @@ class VpnViewModel extends ChangeNotifier {
   void _scheduleBackgroundPreflight({bool immediate = false}) {
     _backgroundTimer?.cancel();
     if ((!_foreground && !_desktop) || _disposed || !ready || autoSelecting || busy ||
-        _nativeNeedsStop || _healthStopping != null || engine is! CandidateHost) return;
+        _nativeNeedsStop || _healthStopping != null || engine is! CandidateHost) { return; }
     if (_healthPending != null) return;
     final token = ++_backgroundEpoch;
     _backgroundTimer = Timer(Duration(seconds: immediate ? 3 : networkContext.metered == false ? 1 : 10), () async {

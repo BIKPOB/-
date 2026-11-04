@@ -35,7 +35,7 @@ try {
 } finally {
  if($p -and !$p.HasExited){Stop-Process -Id $p.Id -Force; $p.WaitForExit()}
  & $probe -Operation cleanup
- Remove-Item $config -ErrorAction SilentlyContinue
+ if($cycle -eq 3){Remove-Item $config -ErrorAction SilentlyContinue}
  Remove-Item Env:QUIET_TUNNEL_ADDRESS -ErrorAction SilentlyContinue
 }
 }
