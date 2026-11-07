@@ -1327,7 +1327,7 @@ class VpnViewModel extends ChangeNotifier {
         connectionVerified = _requiresSpeed ? (measuredBytesPerSecond ?? 0)>=targetBytesPerSecond : result?['quality'] == true;
         // 'delay' includes the subsequent speed transfer. Use only the
         // separate HTTPS-first-response RTT for health; do not invent a ping.
-        final latencyMs = (result?['latencyMs'] as num?)?.toInt();
+        final latencyMs = (result['latencyMs'] as num?)?.toInt();
         if (latencyMs != null) _rememberWireGuardHealth(latencyMs);
         message = '${result?['detail'] ?? 'HTTPS-проверка пройдена'}'; _scheduleTraffic(); _notify();
       }
