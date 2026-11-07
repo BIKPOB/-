@@ -925,7 +925,7 @@ class VpnViewModel extends ChangeNotifier {
   bool _nativeConnected = false;
   String? _pendingFailure;
   bool get canDisconnect => _nativeNeedsStop;
-  int _connectionEpoch = 0, _probeEpoch = 0;
+  int _connectionEpoch = 0, _probeEpoch = 0, _wireGuardProbeEpoch = -1;
   Timer? _poll, _connectTimeout, _trafficTimer;
   final traffic = TrafficMeter();
   final _clock = Stopwatch()..start();
@@ -1098,11 +1098,15 @@ class VpnViewModel extends ChangeNotifier {
         for (final entry in unique.entries) {
           final server = entry.value;
           if (server.protocol == 'wireguard') {
-            _protocolHealth[entry.key] = const HealthResult(Reachability.notMeasured,null,'WireGuard: требуется проверка туннеля');
+            // No fake UDP ping: retain only a recent real HTTPS/TUN proof from
+            // connecting this precise profile on the current physical network.
+            if (_protocolHealth[entry.key]?.protocolVerified != true) {
+              _protocolHealth[entry.key] = const HealthResult(Reachability.notMeasured,null,'WireGuard: требуется проверка туннеля');
+            }
             continue;
           }
           final previous = _protocolHealth[entry.key];
-          if (previous?.checkedAt == null || now.difference(previous!.checkedAt!) >= const Duration(minutes:15)) candidates.add(server);
+          if (ProtocolHealthPolicy.needsProbe(previous, now)) candidates.add(server);
         }
         backgroundTotal = unique.values.where((s)=>s.protocol!='wireguard').length;
         backgroundChecked = backgroundTotal - candidates.length;
@@ -1134,8 +1138,13 @@ class VpnViewModel extends ChangeNotifier {
           final matches = results.where((result)=>result.server.id==server.id);
           final result = matches.isEmpty ? null : matches.first;
           final success = result != null && result.error == null && result.latencyMs != null;
-          final value = HealthResult(success ? Reachability.reachable : Reachability.unreachable,
-            result?.latencyMs, success ? 'HTTPS через сервер' : result?.error ?? 'Проверка не завершена', DateTime.now());
+          // A skipped candidate is not a failed server. Retain a short retry
+          // cooldown, instead of falsely marking it unreachable for 15 minutes.
+          final value = result == null
+              ? HealthResult(Reachability.notMeasured, null, 'Проверка не завершена', DateTime.now())
+              : HealthResult(success ? Reachability.reachable : Reachability.unreachable,
+                  result.latencyMs, success ? 'HTTPS через сервер' : result.error ?? 'HTTPS не подтверждён',
+                  DateTime.now());
           _protocolHealth[ConnectionStrategy.profileKey(server)] = value;
           // Publish aliases for imported copies as well as catalog profiles.
           for (final item in [..._imports,..._healthCatalog!].where((s)=>ConnectionStrategy.profileKey(s)==ConnectionStrategy.profileKey(server))) {
@@ -1251,6 +1260,13 @@ class VpnViewModel extends ChangeNotifier {
           connectionVerified = _requiresSpeed ? (event.bytesPerSecond ?? 0) >= targetBytesPerSecond : event.quality; measuredBytesPerSecond = event.bytesPerSecond;
           state = ConnectionState.connected; message = event.message ?? 'Xray: ответ через сервер получен';
           _scheduleTraffic(); _notify();
+          // Windows confirms a WireGuard tunnel before reporting connected.
+          // Read its HTTPS RTT once, and never invent a UDP-ping value.
+          if (engine is DesktopCapabilities && activeServer?.protocol == 'wireguard' &&
+              _wireGuardProbeEpoch != _connectionEpoch) {
+            _wireGuardProbeEpoch = _connectionEpoch;
+            unawaited(_verifyInternet());
+          }
         } else if (!_verifying && state != ConnectionState.connected) { unawaited(_verifyInternet()); }
       case ConnectionState.connecting:
         connectionVerified = false; measuredBytesPerSecond = null;
@@ -1297,6 +1313,19 @@ class VpnViewModel extends ChangeNotifier {
         _connectTimeout?.cancel(); _connectTimeout = null; state = ConnectionState.connected;
         measuredBytesPerSecond = (result?['bytesPerSecond'] as num?)?.toInt();
         connectionVerified = _requiresSpeed ? (measuredBytesPerSecond ?? 0)>=targetBytesPerSecond : result?['quality'] == true;
+        if (activeServer?.protocol == 'wireguard') {
+          // The native TUN probe returned a real HTTPS response, independently
+          // of whether the measured throughput meets the AI speed target.
+          final server = activeServer!;
+          final proof = HealthResult(Reachability.reachable,
+              (result!['delay'] as num).toInt(), 'HTTPS через VPN', DateTime.now());
+          _protocolHealth[ConnectionStrategy.profileKey(server)] = proof;
+          health[server.id] = proof;
+          if (_healthContext == null && !networkContext.vpnPresent &&
+              !networkContext.ambiguous && networkContext.type != 'offline') {
+            _healthContext = networkContext;
+          }
+        }
         message = '${result?['detail'] ?? 'HTTPS-проверка пройдена'}'; _scheduleTraffic(); _notify();
       }
     } catch (_) {

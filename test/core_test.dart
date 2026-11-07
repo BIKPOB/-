@@ -91,4 +91,27 @@ void main() {
     expect(ServerMonitor.parsePing('Operation not permitted'), isNull);
   });
 
+  test('protocol verified requires fresh HTTPS, never a TCP or ICMP ping', () {
+    final now = DateTime.now();
+    expect(HealthResult(Reachability.reachable, 42, 'HTTPS через VPN', now).protocolVerified, isTrue);
+    expect(HealthResult(Reachability.reachable, 42, 'HTTPS через сервер', now).protocolVerified, isTrue);
+    expect(HealthResult(Reachability.reachable, 4, 'TCP', now).protocolVerified, isFalse);
+    expect(HealthResult(Reachability.reachable, 4, 'ICMP', now).protocolVerified, isFalse);
+    expect(HealthResult(Reachability.reachable, 42, 'HTTPS через VPN',
+      now.subtract(const Duration(minutes: 16))).protocolVerified, isFalse);
+  });
+  test('missed candidates are retried earlier than verified servers', () {
+    final now = DateTime.now();
+    expect(ProtocolHealthPolicy.needsProbe(
+      HealthResult(Reachability.notMeasured, null, 'Проверка не завершена', now), now), isFalse);
+    expect(ProtocolHealthPolicy.needsProbe(
+      HealthResult(Reachability.notMeasured, null, 'Проверка не завершена',
+        now.subtract(const Duration(minutes: 3))), now), isTrue);
+    expect(ProtocolHealthPolicy.needsProbe(
+      HealthResult(Reachability.reachable, 42, 'HTTPS через сервер',
+        now.subtract(const Duration(minutes: 3))), now), isFalse);
+    expect(ProtocolHealthPolicy.needsProbe(
+      HealthResult(Reachability.reachable, 42, 'HTTPS через сервер',
+        now.subtract(const Duration(minutes: 16))), now), isTrue);
+  });
 }

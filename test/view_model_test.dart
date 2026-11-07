@@ -100,6 +100,19 @@ class HealthLabFixture extends CandidateLab {
     return [for(final server in candidates) CandidateResult(server,42,[],null)];
   }
 }
+class EmptyHealthLabFixture extends HealthLabFixture {
+  EmptyHealthLabFixture(super.host);
+  @override Future<List<CandidateResult>> run(List<VpnServer> candidates,{required bool deep,
+    required bool metered,bool healthOnly=false,int target=131072,NetworkAnalysis? analysis,
+    SelectionPolicy policy=const SelectionPolicy(),required Future<bool> Function() routeValid,
+    required void Function(String) status,void Function(CandidateResult)? onResult,
+    Future<void> Function(List<VpnServer>)? onAttempt}) async {
+    expect(healthOnly,isTrue);
+    expect(await routeValid(),isTrue);
+    calls++;
+    return [];
+  }
+}
 class IdleBaselineMonitor extends BaselineMonitor {
   @override Future<void> pause(bool value) async {}
   @override Future<NetworkBaseline?> tick(NetworkContext context,
@@ -523,6 +536,24 @@ void main() {
       network='mobile';
       await vm.checkServerHealth();
       expect(lab.calls,2,reason:'New network requires a new protocol handshake');
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+  test('background probe budget exhaustion is unmeasured, not unreachable', () async {
+    final engine = ProxyLabEngine();
+    final lab = EmptyHealthLabFixture(engine);
+    final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(),
+      healthLabFactory: (_) => lab, networkAnalyzer: CountingNetworkAnalyzer(),
+      baselineMonitor: IdleBaselineMonitor(),
+      catalogLoader: () async => const PublicCatalogResult([], false, 0),
+      networkReader: () async => 'wifi');
+    try {
+      await vm.initialize();
+      await vm.checkServerHealth();
+      expect(lab.calls, 1);
+      expect(vm.serverHealth(server)?.state, Reachability.notMeasured);
+      expect(vm.serverHealth(server)?.protocolVerified, isFalse);
+      await vm.checkServerHealth();
+      expect(lab.calls, 1, reason: 'Interrupted checks have a short retry cooldown');
     } finally { vm.dispose(); await engine.dispose(); }
   });
   test('quick selection keeps the first measured slow connection without reconnecting', () async {

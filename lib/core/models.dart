@@ -26,8 +26,10 @@ class VpnServer {
 class HealthResult {
   const HealthResult(this.state, [this.milliseconds, this.method = '', this.checkedAt]);
   final DateTime? checkedAt;
-  bool get protocolVerified => state == Reachability.reachable && method == 'HTTPS через сервер' && checkedAt != null &&
-    DateTime.now().difference(checkedAt!) >= Duration.zero && DateTime.now().difference(checkedAt!) < const Duration(minutes: 15);
+  bool get protocolVerified => state == Reachability.reachable &&
+    (method == 'HTTPS через сервер' || method == 'HTTPS через VPN') &&
+    checkedAt != null && DateTime.now().difference(checkedAt!) >= Duration.zero &&
+    DateTime.now().difference(checkedAt!) < const Duration(minutes: 15);
   final String method;
   final Reachability state;
   final int? milliseconds;
@@ -44,4 +46,20 @@ class EngineEvent {
 class Credentials {
   const Credentials(this.username, this.password);
   final String username, password;
+}
+
+/// Cache confirmed HTTPS separately from failed or interrupted checks. A socket
+/// response is never treated as an authenticated protocol handshake.
+class ProtocolHealthPolicy {
+  static const verifiedTtl = Duration(minutes: 15);
+  static const retryTtl = Duration(minutes: 2);
+  static bool needsProbe(HealthResult? result, DateTime now) {
+    final checked = result?.checkedAt;
+    if (checked == null) return true;
+    final elapsed = now.difference(checked);
+    if (elapsed.isNegative) return true;
+    final verified = result!.state == Reachability.reachable &&
+        (result.method == 'HTTPS через сервер' || result.method == 'HTTPS через VPN');
+    return elapsed >= (verified ? verifiedTtl : retryTtl);
+  }
 }
