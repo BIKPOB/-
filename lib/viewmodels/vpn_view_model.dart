@@ -1247,7 +1247,7 @@ class VpnViewModel extends ChangeNotifier {
       sessionClock.stopped();
       _nativeNeedsStop = true; activeServer = server;
       state = ConnectionState.connecting;
-      connectionVerified = false; measuredBytesPerSecond = null;
+      connectionVerified = false; internetVerified = false; measuredBytesPerSecond = null;
       traffic.reset(); connectionStage = 'Запуск VPN';
       _connectionEpoch++;
       _connectTimeout?.cancel();
@@ -1293,7 +1293,7 @@ class VpnViewModel extends ChangeNotifier {
           }
         } else if (!_verifying && state != ConnectionState.connected) { unawaited(_verifyInternet()); }
       case ConnectionState.connecting:
-        connectionVerified = false; measuredBytesPerSecond = null;
+        connectionVerified = false; internetVerified = false; measuredBytesPerSecond = null;
         _nativeConnected = false;
         connectionStage = event.message ?? connectionStage;
         message = connectionStage; traffic.reset(); _trafficTimer?.cancel();
@@ -1349,6 +1349,7 @@ class VpnViewModel extends ChangeNotifier {
       if (!_disposed && epoch == _connectionEpoch && _nativeNeedsStop) {
         _connectTimeout?.cancel(); _connectTimeout = null; state = ConnectionState.connected;
         measuredBytesPerSecond = (result?['bytesPerSecond'] as num?)?.toInt();
+        internetVerified = true;
         connectionVerified = _requiresSpeed ? (measuredBytesPerSecond ?? 0)>=targetBytesPerSecond : result?['quality'] == true;
         // 'delay' includes the subsequent speed transfer. Use only the
         // separate HTTPS-first-response RTT for health; do not invent a ping.
@@ -1453,7 +1454,9 @@ class VpnViewModel extends ChangeNotifier {
   }
   Future<void> disconnect({bool automatic=false}) async {
     if (!automatic) _cancelReserve();
-    if (busy || _stopping) return;
+    if (_stopping || (busy && !_nativeNeedsStop)) return;
+    // Explicit manual stop is allowed even while connect() is waiting on a
+    // native plugin. The Android engine invalidates its in-flight start token.
     reconnectAdvice = null;
     sessionClock.stopped();
     _clearConfirmation();
@@ -1467,7 +1470,10 @@ class VpnViewModel extends ChangeNotifier {
       await _stopEngine(); _nativeNeedsStop = false; activeServer = null;
       if (!autoSelecting) await _baselineMonitor.pause(false);
       state = ConnectionState.disconnected; message = null;
-    } catch (_) { state = ConnectionState.error; message = 'Отключение не подтверждено. Повторите или используйте настройки системы.'; }
+    } catch (_) {
+      state = ConnectionState.error;
+      message = 'Отключение не подтверждено. Кнопка отключения доступна для повтора; при необходимости отключите VPN в настройках системы.';
+    }
     finally {
       busy = false; _stopping = false; _scheduleBackgroundPreflight(immediate: true);
       if(!autoSelecting && !_nativeNeedsStop) _scheduleBaseline(immediate:true,forceAnalysis:true);
