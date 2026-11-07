@@ -691,11 +691,15 @@ class VpnViewModel extends ChangeNotifier {
           autoAttemptReports.add('${speeds.length} замер(а): ${speeds.map((n) => '${(n / 1024).round()} КиБ/с').join(', ')}');
         }
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
-        if (!deep && usable && sameNetwork) {
+        if (!deep && sameNetwork && (success ||
+            (usable && ((_selectionTarget == null && !_requiresSpeed) ||
+                engine is QuickProbeSupport)))) {
           connectionVerified = success;
           autoStatus = success
             ? 'ИИ выбрал VPN: HTTPS и скорость подтверждены · опыт: ${_selector.samples}'
-            : 'VPN подключён: HTTPS подтверждён; скорость ещё измеряется или ниже цели. Глубокий подбор может найти быстрее.';
+            : engine is QuickProbeSupport
+              ? 'VPN подключён: HTTPS подтверждён; скорость ещё измеряется или ниже цели. Глубокий подбор может найти быстрее.'
+              : 'ИИ сохранил первый рабочий VPN; скорость ниже цели. Глубокий подбор может найти быстрее.';
           return;
         }
         // Proxy candidates were compared before TUN activation. Once the live
@@ -1274,6 +1278,11 @@ class VpnViewModel extends ChangeNotifier {
   }
   void _onEvent(EngineEvent event) {
     if (_disposed || _stopping) return;
+    // A delayed native CONNECTED event from an attempt cancelled by the user
+    // must not resurrect a VPN that the view model already stopped.
+    if ((event.state == ConnectionState.connected ||
+        event.state == ConnectionState.connecting) &&
+        !_nativeNeedsStop && activeServer == null) return;
     switch (event.state) {
       case ConnectionState.connected:
         _connectTimeout?.cancel(); _connectTimeout = null;
