@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quiet_vpn/platform/android_engine.dart';
@@ -95,6 +96,89 @@ void main() {
       expect(probes, 1);
       await engine.disconnect(); expect(stops, 1);
     } finally { await subscription.cancel(); await engine.dispose(); }
+  });
+  test('quick Xray check confirms HTTPS before a separate speed download', () async {
+    var stage = 'CONNECTED', fast = 0, normal = 0;
+    final speed = Completer<Map<String, dynamic>>();
+    final events = <EngineEvent>[];
+    messenger.setMockMethodCallHandler(const MethodChannel('flutter_v2ray_client'), (call) async {
+      if (call.method == 'stopV2Ray') stage = 'DISCONNECTED';
+      return null;
+    });
+    messenger.setMockMethodCallHandler(const MethodChannel('quietvpn/wg'), (call) async => 'disconnected');
+    messenger.setMockMethodCallHandler(const MethodChannel('quietvpn/catalog-cache'),
+      (_) async => {'ownVpn': false});
+    messenger.setMockMethodCallHandler(const MethodChannel('quietvpn/xray-state'), (call) async {
+      if (call.method == 'stage') return stage;
+      if (call.method == 'probe') {
+        if (call.arguments['quick'] == true) {
+          fast++;
+          return {'delay': 125, 'httpsVerified': true, 'quality': false,
+            'detail': 'HTTPS подтверждён'};
+        }
+        normal++;
+        return speed.future;
+      }
+      return null;
+    });
+    final engine = AndroidEngine();
+    final sub = engine.events.listen(events.add);
+    try {
+      engine.setQuickProbe(true);
+      await engine.initialize();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(fast, 1);
+      expect(normal, 1);
+      final first = events.lastWhere((e) => e.httpsVerified);
+      expect(first.state, ConnectionState.connected);
+      expect(first.bytesPerSecond, isNull);
+      expect(first.quality, isFalse);
+      speed.complete({'delay': 8000, 'bytesPerSecond': 180000,
+        'quality': true, 'detail': 'speed complete'});
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(events.last.bytesPerSecond, 180000);
+      expect(events.last.httpsVerified, isTrue);
+      await engine.disconnect();
+    } finally {
+      if (!speed.isCompleted) speed.complete({'delay': -1});
+      await sub.cancel(); await engine.dispose();
+      for (final name in ['flutter_v2ray_client','quietvpn/wg',
+        'quietvpn/catalog-cache','quietvpn/xray-state']) {
+        messenger.setMockMethodCallHandler(MethodChannel(name), null);
+      }
+    }
+  });
+  test('failed native stop is retryable without restarting app', () async {
+    var stage = 'CONNECTED', stopAttempts = 0;
+    messenger.setMockMethodCallHandler(const MethodChannel('flutter_v2ray_client'), (call) async {
+      if (call.method == 'stopV2Ray') {
+        stopAttempts++;
+        if (stopAttempts == 1) throw PlatformException(code: 'stop-failed');
+        stage = 'DISCONNECTED';
+      }
+      return null;
+    });
+    messenger.setMockMethodCallHandler(const MethodChannel('quietvpn/wg'), (_) async => 'disconnected');
+    messenger.setMockMethodCallHandler(const MethodChannel('quietvpn/catalog-cache'),
+      (_) async => {'ownVpn': false});
+    messenger.setMockMethodCallHandler(const MethodChannel('quietvpn/xray-state'), (call) async {
+      if (call.method == 'stage') return stage;
+      if (call.method == 'probe') return {'delay': -1};
+      return null;
+    });
+    final engine = AndroidEngine();
+    try {
+      await engine.initialize();
+      await expectLater(engine.disconnect(), throwsA(isA<PlatformException>()));
+      await engine.disconnect();
+      expect(stopAttempts, 2);
+    } finally {
+      await engine.dispose();
+      for (final name in ['flutter_v2ray_client','quietvpn/wg',
+        'quietvpn/catalog-cache','quietvpn/xray-state']) {
+        messenger.setMockMethodCallHandler(MethodChannel(name), null);
+      }
+    }
   });
   test('WireGuard session reconciles and native stop failure propagates', () async {
     var wg = 'connecting';
