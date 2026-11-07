@@ -850,7 +850,7 @@ void main() {
   });
   test('foreground keep-alive is acquired once and released after deep search', () async {
     final engine = SearchKeepAliveEngine(), catalog = Completer<PublicCatalogResult>();
-    final vm = VpnViewModel(engine, MemoryProfiles(),
+    final vm = VpnViewModel(engine, EmptyProfiles(),
       ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
       catalogLoader: () => catalog.future, networkReader: () async => 'wifi',
       baselineMonitor: IdleBaselineMonitor());
