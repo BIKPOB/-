@@ -1,0 +1,94 @@
+name: Publish recovered Quiet VPN 1.x (verified historical artifacts)
+on:
+  push:
+    paths: ['.github/workflows/publish-restored-1x.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: publish-quiet-vpn-restored-1x
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - version: '1.0.0'
+            sha: f246a88e08e6fb545b62742a1cb8d0100c33d99d
+          - version: '1.0.1'
+            sha: 387a08e4b1b9614d0ddb2751f928f5f9230b69c7
+          - version: '1.0.2'
+            sha: 4546570851b9b70c21cbae3e9c38f6d376a9394d
+          - version: '1.0.3'
+            sha: d0cf20349c5835ba0d19541f4cf8c15e05fc6662
+          - version: '1.0.4'
+            sha: d8ee74c4e57ca0baf6190a545577cbc46a9e7385
+          - version: '1.0.5'
+            sha: 633b863fe56f679e269c8a2f6a5c33764278844e
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      HIST_VERSION: ${{ matrix.version }}
+      HIST_SHA: ${{ matrix.sha }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 42365447839
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          name: historical-android-${{ matrix.version }}
+          path: android
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 42365447839
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+          name: historical-windows-${{ matrix.version }}
+          path: windows
+      - name: Verify checked build artifacts and produce release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "android/quiet-vpn-$HIST_VERSION.apk"
+          test -f "windows/quiet-vpn-$HIST_VERSION-windows-x64-setup.exe"
+          test "$(tr -d '\r\n' < android/SOURCE_COMMIT.txt)" = "$HIST_SHA"
+          test "$(tr -d '\r\n' < windows/SOURCE_COMMIT.txt)" = "$HIST_SHA"
+          # Historical SHA file was generated from the repository root,
+          # before the runner artifact moved into its download directory.
+          sed 's#^historical-android/##' android/SHA256SUMS.txt | (cd android && sha256sum -c -)
+          (cd windows && sha256sum -c SHA256SUMS-Windows.txt)
+          mkdir -p restore
+          cp "android/quiet-vpn-$HIST_VERSION.apk" restore/
+          cp "windows/quiet-vpn-$HIST_VERSION-windows-x64-setup.exe" restore/
+          (cd restore && sha256sum *.apk *.exe > SHA256SUMS.txt)
+          echo "$HIST_SHA" > restore/SOURCE_COMMIT.txt
+          cat > notes.md <<EOF
+          ## Quiet VPN v$HIST_VERSION — восстановленный исторический выпуск
+
+          Исходники: https://github.com/$GH_REPO/commit/$HIST_SHA
+
+          **Android:** quiet-vpn-$HIST_VERSION.apk
+          **Windows:** quiet-vpn-$HIST_VERSION-windows-x64-setup.exe
+
+          Первоначальные файлы были удалены вместе со старыми Releases и артефактами Actions. Приложения повторно собраны из исходников указанного коммита: Flutter-анализ, тесты Android/Windows, тесты движка и установки, контрольные суммы SHA-256. Байты новых установщиков могут отличаться от ранее опубликованных.
+
+          В SOURCE_COMMIT.txt находится SHA исторического кода, SHA256SUMS.txt подтверждает целостность обоих установщиков. Тег релиза создан системой восстановления и указывает на обслуживающий workflow; для исходного кода именно этой версии используйте приведённую выше ссылку на исторический коммит.
+
+          Quiet VPN v1.0.6 остаётся без изменений.
+          EOF
+      - name: Publish without overwriting any existing release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v$HIST_VERSION"
+          if curl --silent --show-error --fail --location "https://api.github.com/repos/$GH_REPO/releases/tags/$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; refusing overwrite."
+            exit 0
+          fi
+          gh release create "$tag" restore/* --target "$GITHUB_SHA" --title "Quiet VPN $tag — восстановленный Android и Windows" --notes-file notes.md
+          echo "Restored and verified release $tag from $HIST_SHA"
