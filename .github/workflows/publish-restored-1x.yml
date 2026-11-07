@@ -60,7 +60,9 @@ jobs:
           test "$(tr -d '\r\n' < windows/SOURCE_COMMIT.txt)" = "$HIST_SHA"
           # Historical SHA file was generated from the repository root,
           # before the runner artifact moved into its download directory.
-          sed 's#^historical-android/##' android/SHA256SUMS.txt | (cd android && sha256sum -c -)
+          recorded_hash="$(cut -d' ' -f1 android/SHA256SUMS.txt)"
+          actual_hash="$(sha256sum "android/quiet-vpn-$HIST_VERSION.apk" | cut -d' ' -f1)"
+          test "$actual_hash" = "$recorded_hash" || { echo 'Android APK SHA-256 mismatch'; exit 1; }
           (cd windows && sha256sum -c SHA256SUMS-Windows.txt)
           mkdir -p restore
           cp "android/quiet-vpn-$HIST_VERSION.apk" restore/
