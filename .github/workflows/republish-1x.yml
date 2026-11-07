@@ -1,0 +1,95 @@
+name: Republish verified historical Quiet VPN 1.x builds
+on:
+  push:
+    paths: ['.github/workflows/republish-1x.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: quiet-vpn-republish-1x
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - version: '1.0.0'
+            source_sha: f246a88e08e6fb545b62742a1cb8d0100c33d99d
+          - version: '1.0.1'
+            source_sha: 387a08e4b1b9614d0ddb2751f928f5f9230b69c7
+          - version: '1.0.2'
+            source_sha: 4546570851b9b70c21cbae3e9c38f6d376a9394d
+          - version: '1.0.3'
+            source_sha: d0cf20349c5835ba0d19541f4cf8c15e05fc6662
+          - version: '1.0.4'
+            source_sha: d8ee74c4e57ca0baf6190a545577cbc46a9e7385
+          - version: '1.0.5'
+            source_sha: 633b863fe56f679e269c8a2f6a5c33764278844e
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ matrix.version }}
+      SOURCE_SHA: ${{ matrix.source_sha }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: historical-android-${{ matrix.version }}
+          run-id: 42365447839
+          github-token: ${{ github.token }}
+          path: android
+      - uses: actions/download-artifact@v4
+        with:
+          name: historical-windows-${{ matrix.version }}
+          run-id: 42365447839
+          github-token: ${{ github.token }}
+          path: windows
+      - name: Verify historical source and recovered installer hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "android/quiet-vpn-$VERSION.apk"
+          test -f "windows/quiet-vpn-$VERSION-windows-x64-setup.exe"
+          test "$(tr -d '\r\n' < android/SOURCE_COMMIT.txt)" = "$SOURCE_SHA"
+          test "$(tr -d '\r\n' < windows/SOURCE_COMMIT.txt)" = "$SOURCE_SHA"
+          android_expected="$(awk 'NR == 1 {print $1}' android/SHA256SUMS.txt)"
+          android_actual="$(sha256sum "android/quiet-vpn-$VERSION.apk" | awk '{print $1}')"
+          test "$android_expected" = "$android_actual"
+          windows_expected="$(awk 'NR == 1 {print $1}' windows/SHA256SUMS-Windows.txt)"
+          windows_actual="$(sha256sum "windows/quiet-vpn-$VERSION-windows-x64-setup.exe" | awk '{print $1}')"
+          test "$windows_expected" = "$windows_actual"
+          mkdir -p restore
+          cp "android/quiet-vpn-$VERSION.apk" restore/
+          cp "windows/quiet-vpn-$VERSION-windows-x64-setup.exe" restore/
+          (cd restore && sha256sum *.apk *.exe > SHA256SUMS.txt)
+          printf '%s\n' "$SOURCE_SHA" > restore/SOURCE_COMMIT.txt
+          cat > notes.md <<EOF
+          ## Quiet VPN v$VERSION — восстановленный исторический выпуск
+
+          **Android:** quiet-vpn-$VERSION.apk
+
+          **Windows:** quiet-vpn-$VERSION-windows-x64-setup.exe
+
+          Старые оригинальные артефакты GitHub Releases были удалены.
+          Эти установщики повторно собраны из [исторического коммита](https://github.com/$GH_REPO/commit/$SOURCE_SHA),
+          прошли Flutter-тесты и платформенные CI-проверки. Бинарники могут отличаться от первоначальных по SHA-256.
+          Точные суммы доступны в SHA256SUMS.txt, а исходный коммит — в SOURCE_COMMIT.txt.
+
+          Git-тег восстановленного релиза указывает на текущую ревизию GitHub workflow;
+          SOURCE_COMMIT.txt фиксирует историческую ревизию исходников.
+          EOF
+      - name: Restore historical release without overwriting an existing one
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v$VERSION"
+          if curl --silent --fail --location "https://api.github.com/repos/$GH_REPO/releases/tags/$tag" >/dev/null; then
+            echo "Already published $tag — leaving it unchanged."
+            exit 0
+          fi
+          gh release create "$tag" restore/* --target "$GITHUB_SHA" \
+            --title "Quiet VPN $tag — восстановленный Android и Windows" --notes-file notes.md
