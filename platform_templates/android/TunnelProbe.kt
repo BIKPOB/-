@@ -32,15 +32,18 @@ object TunnelProbe {
             for (url in listOf("https://www.gstatic.com/generate_204",
                     "https://cp.cloudflare.com/generate_204")) {
                 if (token != generation) break
-                val request = network.openConnection(URL(url)) as HttpsURLConnection
-                pending = request
-                request.connectTimeout = 2300
-                request.readTimeout = 2300
-                request.instanceFollowRedirects = false
-                request.useCaches = false
-                val deadline = timer.schedule({ request.disconnect() }, 3, TimeUnit.SECONDS)
+                var request: HttpsURLConnection? = null
+                var deadline: java.util.concurrent.ScheduledFuture<*>? = null
                 try {
-                    check(request.responseCode == 204) { "HTTP status" }
+                    val connection = network.openConnection(URL(url)) as HttpsURLConnection
+                    request = connection
+                    pending = connection
+                    connection.connectTimeout = 2300
+                    connection.readTimeout = 2300
+                    connection.instanceFollowRedirects = false
+                    connection.useCaches = false
+                    deadline = timer.schedule({ connection.disconnect() }, 3, TimeUnit.SECONDS)
+                    check(connection.responseCode == 204) { "HTTP status" }
                     if (token != generation) break
                     val latency = SystemClock.elapsedRealtime() - start
                     return mapOf("delay" to latency, "latencyMs" to latency,
@@ -49,8 +52,8 @@ object TunnelProbe {
                 } catch (e: Exception) {
                     failures.add("${URL(url).host}: ${ProbeFailure.describe(e)}")
                 } finally {
-                    deadline.cancel(false)
-                    request.disconnect()
+                    deadline?.cancel(false)
+                    request?.disconnect()
                     if (pending === request) pending = null
                 }
             }
