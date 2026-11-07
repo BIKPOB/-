@@ -1,63 +1,25 @@
-name: Clean old Quiet VPN builds and releases
-# After confirmed v1.0.6 publication, preserve latest stable release and successful platform CI.
+name: Audit Quiet VPN Actions history (non-destructive)
+# Historical stable releases and their tags must NEVER be removed by an Actions cleanup.
+# This workflow is intentionally manual and read-only.
 on:
-  push:
-    paths: ['.github/workflows/cleanup-history.yml']
   workflow_dispatch:
 permissions:
-  contents: write
-  actions: write
-concurrency:
-  group: quiet-vpn-history-cleanup
-  cancel-in-progress: false
+  contents: read
+  actions: read
 jobs:
-  cleanup:
+  audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Preserve latest stable release and remove older releases including prereleases
+      - name: List releases and build runs (no deletion)
         shell: bash
         run: |
           set -euo pipefail
-          latest=$(gh api "repos/$GH_REPO/releases/latest" --jq '.tag_name')
-          [[ "$latest" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Unexpected latest stable release; refusing cleanup"; exit 1; }
-          echo "Preserving $latest"
-          gh api --paginate "repos/$GH_REPO/releases?per_page=100" --jq '.[] | [.id,.tag_name] | @tsv' > /tmp/quiet_releases.tsv
-          while IFS=$'\t' read -r id tag; do
-            [[ -n "$id" && -n "$tag" ]] || continue
-            [[ "$tag" == "$latest" ]] && continue
-            [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][a-zA-Z0-9._-]+)?$ ]] || { echo "Skipping nonversion tag $tag"; continue; }
-            echo "Removing obsolete release and tag $tag"
-            gh api -X DELETE "repos/$GH_REPO/releases/$id"
-            gh api -X DELETE "repos/$GH_REPO/git/refs/tags/$tag" || echo "Tag $tag already absent or protected"
-          done < /tmp/quiet_releases.tsv
-      - name: Remove obsolete completed Actions runs and their artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh api --paginate "repos/$GH_REPO/actions/runs?per_page=100" --jq '.workflow_runs[] | [.id,.name,.status,.conclusion] | @tsv' > /tmp/quiet_runs.tsv
-          python3 - <<'PY'
-          import os
-          kept_workflows = set()
-          current = os.environ['GITHUB_RUN_ID']
-          removed = []
-          for line in open('/tmp/quiet_runs.tsv'):
-              run_id, name, status, conclusion = line.rstrip('\n').split('\t')
-              if run_id == current or status != 'completed':
-                  continue
-              if conclusion == 'success' and name not in kept_workflows:
-                  kept_workflows.add(name)
-                  continue
-              removed.append(run_id)
-          with open('/tmp/quiet_delete_runs.txt','w') as out:
-              out.write('\n'.join(removed) + ('\n' if removed else ''))
-          print(f'Old completed runs to remove: {len(removed)}; preserving newest successful runs per workflow and all active runs')
-          PY
-          while IFS= read -r run_id; do
-            [[ -n "$run_id" ]] || continue
-            gh api -X DELETE "repos/$GH_REPO/actions/runs/$run_id" >/dev/null || echo "Unable to remove run $run_id"
-          done < /tmp/quiet_delete_runs.txt
-          echo "History cleanup finished."
+          echo 'Stable releases (preserved):'
+          gh api --paginate "repos/$GH_REPO/releases?per_page=100" --jq '.[] | [.tag_name, .prerelease, .published_at] | @tsv'
+          echo 'Recent build runs (preserved):'
+          gh run list -R "$GH_REPO" --limit 30
+          echo 'No releases, tags, workflow runs, or artifacts were deleted.'
