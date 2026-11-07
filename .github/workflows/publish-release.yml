@@ -139,5 +139,11 @@ jobs:
               "https://api.github.com/repos/$GH_REPO/releases/tags/$RELEASE_TAG" >/dev/null; then
             echo 'Release already exists; leaving it unchanged.'
           else
-            gh release create "$RELEASE_TAG" release/* --target "$SOURCE_SHA" --title "Quiet VPN $RELEASE_TAG — Android и Windows" --notes-file notes.md
+            # GitHub's workflow token cannot create releases targeting an older
+            # commit when workflow files have changed on main since that commit.
+            # Tag current HEAD; SOURCE_COMMIT.txt preserves the exact verified
+            # Android/Windows binary source commit and notes link the CI runs.
+            echo '' >> notes.md
+            echo "Тег указывает на текущую ревизию репозитория (включая CI-конфигурацию). Исходники обоих проверенных установщиков: \`$SOURCE_SHA\` — см. SOURCE_COMMIT.txt." >> notes.md
+            gh release create "$RELEASE_TAG" release/* --target "$GITHUB_SHA" --title "Quiet VPN $RELEASE_TAG — Android и Windows" --notes-file notes.md
           fi
