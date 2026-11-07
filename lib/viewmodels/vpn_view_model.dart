@@ -1282,7 +1282,7 @@ class VpnViewModel extends ChangeNotifier {
     // must not resurrect a VPN that the view model already stopped.
     if ((event.state == ConnectionState.connected ||
         event.state == ConnectionState.connecting) &&
-        !_nativeNeedsStop && activeServer == null) return;
+        !_nativeNeedsStop && activeServer == null) { return; }
     switch (event.state) {
       case ConnectionState.connected:
         _connectTimeout?.cancel(); _connectTimeout = null;
