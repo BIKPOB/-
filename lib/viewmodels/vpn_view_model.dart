@@ -1325,9 +1325,10 @@ class VpnViewModel extends ChangeNotifier {
         _connectTimeout?.cancel(); _connectTimeout = null; state = ConnectionState.connected;
         measuredBytesPerSecond = (result?['bytesPerSecond'] as num?)?.toInt();
         connectionVerified = _requiresSpeed ? (measuredBytesPerSecond ?? 0)>=targetBytesPerSecond : result?['quality'] == true;
-        // A successful system-TUN HTTPS probe proves the WireGuard route even
-        // if measured throughput is below the optional AI target.
-        _rememberWireGuardHealth((result!['delay'] as num).toInt());
+        // 'delay' includes the subsequent speed transfer. Use only the
+        // separate HTTPS-first-response RTT for health; do not invent a ping.
+        final latencyMs = (result?['latencyMs'] as num?)?.toInt();
+        if (latencyMs != null) _rememberWireGuardHealth(latencyMs);
         message = '${result?['detail'] ?? 'HTTPS-проверка пройдена'}'; _scheduleTraffic(); _notify();
       }
     } catch (_) {

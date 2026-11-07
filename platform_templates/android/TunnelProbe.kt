@@ -25,6 +25,7 @@ object TunnelProbe {
             manager.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
         } ?: return mapOf("delay" to -1L, "detail" to "Системный VPN недоступен для проверки")
         val start = SystemClock.elapsedRealtime()
+        var latencyMs = -1L // HTTPS 204 only; never include the subsequent 256-KiB transfer.
         var phase = "DNS и HTTPS через системный VPN"
         var bytes = 0
         try {
@@ -41,6 +42,7 @@ object TunnelProbe {
                     if (index == 0) {
                         phase = "DNS и HTTPS через системный VPN"
                         check(request.responseCode == 204) { "HTTP status" }
+                        latencyMs = SystemClock.elapsedRealtime() - start
                     } else {
                         phase = "загрузка 256 КиБ через системный VPN"
                         check(request.responseCode == 200) { "HTTP status" }
@@ -58,9 +60,10 @@ object TunnelProbe {
                         val bps = bytes * 1000L / elapsed
                         check(bytes == TEST_BYTES) { "Incomplete download" }
                         if (!acceptable(bytes, elapsed)) return mapOf("delay" to SystemClock.elapsedRealtime() - start,
-                            "quality" to false, "bytesPerSecond" to bps,
+                            "latencyMs" to latencyMs, "quality" to false, "bytesPerSecond" to bps,
                             "detail" to "VPN работает, но тест медленный: ${bps / 1024} КиБ/с. Сохранён как резервный кандидат (цель 128 КиБ/с)")
-                        return mapOf("delay" to SystemClock.elapsedRealtime() - start, "bytesPerSecond" to bps, "quality" to true,
+                        return mapOf("delay" to SystemClock.elapsedRealtime() - start, "latencyMs" to latencyMs,
+                            "bytesPerSecond" to bps, "quality" to true,
                             "detail" to "Системный VPN: DNS, HTTPS и 256 КиБ подтверждены · ${bps / 1024} КиБ/с")
                     }
                 } finally { deadline.cancel(false); request.disconnect(); if (pending === request) pending = null }

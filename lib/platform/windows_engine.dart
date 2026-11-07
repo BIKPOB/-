@@ -266,7 +266,7 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
       }
       _emit(ConnectionState.connected, result['detail'] as String,
         quality: result['quality'] == true, speed: result['bytesPerSecond'] as int?,
-        latencyMs: (result['delay'] as num?)?.toInt());
+        latencyMs: (result['latencyMs'] as num?)?.toInt());
     } catch (e) {
       if (token == _epoch) _emit(ConnectionState.error, 'Windows VPN: ${e is StateError ? e.message : e.runtimeType}');
     }

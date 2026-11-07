@@ -180,6 +180,7 @@ class WindowsProbe {
         final response = await request.close();
         if (response.statusCode != 204) throw HttpException('HTTPS status ${response.statusCode}');
         await response.drain<void>();
+        final latencyMs = clock.elapsedMilliseconds; // HTTPS 204 including DNS/TLS, excluding test download.
         // Include request setup and first-byte latency so a buffered burst cannot
         // make an otherwise sluggish endpoint look fast. Bound traffic to 4 MiB.
         final download = Stopwatch()..start();
@@ -199,7 +200,8 @@ class WindowsProbe {
           return <String, dynamic>{'delay': -1, 'quality': false,
             'detail': 'HTTPS и загрузка через VPN работают с DoH, но обычный DNS туннеля не подтверждён. Автоподбор не считает это исправным системным VPN.'};
         }
-        return <String, dynamic>{'delay': clock.elapsedMilliseconds, 'quality': speed >= SpeedPolicy.desktopMinimum,
+        return <String, dynamic>{'delay': clock.elapsedMilliseconds, 'latencyMs': latencyMs,
+          'quality': speed >= SpeedPolicy.desktopMinimum,
           'bytesPerSecond': speed, 'detail': 'Windows VPN: DNS, HTTPS и ${bytes ~/ 1024} КиБ за ${download.elapsedMilliseconds} мс · ${(speed * 8 / 1000000).toStringAsFixed(2)} Мбит/с'};
       })().timeout(const Duration(seconds: 27));
     } catch (e) {

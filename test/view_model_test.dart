@@ -100,6 +100,12 @@ class ProxyLabEngine extends MeasuredEngine implements CandidateHost {
   @override Future<void> startCandidates(String configuration) async {throw StateError('Not used in manual test');}
   @override Future<void> stopCandidates() async {}
 }
+class WireGuardAndroidHealthEngine extends ControlledEngine {
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++;
+    controller.add(const EngineEvent(ConnectionState.connected, 'WireGuard native tunnel ready'));
+  }
+}
 class WireGuardHealthEngine extends ProxyLabEngine implements DesktopCapabilities {
   @override Future<NetworkContext> readNetwork() async =>
     const NetworkContext(type: 'ethernet', session: 'same-physical-network');
@@ -542,6 +548,31 @@ void main() {
       expect(vm.connectionVerified, true);
       await vm.disconnect();
     } finally { vm.dispose(); await engine.dispose(); }
+  });
+  test('Android WireGuard health uses HTTPS latency, not transfer time', () async {
+    final engine = WireGuardAndroidHealthEngine();
+    const channel = MethodChannel('quietvpn/xray-state');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'tunnelProbe');
+      return {'delay': 7600, 'latencyMs': 37, 'quality': true, 'bytesPerSecond': 160000};
+    });
+    final vm = VpnViewModel(engine, WireGuardProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.notMeasured)),
+      networkReader: () async => 'wifi',
+      catalogLoader: () async => const PublicCatalogResult([], false, 0));
+    try {
+      await vm.initialize();
+      await vm.connect(null);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(vm.serverHealth(wireGuardFixture)?.protocolVerified, isTrue);
+      expect(vm.serverHealth(wireGuardFixture)?.milliseconds, 37,
+        reason: '7.6-second transfer test is not ping');
+      await vm.disconnect();
+    } finally {
+      vm.dispose(); await engine.dispose();
+      messenger.setMockMethodCallHandler(channel, null);
+    }
   });
   test('WireGuard RTT comes from Windows TUN evidence, not duplicate probing or UDP ping', () async {
     final engine = WireGuardHealthEngine();
