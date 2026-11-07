@@ -33,6 +33,20 @@ class MemoryProfiles extends ProfileStore {
   @override Future<void> save(List<VpnServer> servers) async {}
   @override Future<Credentials?> credentials(String id) async => null;
 }
+const wireGuardFixture = VpnServer(id: 'wg-test', name: 'wg-test', country: 'Test', countryCode: '--',
+  host: 'example.com', port: 51820, transport: 'udp', source: 'test',
+  protocol: 'wireguard', profile: '''[Interface]
+PrivateKey = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+Address = 10.8.0.2/32
+DNS = 1.1.1.1
+[Peer]
+PublicKey = AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = example.com:51820
+''');
+class WireGuardProfiles extends MemoryProfiles {
+  @override Future<List<VpnServer>> load() async => [wireGuardFixture];
+}
 class EmptyProfiles extends MemoryProfiles {
   @override Future<List<VpnServer>> load() async => [];
 }
@@ -85,6 +99,17 @@ class ProxyLabEngine extends MeasuredEngine implements CandidateHost {
   @override Future<String> resolveCandidate(String host) async => host;
   @override Future<void> startCandidates(String configuration) async {throw StateError('Not used in manual test');}
   @override Future<void> stopCandidates() async {}
+}
+class WireGuardHealthEngine extends ProxyLabEngine implements DesktopCapabilities {
+  @override Future<NetworkContext> readNetwork() async =>
+    const NetworkContext(type: 'ethernet', session: 'same-physical-network');
+  @override Future<String> diagnostics() async => '';
+  @override Future<Map<String, dynamic>> probeTunnel() async =>
+    throw StateError('Windows must not perform a second HTTPS probe');
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++;
+    controller.add(const EngineEvent(ConnectionState.connected, 'HTTPS via TUN', true, 160000, 85));
+  }
 }
 class HealthLabFixture extends CandidateLab {
   HealthLabFixture(super.host);
@@ -516,6 +541,24 @@ void main() {
       expect(vm.targetBytesPerSecond, 600000);
       expect(vm.connectionVerified, true);
       await vm.disconnect();
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+  test('WireGuard RTT comes from Windows TUN evidence, not duplicate probing or UDP ping', () async {
+    final engine = WireGuardHealthEngine();
+    final vm = VpnViewModel(engine, WireGuardProfiles(), ServerMonitor(),
+      networkAnalyzer: CountingNetworkAnalyzer(), baselineMonitor: IdleBaselineMonitor(),
+      catalogLoader: () async => const PublicCatalogResult([], false, 0));
+    try {
+      await vm.initialize();
+      await vm.connect(null);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(engine.connects, 1);
+      expect(vm.serverHealth(wireGuardFixture)?.protocolVerified, isTrue);
+      expect(vm.serverHealth(wireGuardFixture)?.milliseconds, 85);
+      await vm.disconnect();
+      await vm.checkServerHealth();
+      expect(vm.serverHealth(wireGuardFixture)?.protocolVerified, isTrue,
+        reason: 'Background catalog must not erase recent authenticated WireGuard TUN proof');
     } finally { vm.dispose(); await engine.dispose(); }
   });
   test('background HTTPS cache is reused and scoped to the physical network', () async {

@@ -925,7 +925,7 @@ class VpnViewModel extends ChangeNotifier {
   bool _nativeConnected = false;
   String? _pendingFailure;
   bool get canDisconnect => _nativeNeedsStop;
-  int _connectionEpoch = 0, _probeEpoch = 0, _wireGuardProbeEpoch = -1;
+  int _connectionEpoch = 0, _probeEpoch = 0;
   Timer? _poll, _connectTimeout, _trafficTimer;
   final traffic = TrafficMeter();
   final _clock = Stopwatch()..start();
@@ -1260,12 +1260,11 @@ class VpnViewModel extends ChangeNotifier {
           connectionVerified = _requiresSpeed ? (event.bytesPerSecond ?? 0) >= targetBytesPerSecond : event.quality; measuredBytesPerSecond = event.bytesPerSecond;
           state = ConnectionState.connected; message = event.message ?? 'Xray: ответ через сервер получен';
           _scheduleTraffic(); _notify();
-          // Windows confirms a WireGuard tunnel before reporting connected.
-          // Read its HTTPS RTT once, and never invent a UDP-ping value.
-          if (engine is DesktopCapabilities && activeServer?.protocol == 'wireguard' &&
-              _wireGuardProbeEpoch != _connectionEpoch) {
-            _wireGuardProbeEpoch = _connectionEpoch;
-            unawaited(_verifyInternet());
+          // Windows already measured HTTPS through this VPN before emitting
+          // connected. Reuse that proof; never run an expensive second probe.
+          if (engine is DesktopCapabilities && event.latencyMs != null &&
+              event.latencyMs! >= 0) {
+            _rememberWireGuardHealth(event.latencyMs!);
           }
         } else if (!_verifying && state != ConnectionState.connected) { unawaited(_verifyInternet()); }
       case ConnectionState.connecting:
@@ -1303,6 +1302,19 @@ class VpnViewModel extends ChangeNotifier {
     ? (engine as DesktopCapabilities).probeTunnel().timeout(const Duration(seconds: 35))
     : const MethodChannel('quietvpn/xray-state').invokeMapMethod<String, dynamic>('tunnelProbe').timeout(const Duration(seconds: 30));
 
+  void _rememberWireGuardHealth(int delayMs) {
+    final server = activeServer;
+    if (server == null || server.protocol != 'wireguard' || delayMs < 0 || !_nativeNeedsStop) return;
+    // HTTPS through this actual TUN is the only supported WireGuard proof.
+    final proof = HealthResult(Reachability.reachable, delayMs, 'HTTPS через VPN', DateTime.now());
+    _protocolHealth[ConnectionStrategy.profileKey(server)] = proof;
+    health[server.id] = proof;
+    if (_healthContext == null && !networkContext.vpnPresent &&
+        !networkContext.ambiguous && networkContext.type != 'offline') {
+      _healthContext = networkContext;
+    }
+  }
+
   Future<void> _verifyInternet() async {
     _verifying = true;
     final epoch = _connectionEpoch;
@@ -1313,19 +1325,9 @@ class VpnViewModel extends ChangeNotifier {
         _connectTimeout?.cancel(); _connectTimeout = null; state = ConnectionState.connected;
         measuredBytesPerSecond = (result?['bytesPerSecond'] as num?)?.toInt();
         connectionVerified = _requiresSpeed ? (measuredBytesPerSecond ?? 0)>=targetBytesPerSecond : result?['quality'] == true;
-        if (activeServer?.protocol == 'wireguard') {
-          // The native TUN probe returned a real HTTPS response, independently
-          // of whether the measured throughput meets the AI speed target.
-          final server = activeServer!;
-          final proof = HealthResult(Reachability.reachable,
-              (result!['delay'] as num).toInt(), 'HTTPS через VPN', DateTime.now());
-          _protocolHealth[ConnectionStrategy.profileKey(server)] = proof;
-          health[server.id] = proof;
-          if (_healthContext == null && !networkContext.vpnPresent &&
-              !networkContext.ambiguous && networkContext.type != 'offline') {
-            _healthContext = networkContext;
-          }
-        }
+        // A successful system-TUN HTTPS probe proves the WireGuard route even
+        // if measured throughput is below the optional AI target.
+        _rememberWireGuardHealth((result!['delay'] as num).toInt());
         message = '${result?['detail'] ?? 'HTTPS-проверка пройдена'}'; _scheduleTraffic(); _notify();
       }
     } catch (_) {

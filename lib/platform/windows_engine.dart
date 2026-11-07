@@ -46,9 +46,9 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
   String get _alias => _protocol == 'wireguard' ? 'QuietVPN-AWG' : WindowsConfig.adapter;
   String _file(String name) => '$_root${Platform.pathSeparator}engines${Platform.pathSeparator}$name';
   @override Stream<EngineEvent> get events => _events.stream;
-  void _emit(ConnectionState state, String detail, {bool quality = false, int? speed}) {
+  void _emit(ConnectionState state, String detail, {bool quality = false, int? speed, int? latencyMs}) {
     _detail = detail;
-    if (!_events.isClosed) _events.add(EngineEvent(state, detail, quality, speed));
+    if (!_events.isClosed) _events.add(EngineEvent(state, detail, quality, speed, latencyMs));
   }
   Future<ProcessResult> _run(String program, List<String> args, {int seconds = 15}) async {
     final p = await Process.start(program, args, runInShell: false);
@@ -265,7 +265,8 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
         return;
       }
       _emit(ConnectionState.connected, result['detail'] as String,
-        quality: result['quality'] == true, speed: result['bytesPerSecond'] as int?);
+        quality: result['quality'] == true, speed: result['bytesPerSecond'] as int?,
+        latencyMs: (result['delay'] as num?)?.toInt());
     } catch (e) {
       if (token == _epoch) _emit(ConnectionState.error, 'Windows VPN: ${e is StateError ? e.message : e.runtimeType}');
     }
