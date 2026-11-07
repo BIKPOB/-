@@ -117,6 +117,15 @@ class WireGuardHealthEngine extends ProxyLabEngine implements DesktopCapabilitie
     controller.add(const EngineEvent(ConnectionState.connected, 'HTTPS via TUN', true, 160000, 85));
   }
 }
+class HttpsOnlyQuickEngine extends ProxyLabEngine implements QuickProbeSupport {
+  final flags = <bool>[];
+  @override void setQuickProbe(bool value) => flags.add(value);
+  @override Future<void> connect(VpnServer server, Credentials? credentials) async {
+    connects++;
+    controller.add(const EngineEvent(ConnectionState.connected,
+      'HTTPS через Xray подтверждён', false, null, null, true));
+  }
+}
 class HealthLabFixture extends CandidateLab {
   HealthLabFixture(super.host);
   int calls=0;
@@ -590,6 +599,47 @@ void main() {
       await vm.checkServerHealth();
       expect(vm.serverHealth(wireGuardFixture)?.protocolVerified, isTrue,
         reason: 'Background catalog must not erase recent authenticated WireGuard TUN proof');
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+  test('quick HTTPS proof retains real VPN without fabricating target speed', () async {
+    final engine = HttpsOnlyQuickEngine();
+    final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(),
+      catalogLoader: () async => const PublicCatalogResult([], false, 0),
+      networkReader: () async => 'wifi',
+      baselineMonitor: IdleBaselineMonitor());
+    try {
+      await vm.initialize();
+      await vm.autoConnect();
+      expect(engine.connects, 1);
+      expect(engine.flags, [true, false]);
+      expect(vm.state, ConnectionState.connected);
+      expect(vm.internetVerified, isTrue);
+      expect(vm.connectionVerified, isFalse);
+      expect(vm.measuredBytesPerSecond, isNull);
+      expect(vm.canDisconnect, isTrue);
+      expect(vm.autoStatus, contains('HTTPS подтверждён'));
+      await vm.disconnect();
+      expect(vm.internetVerified, isFalse);
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+  test('manual disconnect is allowed while native connect is pending', () async {
+    final engine = ControlledEngine();
+    final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(),
+      catalogLoader: () async => const PublicCatalogResult([], false, 0),
+      networkReader: () async => 'wifi',
+      baselineMonitor: IdleBaselineMonitor());
+    try {
+      await vm.initialize();
+      final pending = vm.connect(null);
+      await engine.started.future;
+      expect(vm.busy, isTrue);
+      expect(vm.canDisconnect, isTrue);
+      await vm.disconnect();
+      expect(engine.disconnects, 1);
+      engine.release.complete();
+      await pending;
+      expect(vm.canDisconnect, isFalse);
+      expect(vm.state, ConnectionState.disconnected);
     } finally { vm.dispose(); await engine.dispose(); }
   });
   test('background HTTPS cache is reused and scoped to the physical network', () async {
