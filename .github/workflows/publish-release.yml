@@ -4,6 +4,8 @@ on:
     workflows: ['Build Android APK', 'Build Windows installer']
     types: [completed]
   workflow_dispatch:
+  push:
+    paths: ['.github/workflows/publish-release.yml']
 permissions:
   contents: write
   actions: read
