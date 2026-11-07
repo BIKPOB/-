@@ -1,5 +1,5 @@
 name: Clean old Quiet VPN builds and releases
-# Final post-build cleanup for 1.0.6; keep last stable release and latest successful builds.
+# After confirmed v1.0.6 publication, preserve latest stable release and successful platform CI.
 on:
   push:
     paths: ['.github/workflows/cleanup-history.yml']
