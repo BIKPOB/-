@@ -5,6 +5,12 @@ abstract interface class QuickProbeSupport {
   void setQuickProbe(bool enabled);
 }
 
+/// Keeps explicitly requested VPN search active across Android screen lock.
+abstract interface class SearchSessionHost {
+  Future<void> beginSearchSession({required bool deep});
+  Future<void> endSearchSession();
+}
+
 abstract interface class VpnEngine {
   Stream<EngineEvent> get events;
   Future<void> initialize();

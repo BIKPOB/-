@@ -51,10 +51,10 @@ void main() {
     expect(result.servers.single.host,'good.example');
     expect(result.skipped,1);
   });
-  test('catalog limits are independent per protocol and local addresses are excluded', () {
+  test('all valid profiles are retained without hidden 300-per-source truncation', () {
     final lines = List.generate(320, (i) => 'vless://$uuid@node$i.example.com:443');
     lines.add('ss://aes-256-gcm:secret@example.org:443');
-    expect(PublicCatalog.parse(lines.join('\n')).servers.length, 301);
+    expect(PublicCatalog.parse(lines.join('\n')).servers.length, 321);
     for (final host in ['localhost', 'router.local', '10.1.2.3', '192.168.1.1', '169.254.1.2', '100.64.1.2', '::1', 'fc00::1', '::ffff:127.0.0.1']) {
       expect(PublicCatalog.publicHost(host), false, reason: host);
     }

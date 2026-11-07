@@ -65,6 +65,14 @@ class ControlledEngine implements VpnEngine {
   @override Future<void> dispose() => controller.close();
 }
 
+class SearchKeepAliveEngine extends ControlledEngine implements SearchSessionHost {
+  int starts = 0, stops = 0;
+  bool? lastDeep;
+  @override Future<void> beginSearchSession({required bool deep}) async {
+    starts++; lastDeep = deep;
+  }
+  @override Future<void> endSearchSession() async { stops++; }
+}
 class SlowFirstEngine extends ControlledEngine {
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
     connects++;
@@ -840,7 +848,31 @@ void main() {
     await tester.pump();await search;
     await tester.pumpWidget(const SizedBox.shrink());await engine.dispose();
   });
-  testWidgets('notification shade preserves search; actually hiding the app cancels it', (tester) async {
+  test('foreground keep-alive is acquired once and released after deep search', () async {
+    final engine = SearchKeepAliveEngine(), catalog = Completer<PublicCatalogResult>();
+    final vm = VpnViewModel(engine, MemoryProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () => catalog.future, networkReader: () async => 'wifi',
+      baselineMonitor: IdleBaselineMonitor());
+    try {
+      await vm.initialize();
+      final search = vm.autoConnect(deep:true);
+      for (var i=0; i<15 && engine.starts==0; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(engine.starts,1);
+      expect(engine.lastDeep,isTrue);
+      vm.setForeground(false);
+      expect(vm.autoSelecting,isTrue);
+      expect(engine.stops,0);
+      vm.setForeground(true);
+      catalog.complete(const PublicCatalogResult([], false, 0));
+      await search;
+      expect(engine.stops,1);
+      expect(vm.autoSelecting,isFalse);
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+  testWidgets('notification shade and screen lock preserve active AI search', (tester) async {
     final engine = AutoEngine(), catalog = Completer<PublicCatalogResult>();
     final vm = VpnViewModel(engine, MemoryProfiles(),
       ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
@@ -863,10 +895,16 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump();
-    expect(vm.autoStatus, 'Подбор остановлен: приложение ушло в фон');
+    expect(vm.autoSelecting, isTrue);
+    expect(engine.disconnects, 0);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    expect(vm.autoSelecting, isTrue);
+    await vm.cancelAutoSelection();
     catalog.complete(const PublicCatalogResult([], false, 0));
     await tester.pump(); await search;
     expect(engine.connects, 0);
+    expect(vm.autoStatus, 'Подбор остановлен пользователем');
     await tester.pumpWidget(const SizedBox.shrink());
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await engine.dispose();

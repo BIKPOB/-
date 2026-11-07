@@ -7,10 +7,12 @@ import '../core/traffic.dart';
 import 'vpn_engine.dart';
 import 'candidate_host.dart';
 
-class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost, QuickProbeSupport {
+class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost,
+    QuickProbeSupport, SearchSessionHost {
   static const _wg = MethodChannel('quietvpn/wg');
   static const _xray = MethodChannel('flutter_v2ray_client');
   static const _stage = MethodChannel('quietvpn/xray-state');
+  static const _searchSession = MethodChannel('quietvpn/search-session');
   final _events = StreamController<EngineEvent>.broadcast();
   final _subscriptions = <StreamSubscription<dynamic>>[];
   String _active = 'wireguard', _xrayState = 'DISCONNECTED';
@@ -19,6 +21,10 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost, Q
       _starting = false, _quickProbe = false;
   int _epoch = 0;
   @override void setQuickProbe(bool enabled) => _quickProbe = enabled;
+  @override Future<void> beginSearchSession({required bool deep}) =>
+      _searchSession.invokeMethod<void>('start', {'deep':deep});
+  @override Future<void> endSearchSession() =>
+      _searchSession.invokeMethod<void>('stop');
   @override Stream<EngineEvent> get events => _events.stream;
   void _emit(ConnectionState state, [String? detail, bool quality = true,
     int? bytesPerSecond, bool httpsVerified = false]) {

@@ -329,7 +329,23 @@ class VpnViewModel extends ChangeNotifier {
     _searchDeadline = DateTime.now().add(deep ? const Duration(minutes:12) : const Duration(seconds:15));
     final reports = <String>[];
     final rounds = deep ? 4 : 2;
+    final startedEpoch = _autoEpoch;
+    final sessionHost = engine is SearchSessionHost ? engine as SearchSessionHost : null;
     try {
+      // This starts while the app is visible, before the user locks the screen.
+      // A bounded native service keeps the search alive; background monitor
+      // jobs never hold a wake lock.
+      if (sessionHost != null) {
+        try {
+          await sessionHost.beginSearchSession(deep:deep)
+              .timeout(const Duration(seconds: 3));
+        } catch (_) {
+          _appendMessage('Android не разрешил фоновую службу ИИ. '
+            'Поиск продолжается, но при блокировке экрана может быть приостановлен.', error:true);
+          _notify();
+        }
+      }
+      if (_disposed || startedEpoch != _autoEpoch) return;
       for (var round=1; round<=rounds; round++) {
         if (_disposed || !DateTime.now().isBefore(_searchDeadline!)) break;
         searchProgress.beginRound(round);
@@ -365,7 +381,13 @@ class VpnViewModel extends ChangeNotifier {
             // cannot be cancelled; its epoch was already invalidated above.
             final boundedWork = work.timeout(const Duration(seconds: 12),
                 onTimeout: () {});
-            unawaited(Future.wait<void>([boundedWork, stop]).whenComplete(() {
+            unawaited(Future.wait<void>([boundedWork, stop]).whenComplete(() async {
+              // Do not drop the foreground service while an old VPN stop is
+              // still draining after the quick-search deadline.
+              if (sessionHost != null) {
+                try { await sessionHost.endSearchSession().timeout(const Duration(seconds: 2)); }
+                catch (_) { }
+              }
               _quickDraining = false; _stopping = false;
               if (!_disposed) {
                 _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate:true); _notify();
@@ -397,6 +419,10 @@ class VpnViewModel extends ChangeNotifier {
       autoSelecting = false;
       if (engine is QuickProbeSupport) {
         (engine as QuickProbeSupport).setQuickProbe(false);
+      }
+      if (sessionHost != null && !_quickDraining) {
+        try { await sessionHost.endSearchSession().timeout(const Duration(seconds: 2)); }
+        catch (_) { }
       }
       if (!_disposed) {
         if (!_quickDraining) { _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate:true); }
@@ -1071,25 +1097,28 @@ class VpnViewModel extends ChangeNotifier {
     _baselineTimer?.cancel();
     if (visible) _scheduleBaseline(immediate: true);
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
-    if (!visible) _networkAnalyzer.cancel();
+    if (!visible && !autoSelecting) _networkAnalyzer.cancel();
     if (!visible) { unawaited(_stopHealthChecks().then((_) {
       if ((_foreground || _desktop) && !_disposed) _scheduleBackgroundPreflight(immediate:true);
     })); }
-    if (!visible && !_desktop && autoSelecting && !requestingNetworkPermission) {
-      unawaited(cancelAutoSelection(reason: 'Подбор остановлен: приложение ушло в фон'));
-    }
+    // Screen lock is not a user cancellation. An explicitly started Android
+    // foreground search session owns the work until completion or manual Stop.
     _scheduleTraffic();
     _probeEpoch++; monitor.cancel(); _poll?.cancel();
     if (visible) {
-      unawaited(engine.reconcile().catchError((Object _) { message = 'Не удалось сверить состояние VPN'; _notify(); }));
+      if (!autoSelecting) {
+        unawaited(engine.reconcile().catchError((Object _) {
+          message = 'Не удалось сверить состояние VPN'; _notify();
+        }));
+      }
       _scheduleProbe(immediate: true);
       _scheduleBackgroundPreflight(immediate: true);
     } else {
       health = {for (final s in servers) s.id: const HealthResult(Reachability.paused)};
       _notify();
     }
-    // Android native foreground service owns the tunnel; Dart timers are not
-    // used as a guarantee of background execution or kept alive with wake locks.
+    // Only a user-initiated AI search uses the bounded native search service
+    // and CPU wake lock. Idle health sweeps remain foreground-app only.
   }
   void _scheduleBackgroundPreflight({bool immediate = false}) {
     _backgroundTimer?.cancel();

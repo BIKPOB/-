@@ -33,7 +33,8 @@ class PublicCatalog {
     }
     final servers = <VpnServer>[];
     final seen = <String>{};
-    final counts = <String, int>{};
+    // Preserve every distinct valid public profile within maxBytes. A former
+    // 300-per-protocol/source cap silently hid potentially working servers.
     var skipped = 0;
     for (final line in const LineSplitter().convert(text)) {
       final value = line.trim();
@@ -45,9 +46,6 @@ class PublicCatalog {
         if (!publicHost(parsed.host)) { skipped++; continue; }
         final id = sha256.convert(utf8.encode(parsed.text)).toString();
         if (!seen.add(id)) continue;
-        final count = counts[parsed.protocol] ?? 0;
-        if (count >= 300) continue;
-        counts[parsed.protocol] = count + 1;
         servers.add(VpnServer(id: 'public-$id', name: '${parsed.protocol == 'wireguard' ? 'WireGuard' : parsed.protocol == 'vless' ? 'VLESS' : 'Shadowsocks'} · ${parsed.host}:${parsed.port} · ${id.substring(0, 4)}',
           country: 'Публичный сервер', countryCode: '--', host: parsed.host, port: parsed.port,
           transport: parsed.transport, profile: parsed.text, source: sourceName, protocol: parsed.protocol));
