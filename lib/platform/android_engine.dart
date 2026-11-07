@@ -62,10 +62,15 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost, Q
   Future<void> _verifyProxy() async {
     _checking = true;
     final epoch = _epoch;
-    _emit(ConnectionState.connecting, 'Xray запущен локально · проверка удалённого соединения (DNS и загрузка данных)');
+    _emit(ConnectionState.connecting, _quickProbe
+      ? 'Проверка HTTPS через системный VPN (без замера скорости)'
+      : 'Xray запущен локально · проверка удалённого соединения (DNS и загрузка данных)');
     try {
       final quick = _quickProbe;
-      final probe = await _stage.invokeMapMethod<String, dynamic>('probe', {'quick':quick})
+      // Quick search proves app traffic over the real system VPN, not just a
+      // local SOCKS listener which could succeed while the TUN route is broken.
+      final probe = await _stage.invokeMapMethod<String, dynamic>(
+          quick ? 'tunnelProbe' : 'probe', {'quick':quick})
           .timeout(Duration(seconds: quick ? 8 : 35));
       final delay = (probe?['delay'] as num?)?.toInt();
       final detail = probe?['detail'] as String? ?? 'Нет результата проверки';
@@ -91,7 +96,7 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost, Q
     // No false speed is reported if this secondary endpoint is blocked.
     try {
       final result = await _stage.invokeMapMethod<String, dynamic>(
-        'probe', {'quick':false}).timeout(const Duration(seconds: 40));
+        'tunnelProbe', {'quick':false}).timeout(const Duration(seconds: 40));
       if (_stopping || epoch != _epoch || _disposed || (result?['delay'] as num? ?? -1) < 0) return;
       final bps = (result?['bytesPerSecond'] as num?)?.toInt();
       _emit(ConnectionState.connected,
