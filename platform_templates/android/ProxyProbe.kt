@@ -91,21 +91,24 @@ object ProxyProbe {
             if (pending === socket) pending = null
         }
     }
-    fun measure(context: android.content.Context): Map<String, Any> {
+    fun measure(context: android.content.Context, quick: Boolean = false): Map<String, Any> {
         val token = generation
         val failures = mutableListOf<String>()
-        // Isolate proxy transport from target DNS; TLS still verifies the IP SAN.
-        for (host in listOf("1.1.1.1", "www.gstatic.com", "cp.cloudflare.com")) {
+        // The short probe confirms an actual SOCKS/TLS/HTTPS path, NOT speed.
+        val hosts = if (quick) listOf("www.gstatic.com", "cp.cloudflare.com")
+                    else listOf("1.1.1.1", "www.gstatic.com", "cp.cloudflare.com")
+        for (host in hosts) {
             if (token != generation) break
             val start = android.os.SystemClock.elapsedRealtime()
             val socket = Socket()
             pending = socket
             if (token != generation) { socket.close(); break }
-            val deadline = timer.schedule({ try { socket.close() } catch (_: Exception) { } }, 7, TimeUnit.SECONDS)
+            val deadline = timer.schedule({ try { socket.close() } catch (_: Exception) { } },
+                if (quick) 3L else 7L, TimeUnit.SECONDS)
             var stage = "локальный SOCKS"
             try {
-                socket.soTimeout = 6000
-                socket.connect(InetSocketAddress("127.0.0.1", 10807), 1500)
+                socket.soTimeout = if (quick) 2500 else 6000
+                socket.connect(InetSocketAddress("127.0.0.1", 10807), if (quick) 700 else 1500)
                 stage = "локальное согласование SOCKS"
                 val numeric = host == "1.1.1.1"
                 socksConnect(socket, host, if (numeric) byteArrayOf(1, 1, 1, 1) else null)
@@ -113,7 +116,7 @@ object ProxyProbe {
                 val tls = (SSLSocketFactory.getDefault() as SSLSocketFactory).createSocket(socket, host, 443, true) as SSLSocket
                 tls.use {
                     it.sslParameters = it.sslParameters.apply { endpointIdentificationAlgorithm = "HTTPS" }
-                    it.soTimeout = 6000
+                    it.soTimeout = if (quick) 2500 else 6000
                     it.startHandshake()
                     stage = "HTTPS-ответ"
                     val path = if (numeric) "/cdn-cgi/trace" else "/generate_204"
@@ -130,8 +133,12 @@ object ProxyProbe {
                     if (!Regex("HTTP/1\\.[01] $status(?: .*|\\r)?").matches(line.toString().trimEnd())) throw IOException("HTTP status")
                 }
                 if (token != generation) break
-                // Xray can exclude this app process from its Android TUN to
-                // avoid a routing loop. Verify and measure its local SOCKS path.
+                // TLS certificate and HTTP status have been checked through
+                // Xray SOCKS. Do not download 256 KiB in the quick selection.
+                if (quick) return mapOf(
+                    "delay" to (android.os.SystemClock.elapsedRealtime() - start),
+                    "httpsVerified" to true, "quality" to false,
+                    "detail" to "HTTPS через Xray подтверждён; скорость проверяется отдельно")
                 return download(token)
             } catch (e: Exception) {
                 failures.add("$host: $stage (${ProbeFailure.describe(e)}, ${android.os.SystemClock.elapsedRealtime() - start} мс)")
