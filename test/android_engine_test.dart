@@ -110,7 +110,7 @@ void main() {
       (_) async => {'ownVpn': false});
     messenger.setMockMethodCallHandler(const MethodChannel('quietvpn/xray-state'), (call) async {
       if (call.method == 'stage') return stage;
-      if (call.method == 'probe') {
+      if (call.method == 'tunnelProbe') {
         if (call.arguments['quick'] == true) {
           fast++;
           return {'delay': 125, 'httpsVerified': true, 'quality': false,
