@@ -109,7 +109,7 @@ class MainActivity : FlutterActivity() {
                     result.success(XrayDiagnostics.prepare(applicationContext))
                 } else if (call.method == "tunnelProbe") {
                     probeWorker.execute {
-                        val measured = TunnelProbe.measure(applicationContext)
+                        val measured = TunnelProbe.measure(applicationContext, call.argument<Boolean>("quick") == true)
                         runOnUiThread { result.success(measured) }
                     }
                 } else if (call.method == "probe") {
@@ -118,7 +118,7 @@ class MainActivity : FlutterActivity() {
                         delay["detail"] = "${delay["detail"]}\n${XrayDiagnostics.report(applicationContext)}"
                         runOnUiThread { result.success(delay) }
                     }
-                } else if (call.method == "cancelProbe") { ProxyProbe.cancel(); XrayDiagnostics.stop(); result.success(null) }
+                } else if (call.method == "cancelProbe") { ProxyProbe.cancel(); TunnelProbe.cancel(); XrayDiagnostics.stop(); result.success(null) }
                 else result.notImplemented()
             }
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/catalog-cache")
