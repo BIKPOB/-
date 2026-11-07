@@ -1,0 +1,277 @@
+name: Restore historical Quiet VPN 1.x installers
+on:
+  push:
+    paths: ['.github/workflows/restore-1x.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: quiet-vpn-restore-historical-1x
+  cancel-in-progress: false
+jobs:
+  android:
+    name: Android ${{ matrix.version }} (historical source)
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - version: '1.0.0'
+            sha: f246a88e08e6fb545b62742a1cb8d0100c33d99d
+          - version: '1.0.1'
+            sha: 387a08e4b1b9614d0ddb2751f928f5f9230b69c7
+          - version: '1.0.2'
+            sha: 4546570851b9b70c21cbae3e9c38f6d376a9394d
+          - version: '1.0.3'
+            sha: d0cf20349c5835ba0d19541f4cf8c15e05fc6662
+          - version: '1.0.4'
+            sha: d8ee74c4e57ca0baf6190a545577cbc46a9e7385
+          - version: '1.0.5'
+            sha: 633b863fe56f679e269c8a2f6a5c33764278844e
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.32.8'
+          channel: stable
+          cache: true
+      - name: Configure Android SDK
+        run: |
+          python - <<'PY'
+          import os, subprocess
+          sdk = os.environ['ANDROID_HOME']+'/cmdline-tools/latest/bin/sdkmanager'
+          subprocess.run([sdk, '--licenses'], input='y\n'*200, text=True, check=True)
+          subprocess.run([sdk,'platforms;android-36','ndk;27.0.12077973'],check=True)
+          PY
+      - name: Generate Android project
+        run: python tools/bootstrap.py --platforms android
+      - uses: actions/cache@v4
+        id: awg
+        with:
+          path: android/app/libs/amneziawg-tunnel.aar
+          key: quiet-history-awg-${{ hashFiles('tools/build_awg.py', 'tools/foreground_patch.py') }}
+      - name: Compile pinned Android AmneziaWG
+        if: steps.awg.outputs.cache-hit != 'true'
+        run: python tools/build_awg.py
+      - name: Verify historical Flutter sources
+        run: |
+          flutter analyze
+          flutter test
+          dart run tools/test_candidate_lab.dart
+      - name: Compile historic Android APK
+        run: flutter build apk --release --target-platform android-arm64,android-arm
+      - name: Native Android integration tests and APK checks
+        run: |
+          python tools/test_native.py
+          mkdir -p historical-android
+          cp build/app/outputs/flutter-apk/app-release.apk "historical-android/quiet-vpn-${{ matrix.version }}.apk"
+          python tools/verify_apk.py "historical-android/quiet-vpn-${{ matrix.version }}.apk"
+          sha256sum historical-android/*.apk > historical-android/SHA256SUMS.txt
+          echo "${{ matrix.sha }}" > historical-android/SOURCE_COMMIT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: historical-android-${{ matrix.version }}
+          path: historical-android/
+          retention-days: 30
+          if-no-files-found: error
+
+  windows:
+    name: Windows ${{ matrix.version }} (historical source)
+    runs-on: windows-2022
+    timeout-minutes: 85
+    defaults:
+      run:
+        shell: pwsh
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - version: '1.0.0'
+            sha: f246a88e08e6fb545b62742a1cb8d0100c33d99d
+          - version: '1.0.1'
+            sha: 387a08e4b1b9614d0ddb2751f928f5f9230b69c7
+          - version: '1.0.2'
+            sha: 4546570851b9b70c21cbae3e9c38f6d376a9394d
+          - version: '1.0.3'
+            sha: d0cf20349c5835ba0d19541f4cf8c15e05fc6662
+          - version: '1.0.4'
+            sha: d8ee74c4e57ca0baf6190a545577cbc46a9e7385
+          - version: '1.0.5'
+            sha: 633b863fe56f679e269c8a2f6a5c33764278844e
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.32.8'
+          channel: stable
+          cache: true
+      - name: Generate Windows runner and test Flutter
+        run: |
+          python tools/bootstrap.py --platforms windows
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          flutter analyze
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          flutter test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/checkout@v4
+        with:
+          repository: XTLS/Xray-core
+          ref: c77a4d0e4932a53f3eeafafdfef877b56fd660ad
+          path: xray-source
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: xray-source/go.mod
+          cache-dependency-path: xray-source/go.sum
+      - name: Build original pinned Xray
+        working-directory: xray-source
+        run: |
+          $env:CGO_ENABLED='0'
+          go build -trimpath -ldflags='-s -w' -o xray.exe ./main
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Test proxy and configuration with Xray
+        run: |
+          dart run tools/windows/config_check.dart "$pwd/xray-source/xray.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dart run tools/windows/lab_smoke.dart "$pwd/xray-source/xray.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dart run tools/windows/site_bypass_smoke.dart "$pwd/xray-source/xray.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Build Windows app and package engines
+        run: |
+          flutter build windows --release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./tools/windows/package.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Validate Windows TUN and routing
+        run: |
+          ./tools/windows/smoke.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./tools/windows/reserve_smoke.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./tools/windows/site_bypass_tun.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Create versioned Windows installer and validate extraction
+        run: |
+          $version = '${{ matrix.version }}'
+          $exe = "quiet-vpn-$version-windows-x64-setup.exe"
+          $iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
+          $isccPath = if ($iscc) { $iscc.Source } else { 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' }
+          New-Item -ItemType Directory -Force historical-windows | Out-Null
+          & $isccPath "/DAppVersion=$version" /O"$pwd/historical-windows" platform_templates/windows/installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $setup = Join-Path "$pwd/historical-windows" $exe
+          if (!(Test-Path $setup)) { throw "Missing Windows installer: $exe" }
+          $target = Join-Path $env:RUNNER_TEMP "historical-$version"
+          $p = Start-Process $setup -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',('/DIR="'+$target+'"')) -Wait -PassThru
+          if ($p.ExitCode -ne 0 -or !(Test-Path "$target/quiet_vpn.exe") -or !(Test-Path "$target/engines/xray.exe")) { throw 'Installer test failed' }
+          $p = Start-Process "$target/unins000.exe" -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw 'Uninstaller test failed' }
+          $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $exe" | Set-Content historical-windows/SHA256SUMS-Windows.txt -Encoding ascii
+          '${{ matrix.sha }}' | Set-Content historical-windows/SOURCE_COMMIT.txt -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        with:
+          name: historical-windows-${{ matrix.version }}
+          path: historical-windows/
+          retention-days: 30
+          if-no-files-found: error
+
+  restore_release:
+    name: Restore release v${{ matrix.version }}
+    needs: [android, windows]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - version: '1.0.0'
+            sha: f246a88e08e6fb545b62742a1cb8d0100c33d99d
+          - version: '1.0.1'
+            sha: 387a08e4b1b9614d0ddb2751f928f5f9230b69c7
+          - version: '1.0.2'
+            sha: 4546570851b9b70c21cbae3e9c38f6d376a9394d
+          - version: '1.0.3'
+            sha: d0cf20349c5835ba0d19541f4cf8c15e05fc6662
+          - version: '1.0.4'
+            sha: d8ee74c4e57ca0baf6190a545577cbc46a9e7385
+          - version: '1.0.5'
+            sha: 633b863fe56f679e269c8a2f6a5c33764278844e
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      HIST_VERSION: ${{ matrix.version }}
+      HIST_SHA: ${{ matrix.sha }}
+    steps:
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: historical-android-${{ matrix.version }}
+          path: android
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: historical-windows-${{ matrix.version }}
+          path: windows
+      - name: Verify historical build integrity and stage release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "android/quiet-vpn-$HIST_VERSION.apk"
+          test -f "windows/quiet-vpn-$HIST_VERSION-windows-x64-setup.exe"
+          test "$(tr -d '\r\n' < android/SOURCE_COMMIT.txt)" = "$HIST_SHA"
+          test "$(tr -d '\r\n' < windows/SOURCE_COMMIT.txt)" = "$HIST_SHA"
+          (cd android && sha256sum -c SHA256SUMS.txt)
+          (cd windows && sha256sum -c SHA256SUMS-Windows.txt)
+          mkdir -p restore
+          cp "android/quiet-vpn-$HIST_VERSION.apk" restore/
+          cp "windows/quiet-vpn-$HIST_VERSION-windows-x64-setup.exe" restore/
+          (cd restore && sha256sum *.apk *.exe > SHA256SUMS.txt)
+          echo "$HIST_SHA" > restore/SOURCE_COMMIT.txt
+          cat > notes.md <<EOF
+          ## Quiet VPN v$HIST_VERSION — восстановленный исторический выпуск
+
+          Исходники: [исторический коммит](https://github.com/$GH_REPO/commit/$HIST_SHA).
+
+          **Android:** quiet-vpn-$HIST_VERSION.apk
+          **Windows:** quiet-vpn-$HIST_VERSION-windows-x64-setup.exe
+
+          Исходные файлы Releases и их архивы GitHub Actions были удалены. Установщики **повторно собраны из исторического коммита** с проверками Flutter, нативными тестами и SHA-256. Байты могут отличаться от первоначально опубликованных установщиков.
+          В файле SOURCE_COMMIT.txt записан точный SHA исходников, а SHA256SUMS.txt содержит контрольные суммы восстановленных файлов.
+
+          Git-тег создан в ходе восстановления и указывает на ревизию обслуживающего workflow; точный исторический исходный коммит указан выше. Релиз восстановлен без изменения существующей версии v1.0.6.
+          EOF
+      - name: Publish restored historical release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v$HIST_VERSION"
+          if curl --silent --show-error --fail --location "https://api.github.com/repos/$GH_REPO/releases/tags/$tag" >/dev/null 2>&1; then
+            echo "Existing release $tag preserved. No overwrite."
+            exit 0
+          fi
+          gh release create "$tag" restore/* --target "$GITHUB_SHA" --title "Quiet VPN $tag — восстановленный Android и Windows" --notes-file notes.md
+          echo "Restored $tag from $HIST_SHA"
