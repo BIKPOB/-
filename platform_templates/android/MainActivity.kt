@@ -114,7 +114,7 @@ class MainActivity : FlutterActivity() {
                     }
                 } else if (call.method == "probe") {
                     probeWorker.execute {
-                        val delay = ProxyProbe.measure(applicationContext).toMutableMap()
+                        val delay = ProxyProbe.measure(applicationContext, call.argument<Boolean>("quick") == true).toMutableMap()
                         delay["detail"] = "${delay["detail"]}\n${XrayDiagnostics.report(applicationContext)}"
                         runOnUiThread { result.success(delay) }
                     }
