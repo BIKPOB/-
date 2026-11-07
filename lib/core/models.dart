@@ -36,8 +36,11 @@ class HealthResult {
 }
 
 class EngineEvent {
-  const EngineEvent(this.state, [this.message, this.quality = true, this.bytesPerSecond, this.latencyMs]);
+  const EngineEvent(this.state, [this.message, this.quality = true, this.bytesPerSecond,
+    this.latencyMs, this.httpsVerified = false]);
   final int? bytesPerSecond;
+  /// HTTPS verified through this VPN even if a speed sample is pending.
+  final bool httpsVerified;
   /// HTTPS response delay produced by an actual VPN tunnel probe, if any.
   final int? latencyMs;
   final bool quality;
