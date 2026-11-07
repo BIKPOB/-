@@ -18,13 +18,45 @@ object TunnelProbe {
     const val MIN_BYTES_PER_SECOND = 131072L
     fun acceptable(bytes: Int, millis: Long): Boolean = bytes >= TEST_BYTES &&
         bytes * 1000L / maxOf(1L, millis) >= MIN_BYTES_PER_SECOND
-    fun measure(context: Context): Map<String, Any> {
+    fun measure(context: Context, quick: Boolean = false): Map<String, Any> {
         val token = generation
         val manager = context.getSystemService(ConnectivityManager::class.java)
         val network = manager.allNetworks.firstOrNull {
             manager.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
         } ?: return mapOf("delay" to -1L, "detail" to "Системный VPN недоступен для проверки")
         val start = SystemClock.elapsedRealtime()
+        if (quick) {
+            // Confirm real system VPN routing, not the app-local Xray SOCKS
+            // listener. Fall back to a second HTTPS 204 endpoint if needed.
+            val failures = mutableListOf<String>()
+            for (url in listOf("https://www.gstatic.com/generate_204",
+                    "https://cp.cloudflare.com/generate_204")) {
+                if (token != generation) break
+                val request = network.openConnection(URL(url)) as HttpsURLConnection
+                pending = request
+                request.connectTimeout = 2300
+                request.readTimeout = 2300
+                request.instanceFollowRedirects = false
+                request.useCaches = false
+                val deadline = timer.schedule({ request.disconnect() }, 3, TimeUnit.SECONDS)
+                try {
+                    check(request.responseCode == 204) { "HTTP status" }
+                    if (token != generation) break
+                    val latency = SystemClock.elapsedRealtime() - start
+                    return mapOf("delay" to latency, "latencyMs" to latency,
+                        "httpsVerified" to true, "quality" to false,
+                        "detail" to "HTTPS через системный VPN подтверждён; скорость проверяется отдельно")
+                } catch (e: Exception) {
+                    failures.add("${URL(url).host}: ${ProbeFailure.describe(e)}")
+                } finally {
+                    deadline.cancel(false)
+                    request.disconnect()
+                    if (pending === request) pending = null
+                }
+            }
+            return mapOf("delay" to -1L,
+                "detail" to "HTTPS через VPN не подтверждён: ${failures.joinToString("; ")}")
+        }
         var latencyMs = -1L // HTTPS 204 only; never include the subsequent 256-KiB transfer.
         var phase = "DNS и HTTPS через системный VPN"
         var bytes = 0
