@@ -119,7 +119,7 @@ class _HomePageState extends State<HomePage>
     final report =
         '$native\nПротокол: ${vm.activeServer?.protocol ?? vm.selected?.protocol ?? '—'}\n'
         'Состояние: ${vm.state.name}\nЭтап: ${vm.connectionStage ?? '—'}\n${vm.message ?? ''}\n'
-        'Интернет и качество подтверждены: ${vm.connectionVerified}\n'
+        'HTTPS через VPN подтверждён: ${vm.internetVerified}\nСкорость соответствует цели: ${vm.connectionVerified}\n'
         'Сеть: ${vm.networkContext.label} · обучающих замеров: ${vm.learningSamples}\n'
         '${vm.baselineStatus}\n${vm.networkAnalysisReport}\nФоновая связь: ${vm.reconnectAdvice ?? "предупреждений нет"}\n'
         'Резерв: ${vm.reserveStatus}\n'
@@ -212,7 +212,7 @@ class _HomePageState extends State<HomePage>
       ? 'ИИ-подбор'
       : switch (vm.state) {
           ConnectionState.connected =>
-            vm.connectionVerified ? 'Подключено' : 'Проверка связи',
+            vm.internetVerified ? 'Подключено' : 'Проверка связи',
           ConnectionState.connecting => 'Подключение',
           ConnectionState.error => 'Ошибка подключения',
           _ => 'Отключено',
@@ -284,11 +284,12 @@ class _HomePageState extends State<HomePage>
       await vm.cancelAutoSelection();
       return;
     }
-    if (vm.busy || !vm.ready) return;
+    if (!vm.ready) return;
     if (vm.canDisconnect) {
       await vm.disconnect();
       return;
     }
+    if (vm.busy) return;
     if (vm.selected == null) {
       vm.postMessage(
         'Выберите сервер для подключения или начните ИИ поиск',
@@ -421,7 +422,11 @@ class _HomePageState extends State<HomePage>
             ]),
           ))),
           const SizedBox(height: 12),
-          if (vm.backgroundStatus != null) Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text(vm.backgroundStatus!, style: quietText(12))),
+          if (vm.backgroundTotal > 0 && vm.backgroundChecked < vm.backgroundTotal)
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: LinearProgressIndicator(
+                value: vm.backgroundChecked / vm.backgroundTotal,
+                minHeight: 2, backgroundColor: Colors.white24, color: Colors.white70)),
           Flexible(
             child: ListView(
               shrinkWrap: true,
@@ -712,7 +717,9 @@ class _HomePageState extends State<HomePage>
                       key: const ValueKey('power-button'),
                       label: vm.autoSelecting ? 'Остановить подбор' :
                         vm.canDisconnect ? 'Отключить VPN' : 'Подключить VPN',
-                      onTap: !vm.ready || vm.busy && !vm.autoSelecting ? null : _power,
+                      onTap: !vm.ready ||
+                        (vm.busy && !vm.autoSelecting && !vm.canDisconnect) ||
+                        vm.disconnectInProgress ? null : _power,
                       child: AnimatedSwitcher(
                         duration: const Duration(milliseconds: 500),
                         switchInCurve: Curves.easeIn,
@@ -833,7 +840,7 @@ class _HomePageState extends State<HomePage>
                     ChatBubble(
                       key: const ValueKey('live-connection'),
                       text:
-                          '${vm.state == ConnectionState.connected ? 'Подключено' : 'Проверка связи'} · $_elapsed\n'
+                          '${vm.internetVerified ? 'Подключено' : 'Проверка связи'} · $_elapsed\n'
                           'Скорость: ↓ ${formatTrafficRate(vm.traffic.download)}  ↑ ${formatTrafficRate(vm.traffic.upload)}',
                     ),
                   if (vm.reconnectAdvice != null)
