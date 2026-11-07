@@ -360,7 +360,12 @@ class VpnViewModel extends ChangeNotifier {
               state = ConnectionState.error;
               message = 'Отключение не подтверждено. Повторите отключение.';
             });
-            unawaited(Future.wait<void>([work, stop]).whenComplete(() {
+            // The underlying Android plugin may never complete its start
+            // MethodChannel call. Bound bookkeeping even when that old Future
+            // cannot be cancelled; its epoch was already invalidated above.
+            final boundedWork = work.timeout(const Duration(seconds: 12),
+                onTimeout: () {});
+            unawaited(Future.wait<void>([boundedWork, stop]).whenComplete(() {
               _quickDraining = false; _stopping = false;
               if (!_disposed) {
                 _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate:true); _notify();
