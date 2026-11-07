@@ -133,12 +133,10 @@ jobs:
       - name: Publish immutable versioned release
         if: steps.builds.outputs.ready == 'true'
         run: |
-          gh api "repos/$GH_REPO/releases?per_page=100" > releases.json
-          if python3 - <<'PY'
-          import json, os, sys
-          sys.exit(0 if any(r['tag_name'] == os.environ['RELEASE_TAG'] for r in json.load(open('releases.json'))) else 1)
-          PY
-          then
+          # Public tag lookup avoids the repository-wide releases-list API,
+          # which can return 403 for installation tokens in this repository.
+          if curl --silent --show-error --fail --location \
+              "https://api.github.com/repos/$GH_REPO/releases/tags/$RELEASE_TAG" >/dev/null; then
             echo 'Release already exists; leaving it unchanged.'
           else
             gh release create "$RELEASE_TAG" release/* --target "$SOURCE_SHA" --title "Quiet VPN $RELEASE_TAG — Android и Windows" --notes-file notes.md
