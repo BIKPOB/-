@@ -7,7 +7,7 @@ import '../core/traffic.dart';
 import 'vpn_engine.dart';
 import 'candidate_host.dart';
 
-class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost {
+class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost, QuickProbeSupport {
   static const _wg = MethodChannel('quietvpn/wg');
   static const _xray = MethodChannel('flutter_v2ray_client');
   static const _stage = MethodChannel('quietvpn/xray-state');
@@ -15,10 +15,15 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost {
   final _subscriptions = <StreamSubscription<dynamic>>[];
   String _active = 'wireguard', _xrayState = 'DISCONNECTED';
   TrafficCounters? _counters;
-  bool _stopping = false, _checking = false, _verified = false, _disposed = false, _starting = false;
+  bool _stopping = false, _checking = false, _verified = false, _disposed = false,
+      _starting = false, _quickProbe = false;
   int _epoch = 0;
+  @override void setQuickProbe(bool enabled) => _quickProbe = enabled;
   @override Stream<EngineEvent> get events => _events.stream;
-  void _emit(ConnectionState state, [String? detail, bool quality = true, int? bytesPerSecond]) { if (!_disposed) _events.add(EngineEvent(state, detail, quality, bytesPerSecond)); }
+  void _emit(ConnectionState state, [String? detail, bool quality = true,
+    int? bytesPerSecond, bool httpsVerified = false]) {
+    if (!_disposed) _events.add(EngineEvent(state, detail, quality, bytesPerSecond, null, httpsVerified));
+  }
   @override Future<void> initialize() async {
     _subscriptions.add(const EventChannel('quietvpn/wg-events').receiveBroadcastStream().listen((s) {
       if (_active == 'wireguard' && !_stopping) _wgEvent(s);
@@ -59,21 +64,40 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost {
     final epoch = _epoch;
     _emit(ConnectionState.connecting, 'Xray запущен локально · проверка удалённого соединения (DNS и загрузка данных)');
     try {
-      final probe = await _stage.invokeMapMethod<String, dynamic>('probe').timeout(const Duration(seconds: 100));
+      final quick = _quickProbe;
+      final probe = await _stage.invokeMapMethod<String, dynamic>('probe', {'quick':quick})
+          .timeout(Duration(seconds: quick ? 8 : 35));
       final delay = (probe?['delay'] as num?)?.toInt();
       final detail = probe?['detail'] as String? ?? 'Нет результата проверки';
       if (_stopping || epoch != _epoch || _disposed) return;
+      _verified = true; // A status tick should not restart the same probe.
       if (delay == null || delay < 0) {
-        _verified = true; // Verification finished; do not repeat on every status tick.
         _emit(ConnectionState.connected, 'Туннель включён, интернет НЕ подтверждён. '
           'Проверка через Xray не прошла: $detail', false);
-      } else { _verified = true; _emit(ConnectionState.connected, '$detail · $delay мс', probe?['quality'] == true, (probe?['bytesPerSecond'] as num?)?.toInt()); }
+      } else {
+        _emit(ConnectionState.connected, '$detail · $delay мс',
+          probe?['quality'] == true, (probe?['bytesPerSecond'] as num?)?.toInt(), true);
+        if (quick) unawaited(_measureSpeedAfterQuick(epoch));
+      }
     } catch (_) {
       if (!_stopping && epoch == _epoch && !_disposed) {
         _verified = true;
         _emit(ConnectionState.connected, 'Туннель включён, интернет НЕ подтверждён: таймаут проверки Xray', false);
       }
     } finally { _checking = false; }
+  }
+  Future<void> _measureSpeedAfterQuick(int epoch) async {
+    // The optional transfer must never delay the 15-second quick search.
+    // No false speed is reported if this secondary endpoint is blocked.
+    try {
+      final result = await _stage.invokeMapMethod<String, dynamic>(
+        'probe', {'quick':false}).timeout(const Duration(seconds: 40));
+      if (_stopping || epoch != _epoch || _disposed || (result?['delay'] as num? ?? -1) < 0) return;
+      final bps = (result?['bytesPerSecond'] as num?)?.toInt();
+      _emit(ConnectionState.connected,
+        result?['detail'] as String? ?? 'HTTPS подтверждён · замер скорости',
+        result?['quality'] == true, bps, true);
+    } catch (_) { /* Keep the verified connection; speed remains unknown. */ }
   }
   String? _labConfiguration;
   static const _lab = MethodChannel('quietvpn/candidate-lab');
