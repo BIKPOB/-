@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
     <application android:label="Quiet VPN" android:name=".QuietVpnApplication"
         android:icon="@mipmap/ic_launcher" android:allowBackup="false"
@@ -29,6 +30,11 @@
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="vpn" />
             <intent-filter><action android:name="android.net.VpnService" /></intent-filter>
             <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="false" />
+        </service>
+        <service android:name=".SearchSessionService" android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="User-initiated VPN server discovery and HTTPS verification while the display is off" />
         </service>
         <service android:name=".NetworkBaselineJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />
         <service android:name=".CatalogRefreshJob" android:permission="android.permission.BIND_JOB_SERVICE" android:exported="false" />

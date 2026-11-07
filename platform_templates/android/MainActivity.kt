@@ -11,6 +11,27 @@ class MainActivity : FlutterActivity() {
     private val probeWorker = java.util.concurrent.Executors.newSingleThreadExecutor()
     override fun configureFlutterEngine(engine: io.flutter.embedding.engine.FlutterEngine) {
         super.configureFlutterEngine(engine)
+        io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/search-session")
+            .setMethodCallHandler { call, result ->
+                try {
+                    when (call.method) {
+                        "start" -> {
+                            val search = Intent(applicationContext, SearchSessionService::class.java)
+                                .setAction(SearchSessionService.ACTION_START)
+                                .putExtra("deep", call.argument<Boolean>("deep") == true)
+                            androidx.core.content.ContextCompat.startForegroundService(applicationContext, search)
+                            result.success(null)
+                        }
+                        "stop" -> {
+                            stopService(Intent(applicationContext, SearchSessionService::class.java))
+                            result.success(null)
+                        }
+                        else -> result.notImplemented()
+                    }
+                } catch (e: Exception) {
+                    result.error("SEARCH_SESSION", "Не удалось запустить фоновый ИИ-подбор: ${e.javaClass.simpleName}", null)
+                }
+            }
         io.flutter.plugin.common.MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/candidate-lab")
             .setMethodCallHandler { call, result ->
                 val worker = if (call.method == "resolve") resolverWorker else candidateWorker
