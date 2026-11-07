@@ -427,6 +427,31 @@ void main() {
     vm.dispose(); await engine.dispose();
   });
 
+  testWidgets('a hung native start cannot lock the stop button forever', (tester) async {
+    final engine = ControlledEngine();
+    final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(),
+      catalogLoader: () async => const PublicCatalogResult([], false, 0),
+      networkReader: () async => 'wifi', baselineMonitor: IdleBaselineMonitor());
+    try {
+      await vm.initialize();
+      final search = vm.autoConnect();
+      for (var i = 0; i < 25 && !engine.started.isCompleted; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(engine.started.isCompleted, isTrue);
+      await tester.pump(const Duration(seconds: 16));
+      await tester.pump();
+      expect(vm.autoSelecting, isFalse);
+      await tester.pump(const Duration(seconds: 13));
+      await tester.pump();
+      expect(vm.disconnectInProgress, isFalse);
+      engine.release.complete();
+      await search;
+    } finally {
+      if (!engine.release.isCompleted) engine.release.complete();
+      vm.dispose(); await engine.dispose();
+    }
+  });
   test('preflight considers a good endpoint beyond the old eight-profile cutoff', () async {
     final engine = MeasuredEngine();
     final pool = [for (var n = 1; n <= 9; n++) VpnServer.fromJson({...server.toJson(),
