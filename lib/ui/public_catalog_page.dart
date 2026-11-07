@@ -44,15 +44,25 @@ class _PublicCatalogPageState extends State<PublicCatalogPage> {
       IconButton(onPressed: loading || adding ? null : refresh, tooltip: 'Обновить базу', icon: const Icon(Icons.refresh)),
     ]), body: Column(children: [
       if (loading || adding) const LinearProgressIndicator(),
-      Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Выберите сервер → «Добавить» → «Подключить» на главном экране. Ссылка провайдера не нужна.'),
-        const SizedBox(height: 8),
-        const Text('Общедоступные серверы сторонних владельцев: доступность и скорость могут меняться. Цвет показывает результат HTTPS через сервер; полный VPN проверяется при подключении.'),
-        const Text('Автообновление базы: примерно раз в 6 часов при наличии сети. Android может отложить запуск. Срок ключей задаёт провайдер.'),
-        if (result != null) Text(result!.status),
-        if (widget.vm.backgroundStatus != null) Text(widget.vm.backgroundStatus!),
-        if (result != null) Text('Совместимых: ${result!.servers.length}. Неподдерживаемых или некорректных: ${result!.skipped}.'),
+      Padding(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         if (error != null) Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+        Row(children: [
+          if (result != null) Expanded(child: Text('Серверов: ${result!.servers.length}',
+            maxLines: 1, overflow: TextOverflow.ellipsis)),
+          IconButton(
+            tooltip: 'Как работает проверка серверов',
+            onPressed: () => showDialog<void>(context: context, builder: (context) => AlertDialog(
+              title: const Text('Проверка серверов'),
+              content: const Text('Цвет отражает проверенный HTTPS через прокси, а не ICMP. '
+                'Полный системный VPN проверяется при подключении. Доступность общедоступных серверов '
+                'может меняться. База обновляется примерно раз в 6 часов. '
+                'Выберите сервер, добавьте его и подключитесь на главном экране.'),
+              actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Закрыть'))],
+            )),
+            icon: const Icon(Icons.info_outline, size: 20),
+          ),
+        ]),
         Wrap(spacing: 8, children: [
           ChoiceChip(label: const Text('WireGuard'), selected: protocol == 'wireguard', onSelected: (_) => setState(() => protocol = 'wireguard')),
           ChoiceChip(label: const Text('VLESS'), selected: protocol == 'vless', onSelected: (_) => setState(() => protocol = 'vless')),
