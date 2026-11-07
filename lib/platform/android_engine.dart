@@ -154,25 +154,35 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost, Q
   @override Future<void> disconnect() async {
     _stopping = true; _starting = false; _epoch++; _verified = false;
     try {
-      await stopCandidates();
-      await _stage.invokeMethod<void>('cancelProbe');
-      if (_active == 'wireguard') { await _wg.invokeMethod<void>('stop'); }
-      else {
-        await _xray.invokeMethod<void>('stopV2Ray');
-        for (var i = 0; i < 40; i++) {
-          final stage = await _stage.invokeMethod<String>('stage');
-          if (stage == 'DISCONNECTED') { _xrayState = 'DISCONNECTED'; break; }
-          if (i == 39) throw StateError('Отключение Xray не подтверждено');
-          await Future<void>.delayed(const Duration(milliseconds: 250));
+      // Do not let an unrelated candidate-lab shutdown or stalled diagnostic
+      // RPC block the actual system VPN stop button.
+      try { await stopCandidates().timeout(const Duration(seconds: 2)); } catch (_) {}
+      try {
+        await _stage.invokeMethod<void>('cancelProbe').timeout(const Duration(seconds: 2));
+      } catch (_) {}
+      if (_active == 'wireguard') {
+        await _wg.invokeMethod<void>('stop').timeout(const Duration(seconds: 5));
+      } else {
+        await _xray.invokeMethod<void>('stopV2Ray').timeout(const Duration(seconds: 5));
+        var stopped = false;
+        for (var i = 0; i < 20; i++) {
+          final stage = await _stage.invokeMethod<String>('stage')
+              .timeout(const Duration(milliseconds: 600));
+          if (stage == 'DISCONNECTED') {
+            _xrayState = 'DISCONNECTED'; stopped = true; break;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 100));
         }
+        if (!stopped) throw StateError('Отключение Xray не подтверждено');
       }
-      // The service may report DISCONNECTED before ConnectivityManager has
-      // removed its VPN network. Do not let the next search see our old route.
+      // Never report a clean disconnect while Android still routes via our
+      // VPN. Keep stop retryable if the native service fails to tear down.
       for (var i = 0; i < 20; i++) {
         Map<dynamic, dynamic>? snapshot;
         try {
           snapshot = await const MethodChannel('quietvpn/catalog-cache')
-              .invokeMapMethod<dynamic, dynamic>('networkContext');
+              .invokeMapMethod<dynamic, dynamic>('networkContext')
+              .timeout(const Duration(milliseconds: 800));
         } on MissingPluginException { break; }
         if (snapshot?['ownVpn'] != true) break;
         if (i == 19) throw StateError('Системный маршрут Quiet VPN ещё отключается');
