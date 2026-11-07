@@ -53,7 +53,8 @@ class VpnViewModel extends ChangeNotifier {
   String? selectedId, country, message, protocolFilter;
   VpnServer? activeServer;
   bool busy = false, ready = false;
-  bool autoSelecting = false, connectionVerified = false;
+  bool autoSelecting = false, connectionVerified = false, internetVerified = false;
+  bool get disconnectInProgress => _stopping || _quickDraining;
   final sessionClock = SessionClock();
   final searchProgress = SearchProgress();
   final List<ConnectionMessage> _messages = [];
@@ -274,8 +275,13 @@ class VpnViewModel extends ChangeNotifier {
   PublicCatalogResult? _searchCatalog;
   bool _roundCanContinue = false;
   Future<void>? _stopInFlight;
-  Future<void> _stopEngine() => _stopInFlight ??= engine.disconnect()
-      .whenComplete(() => _stopInFlight = null);
+  Future<void> _stopEngine() {
+    if (_stopInFlight != null) return _stopInFlight!;
+    // Never trap the power button indefinitely if a native MethodChannel
+    // does not finish. A timeout is NOT proof that the VPN was stopped.
+    final pending = engine.disconnect().timeout(const Duration(seconds: 12));
+    return _stopInFlight = pending.whenComplete(() => _stopInFlight = null);
+  }
 
   Future<void> _quickAttempt(Duration limit) async {
     final operation = (() async {
@@ -314,6 +320,9 @@ class VpnViewModel extends ChangeNotifier {
     if (await _externalVpnBlocksConnection()) return;
     if (_disposed || busy || autoSelecting || _nativeNeedsStop) return;
     autoSelecting = true;
+    if (engine is QuickProbeSupport) {
+      (engine as QuickProbeSupport).setQuickProbe(!deep);
+    }
     searchProgress.start(deep, DateTime.now());
     _searchVisited.clear();
     _searchCatalog = null;
@@ -381,6 +390,9 @@ class VpnViewModel extends ChangeNotifier {
       _searchCatalog = null;
       _searchVisited.clear();
       autoSelecting = false;
+      if (engine is QuickProbeSupport) {
+        (engine as QuickProbeSupport).setQuickProbe(false);
+      }
       if (!_disposed) {
         if (!_quickDraining) { _scheduleProbe(); _scheduleBackgroundPreflight(); _scheduleBaseline(immediate:true); }
         _notify();
@@ -513,7 +525,14 @@ class VpnViewModel extends ChangeNotifier {
       candidates.sort((a, b) => rank(a, b, latency));
       final mixed = [for (final tier in [1, 0, -1])
         ...PublicCatalog.diverse(candidates.where((s) => priority(s) == tier).toList())];
-      var ordered = ConnectionStrategy.select(mixed, limit: deep ? 8 : 6, priority: priority);
+      // A fast search should test more than one VLESS transport/source.
+      // Real, recent HTTPS health still gets first priority.
+      final quickMix = [
+        ..._transportDiversity(mixed.where((s)=>s.protocol!='wireguard').toList()),
+        ...mixed.where((s)=>s.protocol=='wireguard'),
+      ];
+      var ordered = ConnectionStrategy.select(deep ? mixed : quickMix,
+        limit: deep ? 8 : 6, priority: priority);
       if(deep && engine is CandidateHost && !ordered.any((s) => priority(s) == 1)) {
         final lab=_candidateLab ??= CandidateLab(engine as CandidateHost);
         final proxyRanked=_transportDiversity(mixed.where((s)=>s.protocol!='wireguard').toList());
@@ -648,13 +667,16 @@ class VpnViewModel extends ChangeNotifier {
         }
         final medianSpeed = speeds.isEmpty ? null : speeds[speeds.length ~/ 2];
         final usable = state == ConnectionState.connected && !repeatFailed &&
-            medianSpeed != null && medianSpeed > 0 && speeds.every((speed) => speed > 0) && sameNetwork;
+            (internetVerified || (medianSpeed != null && medianSpeed > 0)) &&
+            speeds.every((speed) => speed > 0) && sameNetwork;
         // Short repeated downloads measure consistency, not long-session stability.
         final utility = medianSpeed == null ? 0.0 :
           (.75 * (medianSpeed / (medianSpeed + 524288)) +
            .25 * (speeds.first / max(1, speeds.last))).toDouble();
         searchProgress.completed = attempt;
-        final attemptResult = success ? 'успех' : usable ? 'работает, ниже цели' : 'не подтверждено';
+        final attemptResult = success ? 'успех' : usable
+          ? (medianSpeed == null ? 'HTTPS подтверждён · скорость измеряется' : 'работает, ниже цели')
+          : 'не подтверждено';
         _appendMessage('Попытка $attempt/${ordered.length} · ${server.protocol} · $attemptResult', error: !success);
         _notify();
         autoAttemptReports.add('Попытка $attempt · ${server.protocol} · $attemptResult · ${server.source}\n${message ?? connectionStage ?? 'Нет подробностей'}');
@@ -664,15 +686,16 @@ class VpnViewModel extends ChangeNotifier {
             speed: medianSpeed, reward: medianSpeed == null || repeatFailed ? null : .2 + .8 * utility);
         }
         if (usable && !context.ambiguous && (!_requiresSpeed || success || deep)) {
-          finalists.add((server: server, utility: utility, speed: speeds.first, qualified: success));
+          finalists.add((server: server, utility: utility,
+            speed: speeds.isEmpty ? 0 : speeds.first, qualified: success));
           autoAttemptReports.add('${speeds.length} замер(а): ${speeds.map((n) => '${(n / 1024).round()} КиБ/с').join(', ')}');
         }
         if (cancelled()) { if (_nativeNeedsStop) await disconnect(); return; }
-        if (!deep && (success || (usable && _selectionTarget == null && !_requiresSpeed)) && sameNetwork) {
+        if (!deep && usable && sameNetwork) {
           connectionVerified = success;
           autoStatus = success
-            ? 'ИИ выбрал соединение с подтверждённым HTTPS · опыт: ${_selector.samples}'
-            : 'ИИ сохранил первый рабочий VPN; скорость ниже цели. Глубокий подбор может найти быстрее.';
+            ? 'ИИ выбрал VPN: HTTPS и скорость подтверждены · опыт: ${_selector.samples}'
+            : 'VPN подключён: HTTPS подтверждён; скорость ещё измеряется или ниже цели. Глубокий подбор может найти быстрее.';
           return;
         }
         // Proxy candidates were compared before TUN activation. Once the live
@@ -1257,7 +1280,9 @@ class VpnViewModel extends ChangeNotifier {
         _nativeConnected = true;
         _nativeNeedsStop = true;
         if (engine is DesktopCapabilities || activeServer?.protocol == 'vless' || activeServer?.protocol == 'shadowsocks') {
-          connectionVerified = _requiresSpeed ? (event.bytesPerSecond ?? 0) >= targetBytesPerSecond : event.quality; measuredBytesPerSecond = event.bytesPerSecond;
+          internetVerified = event.httpsVerified || event.quality || (event.bytesPerSecond ?? 0) > 0;
+          connectionVerified = _requiresSpeed ? (event.bytesPerSecond ?? 0) >= targetBytesPerSecond : event.quality;
+          measuredBytesPerSecond = event.bytesPerSecond;
           state = ConnectionState.connected; message = event.message ?? 'Xray: ответ через сервер получен';
           _scheduleTraffic(); _notify();
           // Windows already measured HTTPS through this VPN before emitting
@@ -1346,7 +1371,8 @@ class VpnViewModel extends ChangeNotifier {
     }
   }
   void _clearConfirmation() {
-    connectionVerified = false; measuredBytesPerSecond = null; connectionStage = null;
+    connectionVerified = false; internetVerified = false;
+    measuredBytesPerSecond = null; connectionStage = null;
   }
   Future<void> _recoverReserve(CandidateResult candidate, NetworkContext network, int token) async {
     bool allowed() => !_disposed && reserveEnabled && token == _reserveEpoch && _reserveAllowed;
