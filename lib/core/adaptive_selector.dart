@@ -251,14 +251,14 @@ class AdaptiveSelector {
       if (proofs is Map && proofs.length <= 500) {
         for (final entry in proofs.entries) {
           if (entry.key is! String || (entry.key as String).length != 64 ||
-              entry.value is! List || (entry.value as List).length > 3) continue;
+              entry.value is! List || (entry.value as List).length > 3) { continue; }
           final items = <Map<String, dynamic>>[];
           for (final row in entry.value as List) {
             if (row is! Map) continue;
             final parsed = Map<String, dynamic>.from(row);
             if (parsed['networkKey'] is! String || parsed['time'] is! String ||
                 parsed['network'] is! String ||
-                DateTime.tryParse(parsed['time'] as String) == null) continue;
+                DateTime.tryParse(parsed['time'] as String) == null) { continue; }
             items.add(parsed);
           }
           if (items.isNotEmpty) model.proven[entry.key as String] = items;
