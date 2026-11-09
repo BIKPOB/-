@@ -34,7 +34,7 @@ void main() {
     final aWeekLater = policy.estimate(good, wifi,
       now:clock.add(const Duration(days:7)));
     expect(aDayLater.mean, greaterThan(.5));
-    expect(aWeekLater.mean, closerTo(.5, .02));
+    expect(aWeekLater.mean, closeTo(.5, .02));
     expect(SourceReliability.decode(policy.encode()).estimate(good, wifi,
       now:clock).mean, closeTo(after, .00001));
   });
