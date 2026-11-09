@@ -16,6 +16,7 @@ import '../core/server_monitor.dart';
 import '../data/profile_store.dart';
 import '../data/public_catalog.dart';
 import '../core/adaptive_selector.dart';
+import '../core/contextual_search.dart';
 import '../core/connection_strategy.dart';
 import '../core/network_analysis.dart';
 import '../core/candidate_lab.dart';
@@ -100,6 +101,25 @@ class VpnViewModel extends ChangeNotifier {
   String? autoStatus;
   int _autoEpoch = 0;
   AdaptiveSelector _selector = AdaptiveSelector();
+  bool adaptiveRankingEnabled = true;
+  int get learnedSources => _selector.sourceReliability.learnedSources;
+  Future<void> setAdaptiveRankingEnabled(bool enabled) async {
+    if (autoSelecting || busy) return;
+    adaptiveRankingEnabled = enabled;
+    _labStorage['adaptiveRankingEnabled'] = enabled;
+    await _saveLab();
+    _notify();
+  }
+  /// Descriptive metrics only: policies were NOT randomized, so these are
+  /// not unbiased counterfactual estimates of which selector is better.
+  List<Map<String,dynamic>> get searchMetrics => List.unmodifiable(
+    (_labStorage['searchMetrics'] as List? ?? [])
+      .whereType<Map>().map((e) => Map<String,dynamic>.from(e)));
+  double? get quickSuccessRate {
+    final done = searchMetrics.where((e)=>e['deep'] == false && e['attempted'] == true).toList();
+    if (done.isEmpty) return null;
+    return done.where((e)=>e['verifiedWithin15Seconds'] == true).length / done.length;
+  }
   final ServerMonitor _autoMonitor;
   final ServerMonitor _backgroundMonitor;
   final Map<String, HealthResult> _backgroundHealth = {};
@@ -278,10 +298,12 @@ class VpnViewModel extends ChangeNotifier {
       String outcome, {int? speed, double? reward}) async {
     // Genuine HTTPS confirmation is useful even without a speed download.
     // Never turn an interrupted/failed preflight into a negative training label.
-    final proved = outcome == 'verified' || outcome == 'usable' || outcome == 'proxy_verified';
-    if (reward != null || proved) {
-      _selector.observe(server, context.type, latency, success: proved,
-        context: context, reward: reward ?? (outcome == 'proxy_verified' ? .55 : .65));
+    final proved = outcome == 'verified' || outcome == 'usable';
+    // The neural classifier is trained on confirmed VPN outcomes, never on
+    // proxy-only handshakes or missing/ambiguous network observations.
+    if (proved) {
+      _selector.observe(server, context.type, latency, success:true,
+        context:context, reward:reward ?? .65);
     }
     _selector.record(server, context, outcome, speed: speed, verifiedLatencyMs: latency);
     try { await store.saveSelector(_selector.encode()); } catch (_) { }
@@ -385,6 +407,8 @@ class VpnViewModel extends ChangeNotifier {
     final reports = <String>[];
     final rounds = deep ? 4 : 2;
     final startedEpoch = _autoEpoch;
+    final startedAt = DateTime.now();
+    final searchPolicy = adaptiveRankingEnabled;
     final sessionHost = engine is SearchSessionHost ? engine as SearchSessionHost : null;
     try {
       // This starts while the app is visible, before the user locks the screen.
@@ -468,6 +492,26 @@ class VpnViewModel extends ChangeNotifier {
       }
       autoAttemptReports..clear()..addAll(reports);
       try { await store.saveAttempts('${DateTime.now().toIso8601String()}\n${reports.join('\n\n')}'); } catch (_) { }
+      final elapsedMs = DateTime.now().difference(startedAt).inMilliseconds;
+      final attempted = reports.any((r) => r.startsWith('Попытка '));
+      if (attempted && !(autoStatus?.contains('остановлен пользователем') ?? false)) {
+        final record = <String,dynamic>{
+          'time': DateTime.now().toUtc().toIso8601String(),
+          'policy': searchPolicy ? 'contextual' : 'legacy',
+          'network': networkContext.type,
+          'deep': deep,
+          'attempted':true,
+          'elapsedMs': elapsedMs,
+          'vpnHttpsVerified': state == ConnectionState.connected && internetVerified,
+          'verifiedWithin15Seconds': !deep && elapsedMs <= 15000 &&
+            state == ConnectionState.connected && internetVerified,
+        };
+        final previous = (_labStorage['searchMetrics'] as List? ?? [])
+            .whereType<Map>().map((e) => Map<String,dynamic>.from(e)).toList();
+        _labStorage['searchMetrics'] = [...previous, record].skip(
+            max(0, previous.length + 1 - 80)).toList();
+        await _saveLab();
+      }
       _searchDeadline = null;
       _searchCatalog = null;
       _searchVisited.clear();
@@ -556,6 +600,12 @@ class VpnViewModel extends ChangeNotifier {
           : latency?[server.id]?.state == Reachability.unreachable ? -1 : 0;
         final reachable = reachability(b).compareTo(reachability(a));
         if (reachable != 0) return reachable;
+        if (adaptiveRankingEnabled) {
+          final source = _selector.sourceReliability;
+          final sourceRank = source.estimate(b, context).optimistic
+              .compareTo(source.estimate(a, context).optimistic);
+          if (sourceRank != 0) return sourceRank;
+        }
         final experience = _selector.experienceScore(b, context)
             .compareTo(_selector.experienceScore(a, context));
         if (experience != 0) return experience;
@@ -637,10 +687,10 @@ class VpnViewModel extends ChangeNotifier {
       ];
       var ordered = ConnectionStrategy.select(deep ? mixed : quickMix,
         limit: deep ? 8 : 6, priority: priority);
-      if (!deep) {
-        // Re-test up to two previously proven VPNs first. Reserve the
-        // remaining slots for other sources/transports and exploration.
-        final tried = <String>{};
+      if (!deep && adaptiveRankingEnabled) {
+        // Proven tunnel checks outrank predictions, with two reserved slots.
+        // A bounded UCB-like source estimator ranks other source/protocol
+        // pairs and one slot explores an under-observed source.
         final historical = pool.where((s) =>
           s.protocol != 'wireguard' && _selector.workedBefore(s, context)).toList()
             ..sort((a, b) {
@@ -648,11 +698,18 @@ class VpnViewModel extends ChangeNotifier {
               return order != 0 ? order : _selector.experienceScore(b, context)
                   .compareTo(_selector.experienceScore(a, context));
             });
-        final known = historical.where((s) =>
-          tried.add(ConnectionStrategy.profileKey(s))).take(2).toList();
-        final fresh = quickMix.where((s) => !tried.contains(ConnectionStrategy.profileKey(s)));
-        ordered = [...known, ...fresh].where((s) =>
-          tried.add('queued:${ConnectionStrategy.profileKey(s)}')).take(6).toList();
+        final source = _selector.sourceReliability;
+        ordered = ContextualSearchPlanner.quick(
+          baseline: rotate(quickMix),
+          historical: historical,
+          desirability: (s) {
+            final old = _selector.experienceScore(s, context);
+            final model = _selector.score(s, network, null, context:context);
+            final sourceValue = source.estimate(s, context).optimistic;
+            return .50 * old + .35 * sourceValue + .15 * model;
+          },
+          sourceExposure: (s) => source.estimate(s, context).exposure,
+        );
       }
       if(deep && engine is CandidateHost && !ordered.any((s) => priority(s) == 1)) {
         final lab=_candidateLab ??= CandidateLab(engine as CandidateHost);
@@ -1144,6 +1201,13 @@ class VpnViewModel extends ChangeNotifier {
     try {
       _imports = await store.load();
       try { _selector = AdaptiveSelector.decode(await store.loadSelector()); } catch (_) { }
+      try {
+        final raw = await store.loadNetworkLab();
+        if (raw != null) {
+          _labStorage = Map<String,dynamic>.from(jsonDecode(raw) as Map);
+          adaptiveRankingEnabled = _labStorage['adaptiveRankingEnabled'] != false;
+        }
+      } catch (_) { /* Use safe local defaults when the old file is absent. */ }
       try {
         final previous = await store.loadAttempts();
         if (previous != null && previous.isNotEmpty) autoAttemptReports.add('Предыдущий подбор (сохранённый отчёт):\n$previous');

@@ -156,6 +156,19 @@ class _HomePageState extends State<HomePage>
               const SizedBox(height: 6),
               Text('Обучающих результатов: ${vm.learningSamples} · подтверждённых VPN: $confirmed'),
               Text('Ранее рабочих сохранённых профилей: ${vm.previouslyWorkingServers}'),
+              Text('Источников с накопленной статистикой: ${vm.learnedSources}'),
+              Text('Успех быстрого HTTPS за 15 с: ${vm.quickSuccessRate == null ? "пока нет данных" : "${(vm.quickSuccessRate! * 100).toStringAsFixed(0)}%"}'),
+              const SizedBox(height: 6),
+              StatefulBuilder(builder: (context, setLocal) => SwitchListTile(
+                dense:true, contentPadding: EdgeInsets.zero,
+                title: const Text('Контекстный ИИ-поиск'),
+                subtitle: const Text('Отключение возвращает прежний алгоритм без удаления опыта'),
+                value: vm.adaptiveRankingEnabled,
+                onChanged: vm.autoSelecting ? null : (enabled) async {
+                  await vm.setAdaptiveRankingEnabled(enabled);
+                  setLocal(() {});
+                },
+              )),
               const SizedBox(height: 6),
               const Text('Модель учитывает успешность профиля, тип сети и давность проверки. '
                 'Ранее рабочие серверы перепроверяются; устаревшее измерение не считается текущим пингом.'),

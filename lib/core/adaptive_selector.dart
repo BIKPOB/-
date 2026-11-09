@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'models.dart';
 import 'network_context.dart';
+import 'contextual_search.dart';
 
 /// Small on-device neural classifier: 18 inputs, 6 tanh units, sigmoid output.
 /// Starts untrained; learns only from verified connections, not ICMP responses.
@@ -50,6 +51,7 @@ class AdaptiveSelector {
   /// Real system-VPN successes outlive the bounded 200-event diagnostics log.
   /// Keys are SHA-256 profile fingerprints, values carry no raw server secrets.
   final proven = <String, List<Map<String, dynamic>>>{};
+  SourceReliability sourceReliability = SourceReliability();
   void record(VpnServer server, NetworkContext context, String outcome,
       {int? speed, int? verifiedLatencyMs}) {
     journal.add({'time': DateTime.now().toUtc().toIso8601String(),
@@ -57,6 +59,13 @@ class AdaptiveSelector {
       'protocol': server.protocol, 'outcome': outcome, 'bytesPerSecond': speed,
       'verifiedLatencyMs': verifiedLatencyMs});
     if (journal.length > 200) journal.removeAt(0);
+    // Proxy-only and TCP preflight results never teach the system VPN policy.
+    if (outcome == 'verified' || outcome == 'usable') {
+      sourceReliability.observe(server, context, verifiedVpn:true);
+    } else if (outcome == 'unconfirmed' || outcome == 'slow_or_unstable') {
+      sourceReliability.observe(server, context, verifiedVpn:false,
+        attemptedButUnconfirmed:true);
+    }
     if (outcome == 'verified' || outcome == 'usable') {
       final id = profileId(server);
       final contexts = proven.putIfAbsent(id, () => []);
@@ -229,7 +238,8 @@ class AdaptiveSelector {
     if (history.length > 500) history.remove(history.keys.firstWhere((k) => k != id));
   }
   String encode() => jsonEncode({'version': 2, 'journal': journal, 'hidden': hidden,
-    'output': output, 'history': history, 'samples': samples, 'proven': proven});
+    'output': output, 'history': history, 'samples': samples, 'proven': proven,
+    'sourceReliability': sourceReliability.encode()});
   static AdaptiveSelector decode(String? raw) {
     final model = AdaptiveSelector();
     if (raw == null) return model;
@@ -264,6 +274,7 @@ class AdaptiveSelector {
           if (items.isNotEmpty) model.proven[entry.key as String] = items;
         }
       }
+      model.sourceReliability = SourceReliability.decode(j['sourceReliability']);
       model.hidden = h; model.output = o; model.history.addAll(parsed); model.samples = j['samples'] as int;
     } catch (_) { return AdaptiveSelector(); }
     return model;
