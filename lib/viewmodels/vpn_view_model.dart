@@ -1411,8 +1411,8 @@ class VpnViewModel extends ChangeNotifier {
           measuredBytesPerSecond = event.bytesPerSecond;
           state = ConnectionState.connected; message = event.message ?? 'Xray: ответ через сервер получен';
           if (internetVerified && event.latencyMs != null &&
-              event.latencyMs! >= 0) _rememberVerifiedHealth(event.latencyMs!);
-          if (!autoSelecting && internetVerified) _learnManualConnection();
+              event.latencyMs! >= 0) { _rememberVerifiedHealth(event.latencyMs!); }
+          if (!autoSelecting && internetVerified) { _learnManualConnection(); }
           _scheduleTraffic(); _notify();
           // Windows already measured HTTPS through this VPN before emitting
           // connected. Reuse that proof; never run an expensive second probe.
@@ -1470,12 +1470,12 @@ class VpnViewModel extends ChangeNotifier {
   }
 
   void _rememberWireGuardHealth(int delayMs) {
-    if (activeServer?.protocol == 'wireguard') _rememberVerifiedHealth(delayMs);
+    if (activeServer?.protocol == 'wireguard') { _rememberVerifiedHealth(delayMs); }
   }
   void _learnManualConnection() {
     final server = activeServer;
     if (server == null || _lastManualTrainingEpoch == _connectionEpoch ||
-        networkContext.ambiguous || networkContext.type == 'offline') return;
+        networkContext.ambiguous || networkContext.type == 'offline') { return; }
     _lastManualTrainingEpoch = _connectionEpoch;
     unawaited(_remember(server, networkContext, serverHealth(server)?.milliseconds,
       'usable', speed: measuredBytesPerSecond,

@@ -76,8 +76,8 @@ class AdaptiveSelector {
       if (age.isNegative || age >= const Duration(days: 7)) continue;
       if (row['profile'] == sameNetwork &&
           (row['outcome'] == 'unconfirmed' || row['outcome'] == 'slow_or_unstable') &&
-          age < const Duration(minutes: 10)) return false;
-      if (row['outcome'] == 'verified' || row['outcome'] == 'usable') return true;
+          age < const Duration(minutes: 10)) { return false; }
+      if (row['outcome'] == 'verified' || row['outcome'] == 'usable') { return true; }
     }
     return false;
   }
