@@ -277,6 +277,10 @@ class VpnViewModel extends ChangeNotifier {
   PublicCatalogResult? _searchCatalog;
   bool _roundCanContinue = false;
   Future<void>? _stopInFlight;
+  // The quick-search button must remain recoverable even when an old analyzer,
+  // monitor, or plugin refuses to finish its cancellation request.
+  Future<void> _prepareQuickConnection(Future<void> operation) =>
+      _quickAutoSearch ? operation.timeout(const Duration(seconds: 3)) : operation;
   Future<void> _stopEngine() {
     if (_stopInFlight != null) return _stopInFlight!;
     // Never trap the power button indefinitely if a native MethodChannel
@@ -1293,15 +1297,17 @@ class VpnViewModel extends ChangeNotifier {
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
     backgroundStatus = null; busy = true; message = null; _localNetworkFailure = false; _notify();
     try {
-      await _stopHealthChecks();
+      await _prepareQuickConnection(_stopHealthChecks());
       if(!autoSelecting && engine is CandidateHost) {
         final context=await _network();networkContext=context;
         _selectionTarget=baseline?.fresh(context,DateTime.now())==true?baseline!.target:null;
       }
       _networkAnalyzer.cancel();
-      await _analysisPending;
-      await _candidateLab?.cancel();
-      await _baselineMonitor.pause(true);
+      final pendingAnalysis = _analysisPending;
+      if (pendingAnalysis != null) await _prepareQuickConnection(pendingAnalysis);
+      final pendingLab = _candidateLab;
+      if (pendingLab != null) await _prepareQuickConnection(pendingLab.cancel());
+      await _prepareQuickConnection(_baselineMonitor.pause(true));
       final parsed = ProfilePolicy.parse(server.profile);
       final auth = credentials ?? await store.credentials(server.id);
       if (parsed.needsAuth && auth == null) throw StateError('Укажите логин и пароль профиля');
