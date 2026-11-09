@@ -222,10 +222,12 @@ class MainActivity : FlutterActivity() {
     }
     override fun cleanUpFlutterEngine(engine: io.flutter.embedding.engine.FlutterEngine) {
         browserResult?.error("cancelled", "Окно приложения пересоздано. Откройте источник повторно.", null); browserResult = null
+        // A permission dialog is bound to this specific Activity. Cancel its
+        // callback, but keep any already-running WireGuard tunnel intact.
+        if (::wg.isInitialized) wg.detach()
         // Swiping the task away destroys this Activity, not the user's active
         // foreground search. Do not close its candidates or worker queues.
         if (!SearchSessionService.isRequested()) {
-            if (::wg.isInitialized) wg.detach()
             // The engine survives this Activity: keep its existing EventChannel
             // listener, or WireGuard status events are lost when the user returns.
             ProxyProbe.cancel(); probeWorker.shutdownNow()
