@@ -39,8 +39,13 @@ class _PublicCatalogPageState extends State<PublicCatalogPage> {
     } finally { if (mounted) setState(() => adding = false); }
   }
   @override Widget build(BuildContext context) {
-    final items = result?.servers.where((s) => s.protocol == protocol).toList() ?? <VpnServer>[];
+    final items = widget.vm.sortedServers(result?.servers.where((s) =>
+        s.protocol == protocol) ?? const <VpnServer>[]);
     return Scaffold(appBar: AppBar(title: const Text('Публичные серверы'), actions: [
+      IconButton(onPressed: widget.vm.toggleServerSort,
+        tooltip: widget.vm.fastestFirst ? 'Быстрые сначала · изменить сортировку'
+          : 'Исходный порядок · сортировать по задержке',
+        icon: Icon(widget.vm.fastestFirst ? Icons.speed : Icons.sort)),
       IconButton(onPressed: loading || adding ? null : refresh, tooltip: 'Обновить базу', icon: const Icon(Icons.refresh)),
     ]), body: Column(children: [
       if (loading || adding) const LinearProgressIndicator(),

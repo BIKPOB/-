@@ -30,8 +30,8 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost,
       _searchSession.invokeMethod<void>('stop');
   @override Stream<EngineEvent> get events => _events.stream;
   void _emit(ConnectionState state, [String? detail, bool quality = true,
-    int? bytesPerSecond, bool httpsVerified = false]) {
-    if (!_disposed) _events.add(EngineEvent(state, detail, quality, bytesPerSecond, null, httpsVerified));
+    int? bytesPerSecond, bool httpsVerified = false, int? latencyMs]) {
+    if (!_disposed) _events.add(EngineEvent(state, detail, quality, bytesPerSecond, latencyMs, httpsVerified));
   }
   @override Future<void> initialize() async {
     _searchControl.setMethodCallHandler((call) async {
@@ -94,7 +94,8 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost,
           'Проверка через Xray не прошла: $detail', false);
       } else {
         _emit(ConnectionState.connected, '$detail · $delay мс',
-          probe?['quality'] == true, (probe?['bytesPerSecond'] as num?)?.toInt(), true);
+          probe?['quality'] == true, (probe?['bytesPerSecond'] as num?)?.toInt(),
+          true, quick ? (probe?['latencyMs'] as num?)?.toInt() : null);
         if (quick) unawaited(_measureSpeedAfterQuick(epoch));
       }
     } catch (_) {
@@ -114,7 +115,8 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost,
       final bps = (result?['bytesPerSecond'] as num?)?.toInt();
       _emit(ConnectionState.connected,
         result?['detail'] as String? ?? 'HTTPS подтверждён · замер скорости',
-        result?['quality'] == true, bps, true);
+        result?['quality'] == true, bps, true,
+        (result?['latencyMs'] as num?)?.toInt());
     } catch (_) { /* Keep the verified connection; speed remains unknown. */ }
   }
   String? _labConfiguration;

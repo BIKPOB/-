@@ -48,7 +48,32 @@ class VpnViewModel extends ChangeNotifier {
   final ServerMonitor monitor;
   List<VpnServer> _imports = [];
   List<VpnServer> get servers => _imports;
-  List<VpnServer> get filtered => servers.where((s) => (country == null || s.country == country) && (protocolFilter == null || s.protocol == protocolFilter)).toList();
+  bool fastestFirst = true;
+  List<VpnServer> get filtered => sortedServers(servers.where((s) =>
+      (country == null || s.country == country) &&
+      (protocolFilter == null || s.protocol == protocolFilter)));
+
+  /// Only verified, fresh HTTPS responses are sorted as latency values.
+  /// Unknown, TCP-only, expired and WireGuard-unprobed profiles stay below
+  /// measured servers, in their original order (no fictional ping).
+  List<VpnServer> sortedServers(Iterable<VpnServer> input) {
+    final indexed = input.toList().asMap().entries.toList();
+    if (!fastestFirst) return indexed.map((e) => e.value).toList();
+    int? ms(VpnServer server) {
+      final result = serverHealth(server);
+      return result?.protocolVerified == true ? result?.milliseconds : null;
+    }
+    indexed.sort((a, b) {
+      final left = ms(a.value), right = ms(b.value);
+      if (left == null && right == null) return a.key.compareTo(b.key);
+      if (left == null) return 1;
+      if (right == null) return -1;
+      final cmp = left.compareTo(right);
+      return cmp == 0 ? a.key.compareTo(b.key) : cmp;
+    });
+    return indexed.map((e) => e.value).toList();
+  }
+  void toggleServerSort() { fastestFirst = !fastestFirst; _notify(); }
   Map<String, HealthResult> health = {};
   ConnectionState state = ConnectionState.disconnected;
   String? selectedId, country, message, protocolFilter;
@@ -227,6 +252,7 @@ class VpnViewModel extends ChangeNotifier {
   String autoPlan = '';
   bool extendedNetwork = false, requestingNetworkPermission = false;
   int? measuredBytesPerSecond;
+  int _lastManualTrainingEpoch = -1;
   int get learningSamples => _selector.samples;
   List<Map<String, dynamic>> get learningJournal => List.unmodifiable(_selector.journal);
   Future<void> enableNetworkAnalysis({bool refresh = true}) async {
@@ -248,8 +274,12 @@ class VpnViewModel extends ChangeNotifier {
   }
   Future<void> _remember(VpnServer server, NetworkContext context, int? latency,
       String outcome, {int? speed, double? reward}) async {
-    if (reward != null) {
-      _selector.observe(server, context.type, latency, success: reward >= .5, context: context, reward: reward);
+    // Genuine HTTPS confirmation is useful even without a speed download.
+    // Never turn an interrupted/failed preflight into a negative training label.
+    final proved = outcome == 'verified' || outcome == 'usable' || outcome == 'proxy_verified';
+    if (reward != null || proved) {
+      _selector.observe(server, context.type, latency, success: proved,
+        context: context, reward: reward ?? (outcome == 'proxy_verified' ? .55 : .65));
     }
     _selector.record(server, context, outcome, speed: speed);
     try { await store.saveSelector(_selector.encode()); } catch (_) { }
@@ -524,6 +554,9 @@ class VpnViewModel extends ChangeNotifier {
           : latency?[server.id]?.state == Reachability.unreachable ? -1 : 0;
         final reachable = reachability(b).compareTo(reachability(a));
         if (reachable != 0) return reachable;
+        final experience = _selector.experienceScore(b, context)
+            .compareTo(_selector.experienceScore(a, context));
+        if (experience != 0) return experience;
         final speed = _selector.recentSpeed(b, context).compareTo(_selector.recentSpeed(a, context));
         if (speed != 0) return speed;
         final score = _selector.score(b, network, latency?[b.id]?.milliseconds, context: context)
@@ -588,6 +621,23 @@ class VpnViewModel extends ChangeNotifier {
       ];
       var ordered = ConnectionStrategy.select(deep ? mixed : quickMix,
         limit: deep ? 8 : 6, priority: priority);
+      if (!deep) {
+        // Re-test up to two previously proven VPNs first. Reserve the
+        // remaining slots for other sources/transports and exploration.
+        final tried = <String>{};
+        final historical = pool.where((s) =>
+          s.protocol != 'wireguard' && _selector.workedBefore(s, context)).toList()
+            ..sort((a, b) {
+              final order = rank(a, b, null);
+              return order != 0 ? order : _selector.experienceScore(b, context)
+                  .compareTo(_selector.experienceScore(a, context));
+            });
+        final known = historical.where((s) =>
+          tried.add(ConnectionStrategy.profileKey(s))).take(2).toList();
+        final fresh = quickMix.where((s) => !tried.contains(ConnectionStrategy.profileKey(s)));
+        ordered = [...known, ...fresh].where((s) =>
+          tried.add('queued:${ConnectionStrategy.profileKey(s)}')).take(6).toList();
+      }
       if(deep && engine is CandidateHost && !ordered.any((s) => priority(s) == 1)) {
         final lab=_candidateLab ??= CandidateLab(engine as CandidateHost);
         final proxyRanked=_transportDiversity(mixed.where((s)=>s.protocol!='wireguard').toList());
@@ -1360,6 +1410,9 @@ class VpnViewModel extends ChangeNotifier {
           connectionVerified = _requiresSpeed ? (event.bytesPerSecond ?? 0) >= targetBytesPerSecond : event.quality;
           measuredBytesPerSecond = event.bytesPerSecond;
           state = ConnectionState.connected; message = event.message ?? 'Xray: ответ через сервер получен';
+          if (internetVerified && event.latencyMs != null &&
+              event.latencyMs! >= 0) _rememberVerifiedHealth(event.latencyMs!);
+          if (!autoSelecting && internetVerified) _learnManualConnection();
           _scheduleTraffic(); _notify();
           // Windows already measured HTTPS through this VPN before emitting
           // connected. Reuse that proof; never run an expensive second probe.
@@ -1403,10 +1456,10 @@ class VpnViewModel extends ChangeNotifier {
     ? (engine as DesktopCapabilities).probeTunnel().timeout(const Duration(seconds: 35))
     : const MethodChannel('quietvpn/xray-state').invokeMapMethod<String, dynamic>('tunnelProbe').timeout(const Duration(seconds: 30));
 
-  void _rememberWireGuardHealth(int delayMs) {
+  void _rememberVerifiedHealth(int delayMs) {
     final server = activeServer;
-    if (server == null || server.protocol != 'wireguard' || delayMs < 0 || !_nativeNeedsStop) return;
-    // HTTPS through this actual TUN is the only supported WireGuard proof.
+    if (server == null || delayMs < 0 || !_nativeNeedsStop) return;
+    // Only actual HTTPS through the system VPN is a confirmed latency.
     final proof = HealthResult(Reachability.reachable, delayMs, 'HTTPS через VPN', DateTime.now());
     _protocolHealth[ConnectionStrategy.profileKey(server)] = proof;
     health[server.id] = proof;
@@ -1414,6 +1467,19 @@ class VpnViewModel extends ChangeNotifier {
         !networkContext.ambiguous && networkContext.type != 'offline') {
       _healthContext = networkContext;
     }
+  }
+
+  void _rememberWireGuardHealth(int delayMs) {
+    if (activeServer?.protocol == 'wireguard') _rememberVerifiedHealth(delayMs);
+  }
+  void _learnManualConnection() {
+    final server = activeServer;
+    if (server == null || _lastManualTrainingEpoch == _connectionEpoch ||
+        networkContext.ambiguous || networkContext.type == 'offline') return;
+    _lastManualTrainingEpoch = _connectionEpoch;
+    unawaited(_remember(server, networkContext, serverHealth(server)?.milliseconds,
+      'usable', speed: measuredBytesPerSecond,
+      reward: measuredBytesPerSecond == null ? .65 : .75).catchError((Object _) {}));
   }
 
   Future<void> _verifyInternet() async {
@@ -1426,6 +1492,7 @@ class VpnViewModel extends ChangeNotifier {
         _connectTimeout?.cancel(); _connectTimeout = null; state = ConnectionState.connected;
         measuredBytesPerSecond = (result?['bytesPerSecond'] as num?)?.toInt();
         internetVerified = true;
+        if (!autoSelecting) _learnManualConnection();
         connectionVerified = _requiresSpeed ? (measuredBytesPerSecond ?? 0)>=targetBytesPerSecond : result?['quality'] == true;
         // 'delay' includes the subsequent speed transfer. Use only the
         // separate HTTPS-first-response RTT for health; do not invent a ping.

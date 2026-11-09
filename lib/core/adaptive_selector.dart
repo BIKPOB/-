@@ -49,11 +49,73 @@ class AdaptiveSelector {
   final journal = <Map<String, dynamic>>[];
   void record(VpnServer server, NetworkContext context, String outcome, {int? speed}) {
     journal.add({'time': DateTime.now().toUtc().toIso8601String(),
-      'profile': key(server, context.environmentKey), 'network': context.type,
+      'profile': key(server, context.environmentKey), 'profileId': profileId(server), 'network': context.type,
       'protocol': server.protocol, 'outcome': outcome, 'bytesPerSecond': speed});
     if (journal.length > 200) journal.removeAt(0);
   }
   String key(VpnServer s, String network) => sha256.convert(utf8.encode('$network|${s.protocol}|${s.profile}')).toString();
+
+  /// Network-independent hash: reuse knowledge when a server appears in a
+  /// refreshed subscription or when mobile and Wi-Fi have different sessions.
+  /// No keys, hosts, or credentials are written to the learning journal.
+  String profileId(VpnServer s) => sha256.convert(utf8.encode(
+      '${s.protocol}|${s.protocol == 'wireguard' ? s.profile.trim() : s.profile.split('#').first}')).toString();
+
+  /// The history is evidence, not proof that a server works *now*.
+  /// Only actual verified VPN connections count as previously working.
+  bool workedBefore(VpnServer server, NetworkContext context, {DateTime? now}) {
+    if (context.ambiguous) return false;
+    final clock = (now ?? DateTime.now()).toUtc();
+    final sameNetwork = key(server, context.environmentKey);
+    final id = profileId(server);
+    for (final row in journal.reversed) {
+      if (row['profile'] != sameNetwork && row['profileId'] != id) continue;
+      final stamp = DateTime.tryParse(row['time']?.toString() ?? '');
+      if (stamp == null) continue;
+      final age = clock.difference(stamp.toUtc());
+      if (age.isNegative || age >= const Duration(days: 7)) continue;
+      if (row['profile'] == sameNetwork &&
+          (row['outcome'] == 'unconfirmed' || row['outcome'] == 'slow_or_unstable') &&
+          age < const Duration(minutes: 10)) return false;
+      if (row['outcome'] == 'verified' || row['outcome'] == 'usable') return true;
+    }
+    return false;
+  }
+
+  /// Smoothed, decaying success likelihood. A different network contributes
+  /// weaker evidence; a TCP preflight and an interrupted probe contribute none.
+  double experienceScore(VpnServer server, NetworkContext context, {DateTime? now}) {
+    if (context.ambiguous) return .5;
+    final clock = (now ?? DateTime.now()).toUtc();
+    final sameNetwork = key(server, context.environmentKey);
+    final id = profileId(server);
+    var good = 0.0, bad = 0.0;
+    for (final row in journal.reversed) {
+      final exact = row['profile'] == sameNetwork;
+      if (!exact && row['profileId'] != id) continue;
+      final stamp = DateTime.tryParse(row['time']?.toString() ?? '');
+      if (stamp == null) continue;
+      final age = clock.difference(stamp.toUtc());
+      if (age.isNegative || age >= const Duration(days: 7)) continue;
+      final networkWeight = exact ? 1.0 : row['network'] == context.type ? .30 : .12;
+      final ageWeight = 1 / (1 + age.inHours / 24.0);
+      final weight = networkWeight * ageWeight;
+      switch (row['outcome']) {
+        case 'verified':
+        case 'usable':
+          good += weight;
+        case 'proxy_verified':
+          good += weight * .4; // HTTPS via proxy, not verified system TUN.
+        case 'unconfirmed':
+          bad += weight * .35; // A timeout is weak evidence under censorship.
+        case 'slow_or_unstable':
+          bad += weight * .65;
+        default:
+          break;
+      }
+    }
+    return (1 + good) / (2 + good + bad);
+  }
   /// Retry order is separate from neural training: an inconclusive probe is not
   /// a negative training label. Old results lose their scheduling preference.
   int recentPriority(VpnServer server, NetworkContext context, {DateTime? now}) {
