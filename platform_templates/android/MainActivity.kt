@@ -226,7 +226,8 @@ class MainActivity : FlutterActivity() {
         // foreground search. Do not close its candidates or worker queues.
         if (!SearchSessionService.isRequested()) {
             if (::wg.isInitialized) wg.detach()
-            WgSession.sink = null
+            // The engine survives this Activity: keep its existing EventChannel
+            // listener, or WireGuard status events are lost when the user returns.
             ProxyProbe.cancel(); probeWorker.shutdownNow()
             candidateWorker.execute { dev.amirzr.flutter_v2ray_client.v2ray.core.QuietCandidateCore.stop() }
             candidateWorker.shutdown()
