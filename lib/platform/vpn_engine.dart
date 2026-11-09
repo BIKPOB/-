@@ -1,3 +1,4 @@
+import 'dart:async';
 import '../core/models.dart';
 
 /// Engines may select a short TLS/HTTPS proof before a separate speed sample.
@@ -9,6 +10,11 @@ abstract interface class QuickProbeSupport {
 abstract interface class SearchSessionHost {
   Future<void> beginSearchSession({required bool deep});
   Future<void> endSearchSession();
+}
+
+/// Receives user cancellation from Android's persistent search notification.
+abstract interface class SearchCancelHost {
+  Stream<void> get searchCancelRequests;
 }
 
 abstract interface class VpnEngine {

@@ -8,11 +8,14 @@ import 'vpn_engine.dart';
 import 'candidate_host.dart';
 
 class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost,
-    QuickProbeSupport, SearchSessionHost {
+    QuickProbeSupport, SearchSessionHost, SearchCancelHost {
   static const _wg = MethodChannel('quietvpn/wg');
   static const _xray = MethodChannel('flutter_v2ray_client');
   static const _stage = MethodChannel('quietvpn/xray-state');
   static const _searchSession = MethodChannel('quietvpn/search-session');
+  static const _searchControl = MethodChannel('quietvpn/search-control');
+  final _searchCancel = StreamController<void>.broadcast();
+  @override Stream<void> get searchCancelRequests => _searchCancel.stream;
   final _events = StreamController<EngineEvent>.broadcast();
   final _subscriptions = <StreamSubscription<dynamic>>[];
   String _active = 'wireguard', _xrayState = 'DISCONNECTED';
@@ -31,6 +34,10 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost,
     if (!_disposed) _events.add(EngineEvent(state, detail, quality, bytesPerSecond, null, httpsVerified));
   }
   @override Future<void> initialize() async {
+    _searchControl.setMethodCallHandler((call) async {
+      if (call.method != 'cancel') throw MissingPluginException();
+      if (!_disposed) _searchCancel.add(null);
+    });
     _subscriptions.add(const EventChannel('quietvpn/wg-events').receiveBroadcastStream().listen((s) {
       if (_active == 'wireguard' && !_stopping) _wgEvent(s);
     }, onError: (_) => _emit(ConnectionState.error, 'Ошибка WireGuard')));
@@ -216,9 +223,11 @@ class AndroidEngine implements VpnEngine, TrafficSource, ReserveCandidateHost,
     return data == null ? null : TrafficCounters(data['received'] as int, data['sent'] as int);
   }
   @override Future<void> dispose() async {
-    await stopCandidates();
+    _searchControl.setMethodCallHandler(null);
+    try { await stopCandidates().timeout(const Duration(seconds: 2)); } catch (_) {}
     _disposed = true; _epoch++;
     for (final subscription in _subscriptions) { await subscription.cancel(); }
+    await _searchCancel.close();
     await _events.close();
   }
 }

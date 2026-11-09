@@ -40,7 +40,8 @@ class VpnViewModel extends ChangeNotifier {
        _backgroundMonitor = backgroundMonitor ?? ServerMonitor(tcpOnly: true);
   final Future<PublicCatalogResult> Function() _catalogLoader;
   final Future<PublicCatalogResult> Function() _quickCatalogLoader;
-  bool _quickDraining = false;
+  bool _quickDraining = false, _quickAutoSearch = false;
+  StreamSubscription<void>? _searchCancelSubscription;
   final Future<String> Function()? _networkReader;
   final VpnEngine engine;
   final ProfileStore store;
@@ -265,7 +266,8 @@ class VpnViewModel extends ChangeNotifier {
   Future<void> cancelAutoSelection({String reason = 'Подбор остановлен пользователем'}) async {
     _cancelReserve();
     _autoEpoch++; _autoMonitor.cancel(); _networkAnalyzer.cancel();
-    await _candidateLab?.cancel();
+    try { await _candidateLab?.cancel().timeout(const Duration(seconds: 3)); }
+    catch (_) { /* Epoch already invalidated; never lock the Stop button. */ }
     autoStatus = reason; _notify();
     if (!busy && _nativeNeedsStop) await disconnect();
   }
@@ -301,7 +303,23 @@ class VpnViewModel extends ChangeNotifier {
         await _stopEngine();
         _stopping = false;
         state = ConnectionState.error;
-        await operation;
+        // An unresponsive MethodChannel may never finish its original start.
+        // Do not await it forever after a confirmed native stop.
+        try { await operation.timeout(const Duration(seconds: 2)); }
+        on TimeoutException {
+          _autoEpoch++; // Abort this round instead of overlapping native starts.
+          _quickDraining = true;
+          final pending = operation.timeout(const Duration(seconds: 12),
+              onTimeout: () {});
+          unawaited(pending.whenComplete(() async {
+            if (engine is SearchSessionHost && !autoSelecting) {
+              try { await (engine as SearchSessionHost).endSearchSession()
+                .timeout(const Duration(seconds: 2)); } catch (_) {}
+            }
+            _quickDraining = false;
+            if (!_disposed) _notify();
+          }).catchError((Object _) {}));
+        } catch (_) {}
         _nativeNeedsStop = false; activeServer = null;
         message = 'Кандидат не подтвердил соединение за ${limit.inMilliseconds / 1000} с';
       } finally { _stopping = false; }
@@ -320,6 +338,7 @@ class VpnViewModel extends ChangeNotifier {
     if (await _externalVpnBlocksConnection()) return;
     if (_disposed || busy || autoSelecting || _nativeNeedsStop) return;
     autoSelecting = true;
+    _quickAutoSearch = !deep;
     if (engine is QuickProbeSupport) {
       (engine as QuickProbeSupport).setQuickProbe(!deep);
     }
@@ -417,6 +436,7 @@ class VpnViewModel extends ChangeNotifier {
       _searchCatalog = null;
       _searchVisited.clear();
       autoSelecting = false;
+      _quickAutoSearch = false;
       if (engine is QuickProbeSupport) {
         (engine as QuickProbeSupport).setQuickProbe(false);
       }
@@ -1067,6 +1087,11 @@ class VpnViewModel extends ChangeNotifier {
         }
       } catch(_) { }
       }
+      if (engine is SearchCancelHost) {
+        _searchCancelSubscription = (engine as SearchCancelHost).searchCancelRequests.listen((_) {
+          if (autoSelecting) unawaited(cancelAutoSelection());
+        });
+      }
       await engine.initialize(); ready = true;
     } catch (_) { message = 'Не удалось инициализировать VPN или защищённое хранилище. На Windows проверьте установку и запуск от администратора.'; state = ConnectionState.error; }
     if (servers.isNotEmpty) selectedId = servers.first.id;
@@ -1295,7 +1320,9 @@ class VpnViewModel extends ChangeNotifier {
         }
       });
       _notify();
-      await engine.connect(server, auth);
+      // A native start call cannot hold the entire UI indefinitely.
+      await engine.connect(server, auth).timeout(Duration(seconds:
+        _quickAutoSearch && automatic ? 10 : automatic ? 70 : 100));
     } catch (error) {
       if (selectedAutomatically && selectionEpoch != _autoEpoch) return;
       _localNetworkFailure = error is PlatformException && error.code == 'BASE_NETWORK';
@@ -1533,6 +1560,7 @@ class VpnViewModel extends ChangeNotifier {
     _backgroundTimer?.cancel(); _trafficTimer?.cancel(); _poll?.cancel(); _connectTimeout?.cancel();
     monitor.cancel();
     unawaited(_subscription?.cancel());
+    unawaited(_searchCancelSubscription?.cancel());
     super.dispose();
   }
 }

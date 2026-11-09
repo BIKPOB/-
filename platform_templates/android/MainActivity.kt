@@ -1,9 +1,16 @@
 package app.quietvpn.quiet_vpn
 
+import android.content.Context
 import android.content.Intent
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
 
 class MainActivity : FlutterActivity() {
+    // Own the FlutterEngine in Application, not this disposable Activity.
+    override fun provideFlutterEngine(context: Context): FlutterEngine =
+        (application as QuietVpnApplication).engineForActivity()
+    override fun shouldDestroyEngineWithHost(): Boolean = false
+
     private var browserResult: io.flutter.plugin.common.MethodChannel.Result? = null
     private lateinit var wg: WgBridge
     private val resolverWorker = java.util.concurrent.Executors.newFixedThreadPool(3)
@@ -16,13 +23,20 @@ class MainActivity : FlutterActivity() {
                 try {
                     when (call.method) {
                         "start" -> {
-                            val search = Intent(applicationContext, SearchSessionService::class.java)
-                                .setAction(SearchSessionService.ACTION_START)
-                                .putExtra("deep", call.argument<Boolean>("deep") == true)
-                            androidx.core.content.ContextCompat.startForegroundService(applicationContext, search)
-                            result.success(null)
+                            SearchSessionService.markRequested()
+                            try {
+                                val search = Intent(applicationContext, SearchSessionService::class.java)
+                                    .setAction(SearchSessionService.ACTION_START)
+                                    .putExtra("deep", call.argument<Boolean>("deep") == true)
+                                androidx.core.content.ContextCompat.startForegroundService(applicationContext, search)
+                                result.success(null)
+                            } catch (e: Exception) {
+                                SearchSessionService.clearRequested()
+                                throw e
+                            }
                         }
                         "stop" -> {
+                            SearchSessionService.clearRequested()
                             stopService(Intent(applicationContext, SearchSessionService::class.java))
                             result.success(null)
                         }
@@ -203,15 +217,21 @@ class MainActivity : FlutterActivity() {
             override fun onListen(args: Any?, sink: io.flutter.plugin.common.EventChannel.EventSink?) { WgSession.sink = sink; sink?.success(WgSession.state) }
             override fun onCancel(args: Any?) { WgSession.sink = null }
         })
+        // Native channels are configured before Dart starts the first time.
+        (application as QuietVpnApplication).startDartIfNeeded()
     }
     override fun cleanUpFlutterEngine(engine: io.flutter.embedding.engine.FlutterEngine) {
         browserResult?.error("cancelled", "Окно приложения пересоздано. Откройте источник повторно.", null); browserResult = null
-        if (::wg.isInitialized) wg.detach()
-        WgSession.sink = null
-        ProxyProbe.cancel(); probeWorker.shutdownNow()
-        candidateWorker.execute { dev.amirzr.flutter_v2ray_client.v2ray.core.QuietCandidateCore.stop() }
-        candidateWorker.shutdown()
-        resolverWorker.shutdownNow()
+        // Swiping the task away destroys this Activity, not the user's active
+        // foreground search. Do not close its candidates or worker queues.
+        if (!SearchSessionService.isRequested()) {
+            if (::wg.isInitialized) wg.detach()
+            WgSession.sink = null
+            ProxyProbe.cancel(); probeWorker.shutdownNow()
+            candidateWorker.execute { dev.amirzr.flutter_v2ray_client.v2ray.core.QuietCandidateCore.stop() }
+            candidateWorker.shutdown()
+            resolverWorker.shutdownNow()
+        }
         super.cleanUpFlutterEngine(engine)
     }
     @Deprecated("Activity permission result contract")

@@ -12,6 +12,8 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.embedding.engine.FlutterEngineCache
 
 /**
  * Only runs while the user has explicitly started an AI server search.
@@ -21,6 +23,11 @@ import android.os.PowerManager
 class SearchSessionService : Service() {
     companion object {
         const val ACTION_START = "app.quietvpn.quiet_vpn.SEARCH_START"
+        const val ACTION_CANCEL = "app.quietvpn.quiet_vpn.SEARCH_CANCEL"
+        @Volatile private var requested = false
+        fun markRequested() { requested = true }
+        fun clearRequested() { requested = false }
+        fun isRequested(): Boolean = requested
         private const val CHANNEL = "quietvpn_search"
         const val NOTIFICATION_ID = 8342
         const val QUICK_MAX_MS = 45_000L
@@ -34,10 +41,20 @@ class SearchSessionService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_CANCEL) {
+            val engine = FlutterEngineCache.getInstance().get(QuietVpnApplication.ENGINE_ID)
+            if (engine != null) {
+                MethodChannel(engine.dartExecutor.binaryMessenger, "quietvpn/search-control")
+                    .invokeMethod("cancel", null)
+            }
+            main.postDelayed({ stopSelf() }, 2500)
+            return START_NOT_STICKY
+        }
         if (intent?.action != ACTION_START) {
             stopSelf()
             return START_NOT_STICKY
         }
+        markRequested()
         val deep = intent.getBooleanExtra("deep", false)
         val maxMs = if (deep) DEEP_MAX_MS else QUICK_MAX_MS
         val manager = getSystemService(NotificationManager::class.java)
@@ -46,8 +63,12 @@ class SearchSessionService : Service() {
         val openApp = PendingIntent.getActivity(this, 0,
             Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val stopPending = PendingIntent.getService(this, 1,
+            Intent(this, SearchSessionService::class.java).setAction(ACTION_CANCEL),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val notification = Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_quiet)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Остановить", stopPending)
             .setContentTitle("Quiet VPN · ИИ-подбор")
             .setContentText("Поиск серверов продолжается при выключенном экране")
             .setContentIntent(openApp)
@@ -72,6 +93,7 @@ class SearchSessionService : Service() {
     }
 
     override fun onDestroy() {
+        clearRequested()
         main.removeCallbacks(expire)
         if (cpuLock?.isHeld == true) cpuLock?.release()
         cpuLock = null
