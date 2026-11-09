@@ -120,6 +120,26 @@ class VpnViewModel extends ChangeNotifier {
     if (done.isEmpty) return null;
     return done.where((e)=>e['verifiedWithin15Seconds'] == true).length / done.length;
   }
+  /// Descriptive, not an unbiased comparison: connection opportunities
+  /// differ and we cannot know the outcome of servers we did not try.
+  String get quickPolicyReport {
+    final parts = <String>[];
+    for (final mode in ['contextual', 'legacy']) {
+      final records = searchMetrics.where((e) => e['deep'] == false &&
+          e['policy'] == mode && e['attempted'] == true).toList();
+      final label = mode == 'contextual' ? 'Контекстный' : 'Прежний';
+      if (records.isEmpty) {
+        parts.add('$label: нет измерений');
+      } else {
+        final verified = records.where((e) => e['verifiedWithin15Seconds'] == true).length;
+        final durations = records.map((e) => (e['elapsedMs'] as num?)?.toInt() ?? 0).toList()
+          ..sort();
+        parts.add('$label: $verified/${records.length} быстрых подключений · '
+          'медиана ${(durations[durations.length ~/ 2] / 1000).toStringAsFixed(1)} с');
+      }
+    }
+    return parts.join('\n');
+  }
   final ServerMonitor _autoMonitor;
   final ServerMonitor _backgroundMonitor;
   final Map<String, HealthResult> _backgroundHealth = {};

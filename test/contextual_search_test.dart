@@ -38,6 +38,44 @@ void main() {
     expect(SourceReliability.decode(policy.encode()).estimate(good, wifi,
       now:clock).mean, closeTo(after, .00001));
   });
+  test('source learning changes search order in a controlled full-outcome fixture', () {
+    final policy = SourceReliability();
+    final clock = DateTime.utc(2026, 11, 9);
+    final weak = [for (var i=0; i<3; i++) candidate('weak-$i', 'weak-provider')];
+    final good = [for (var i=0; i<2; i++) candidate('good-$i', 'good-provider')];
+    for (var i=0; i<12; i++) {
+      policy.observe(good.first, wifi, verifiedVpn:true, now:clock);
+      policy.observe(weak.first, wifi, verifiedVpn:false,
+        attemptedButUnconfirmed:true, now:clock);
+    }
+    final baseline=[...weak, ...good];
+    final proposed=ContextualSearchPlanner.quick(
+      baseline:baseline, historical:[],
+      desirability:(s)=>policy.estimate(s,wifi,now:clock).optimistic,
+      sourceExposure:(s)=>policy.estimate(s,wifi,now:clock).exposure,
+    );
+    expect(baseline.first.source,'weak-provider');
+    expect(proposed.first.source,'good-provider',
+      reason:'Positive confirmed VPN observations, not a fake ping, drive ranking');
+    final onMobile=ContextualSearchPlanner.quick(
+      baseline:baseline, historical:[],
+      desirability:(s)=>policy.estimate(s,mobile,now:clock).optimistic,
+      sourceExposure:(s)=>policy.estimate(s,mobile,now:clock).exposure,
+    );
+    expect(onMobile.first.source,'weak-provider',
+      reason:'Do not transfer Wi-Fi source confidence as verified LTE availability');
+    expect(proposed.map((s)=>s.profile).toSet().length, proposed.length);
+    // This is a synthetic full-outcome fixture, NOT an unbiased real-world
+    // A/B uplift or an offline counterfactual estimate.
+  });
+  test('source aliases of imported VPNs update the same source model', () {
+    final policy=SourceReliability();
+    final saved=candidate('one','ИИ-подбор · good-provider');
+    final publicPeer=candidate('two','good-provider');
+    final now=DateTime.utc(2026, 11, 9);
+    policy.observe(saved,wifi,verifiedVpn:true,now:now);
+    expect(policy.estimate(publicPeer,wifi,now:now).mean,greaterThan(.5));
+  });
   test('source reliability keeps protocols separate and bounded', () {
     final model = SourceReliability();
     final clock = DateTime.utc(2026, 11, 9);

@@ -5,6 +5,22 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:quiet_vpn/data/public_catalog.dart';
 const uuid = '12345678-1234-1234-1234-123456789abc';
 void main() {
+  test('additional sources are protocol-scoped, size-bounded and cacheable', () {
+    final names=PublicCatalog.additionalSources.keys.toList();
+    expect(names,contains('vair/VLESS alive'));
+    expect(names,contains('barry-far/VLESS'));
+    expect(names,contains('barry-far/Shadowsocks'));
+    for (final url in PublicCatalog.additionalSources.values) {
+      final parsed=Uri.parse(url);
+      expect(parsed.scheme,'https');
+      expect(parsed.host,'raw.githubusercontent.com');
+      expect(parsed.pathSegments,contains('main'));
+    }
+    final sample=PublicCatalog.parse('vless://$uuid@test.example.org:443',
+        sourceName:'vair/VLESS alive');
+    expect(sample.servers.single.source,'vair/VLESS alive');
+    expect(sample.servers.single.protocol,'vless');
+  });
   test('foreground and background share refresh and reuse the fresh catalog', () async {
     var calls = 0;
     final response = Completer<PublicCatalogResult>();

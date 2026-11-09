@@ -157,7 +157,10 @@ class _HomePageState extends State<HomePage>
               Text('Обучающих результатов: ${vm.learningSamples} · подтверждённых VPN: $confirmed'),
               Text('Ранее рабочих сохранённых профилей: ${vm.previouslyWorkingServers}'),
               Text('Источников с накопленной статистикой: ${vm.learnedSources}'),
-              Text('Успех быстрого HTTPS за 15 с: ${vm.quickSuccessRate == null ? "пока нет данных" : "${(vm.quickSuccessRate! * 100).toStringAsFixed(0)}%"}'),
+              Text('Подтверждённый HTTPS за 15 с:'),
+              Text(vm.quickPolicyReport),
+              const Text('Это наблюдательная статистика, а не доказательство преимущества: '
+                'для причинного сравнения нужны контролируемые испытания.'),
               const SizedBox(height: 6),
               StatefulBuilder(builder: (context, setLocal) => SwitchListTile(
                 dense:true, contentPadding: EdgeInsets.zero,

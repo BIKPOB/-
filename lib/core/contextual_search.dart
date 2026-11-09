@@ -16,11 +16,18 @@ class SourceReliability {
   static const maxSources = 192;
   int get learnedSources => _stats.length;
   String _key(VpnServer server, NetworkContext network) {
+    var origin = server.source.trim().toLowerCase();
+    for (final prefix in ['ии-подбор · ', 'публичный · ', 'резерв · ']) {
+      if (origin.startsWith(prefix)) {
+        origin = origin.substring(prefix.length);
+        break;
+      }
+    }
     final scope = network.type == 'mobile' ? 'mobile'
         : network.type == 'wifi' ? 'wifi'
         : network.type == 'ethernet' ? 'ethernet' : 'other';
     return sha256.convert(utf8.encode(
-      '${server.source.trim().toLowerCase()}|${server.protocol}|$scope')).toString();
+      '$origin|${server.protocol}|$scope')).toString();
   }
   List<double> _at(String id, DateTime now) {
     final old = _stats[id];
@@ -94,8 +101,8 @@ class ContextualSearchPlanner {
   }) {
     if (limit <= 0) { return []; }
     final result = <VpnServer>[], used = <String>{};
-    String key(VpnServer s) => s.protocol == 'wireguard'
-        ? s.profile.trim() : s.profile.split('#').first;
+    String key(VpnServer s) => '${s.protocol}|${s.protocol == 'wireguard'
+        ? s.profile.trim() : s.profile.split('#').first}';
     void add(VpnServer s) { if (result.length < limit && used.add(key(s))) { result.add(s); } }
     // At most two proven profiles; the remaining candidates still explore.
     for (final s in historical.take(2)) { add(s); }
