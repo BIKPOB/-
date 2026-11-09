@@ -561,6 +561,15 @@ class VpnViewModel extends ChangeNotifier {
         if (experience != 0) return experience;
         final speed = _selector.recentSpeed(b, context).compareTo(_selector.recentSpeed(a, context));
         if (speed != 0) return speed;
+        // TCP timing is a cheap tie-breaker for preflight order only.
+        // It is never stored or displayed as authenticated VPN ping.
+        if (latency?[a.id]?.state == Reachability.reachable &&
+            latency?[b.id]?.state == Reachability.reachable) {
+          final leftTcp = latency?[a.id]?.milliseconds, rightTcp = latency?[b.id]?.milliseconds;
+          if (leftTcp != null && rightTcp != null && leftTcp != rightTcp) {
+            return leftTcp.compareTo(rightTcp);
+          }
+        }
         final rightHealth = latency?[b.id], leftHealth = latency?[a.id];
         final rightRtt = rightHealth != null && rightHealth.protocolVerified
             ? rightHealth.milliseconds : null;
