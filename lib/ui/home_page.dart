@@ -141,6 +141,9 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _learning() async {
+    final journal = vm.learningJournal;
+    final confirmed = journal.where((e) => e['outcome'] == 'verified' ||
+        e['outcome'] == 'usable').length;
     await showDialog<void>(
       context: context,
       builder: (c) => AlertDialog(
@@ -148,10 +151,21 @@ class _HomePageState extends State<HomePage>
         content: SizedBox(
           width: 500,
           child: SingleChildScrollView(
-            child: Text(
-              vm.learningJournal.isEmpty
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Сеть: ${vm.networkContext.label}'),
+              const SizedBox(height: 6),
+              Text('Обучающих результатов: ${vm.learningSamples} · подтверждённых VPN: $confirmed'),
+              Text('Ранее рабочих сохранённых профилей: ${vm.previouslyWorkingServers}'),
+              const SizedBox(height: 6),
+              const Text('Модель учитывает успешность профиля, тип сети и давность проверки. '
+                'Ранее рабочие серверы перепроверяются; устаревшее измерение не считается текущим пингом.'),
+              const Divider(height: 24),
+              const Text('Последние события'),
+              const SizedBox(height: 6),
+              Text(
+              journal.isEmpty
                   ? 'Пока нет измерений. Модель начинает без готовых знаний о ваших серверах.'
-                  : vm.learningJournal.reversed
+                  : journal.reversed
                         .take(30)
                         .map(
                           (e) =>
@@ -165,7 +179,8 @@ class _HomePageState extends State<HomePage>
                               }} · ${e['bytesPerSecond'] == null ? 'скорость не измерена' : '${((e['bytesPerSecond'] as num) / 1024).round()} КиБ/с'}',
                         )
                         .join('\n\n'),
-            ),
+              ),
+            ]),
           ),
         ),
         actions: [

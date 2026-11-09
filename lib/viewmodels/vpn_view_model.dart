@@ -255,6 +255,8 @@ class VpnViewModel extends ChangeNotifier {
   int _lastManualTrainingEpoch = -1;
   int get learningSamples => _selector.samples;
   List<Map<String, dynamic>> get learningJournal => List.unmodifiable(_selector.journal);
+  int get previouslyWorkingServers => servers.where((s) =>
+      _selector.workedBefore(s, networkContext)).length;
   Future<void> enableNetworkAnalysis({bool refresh = true}) async {
     if (requestingNetworkPermission || autoSelecting) return;
     requestingNetworkPermission = true;
@@ -559,8 +561,11 @@ class VpnViewModel extends ChangeNotifier {
         if (experience != 0) return experience;
         final speed = _selector.recentSpeed(b, context).compareTo(_selector.recentSpeed(a, context));
         if (speed != 0) return speed;
-        final rightRtt = latency?[b.id]?.protocolVerified == true ? latency?[b.id]?.milliseconds : null;
-        final leftRtt = latency?[a.id]?.protocolVerified == true ? latency?[a.id]?.milliseconds : null;
+        final rightHealth = latency?[b.id], leftHealth = latency?[a.id];
+        final rightRtt = rightHealth != null && rightHealth.protocolVerified
+            ? rightHealth.milliseconds : null;
+        final leftRtt = leftHealth != null && leftHealth.protocolVerified
+            ? leftHealth.milliseconds : null;
         final score = _selector.score(b, network, rightRtt, context: context)
           .compareTo(_selector.score(a, network, leftRtt, context: context));
         if (score != 0) return score;
