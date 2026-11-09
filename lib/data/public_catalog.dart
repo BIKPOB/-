@@ -25,6 +25,17 @@ class PublicCatalog {
   static const urls = [
     'https://raw.githubusercontent.com/Au1rxx/free-vpn-subscriptions/main/output/v2ray-base64.txt',
   ];
+  /// Additional public feeds: discovery only, NEVER trusted VPN availability.
+  /// Cached copies allow quick AI searches with no network subscription wait.
+  /// Source contents are capped and validated exactly like existing feeds.
+  static const additionalSources = <String,String>{
+    'vair/VLESS alive':
+      'https://raw.githubusercontent.com/lm705/vair/main/vless_alive.txt',
+    'barry-far/VLESS':
+      'https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/vless.txt',
+    'barry-far/Shadowsocks':
+      'https://raw.githubusercontent.com/barry-far/V2ray-Config/main/Splitted-By-Protocol/ss.txt',
+  };
   static PublicCatalogResult parse(String text, {bool bundled = false, String sourceName = source}) {
     if (utf8.encode(text).length > maxBytes) throw const FormatException('Каталог слишком большой');
     text = text.trim();
@@ -108,7 +119,8 @@ class PublicCatalog {
     if (_recent != null) return _recent!;
     final result = <VpnServer>[];
     for (final name in ['igareck RU Mobile-150', 'igareck RU VLESS', 'igareck RU Shadowsocks',
-      '0xRadikal/Free-v2ray-Configs verified', source, 'NiREvil/vless']) {
+      '0xRadikal/Free-v2ray-Configs verified', source, 'NiREvil/vless',
+      ...additionalSources.keys]) {
       try {
         final snapshots = Platform.isWindows ? await WindowsCatalogCache.read(name)
           : await _cache.invokeListMethod<dynamic>('read', {'source': name}) ?? [];
@@ -137,6 +149,8 @@ class PublicCatalog {
       _loadSource(urls.first, 'assets/public-proxies.txt', source, '10.10.2026'),
       _loadSource('https://raw.githubusercontent.com/NiREvil/vless/refs/heads/main/sub/v2rayng-wg.txt',
         'assets/public-wireguard.txt', 'NiREvil/vless', '11.10.2026'),
+      ...additionalSources.entries.map((source) =>
+        _loadSource(source.value, null, source.key, '')),
     ]);
     return PublicCatalogResult(diverse(parts.expand((p) => p.servers).toList()), parts.any((p) => p.bundled),
       parts.fold(0, (n, p) => n + p.skipped), status: parts.map((p) => p.status).join('\n'));
