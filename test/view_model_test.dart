@@ -726,6 +726,34 @@ void main() {
       expect(lab.calls, 1, reason: 'Interrupted checks have a short retry cooldown');
     } finally { vm.dispose(); await engine.dispose(); }
   });
+  test('contextual ranking can roll back and persists its setting', () async {
+    final profile = MemoryProfiles();
+    final engine = MeasuredEngine();
+    final vm = VpnViewModel(engine, profile, ServerMonitor(),
+      networkReader: () async => 'wifi',
+      catalogLoader: () async => const PublicCatalogResult([], false, 0),
+      baselineMonitor: IdleBaselineMonitor());
+    try {
+      await vm.initialize();
+      expect(vm.adaptiveRankingEnabled, isTrue);
+      expect(vm.quickSuccessRate, isNull,
+        reason:'No online counterfactual improvement is claimed without trials');
+      await vm.setAdaptiveRankingEnabled(false);
+      expect(vm.adaptiveRankingEnabled, isFalse);
+      expect(profile.networkLab, contains('"adaptiveRankingEnabled":false'));
+    } finally { vm.dispose(); await engine.dispose(); }
+    final other = MeasuredEngine();
+    final restored = VpnViewModel(other, profile, ServerMonitor(),
+      networkReader: () async => 'wifi',
+      catalogLoader: () async => const PublicCatalogResult([], false, 0),
+      baselineMonitor: IdleBaselineMonitor());
+    try {
+      await restored.initialize();
+      expect(restored.adaptiveRankingEnabled, isFalse);
+      await restored.setAdaptiveRankingEnabled(true);
+      expect(restored.adaptiveRankingEnabled, isTrue);
+    } finally { restored.dispose(); await other.dispose(); }
+  });
   test('server lists rank only fresh authenticated HTTPS RTT above unknown ping', () async {
     final engine = MeasuredEngine();
     final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(),
