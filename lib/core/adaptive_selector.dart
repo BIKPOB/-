@@ -47,10 +47,12 @@ class AdaptiveSelector {
   final history = <String, List<int>>{};
   int samples = 0;
   final journal = <Map<String, dynamic>>[];
-  void record(VpnServer server, NetworkContext context, String outcome, {int? speed}) {
+  void record(VpnServer server, NetworkContext context, String outcome,
+      {int? speed, int? verifiedLatencyMs}) {
     journal.add({'time': DateTime.now().toUtc().toIso8601String(),
       'profile': key(server, context.environmentKey), 'profileId': profileId(server), 'network': context.type,
-      'protocol': server.protocol, 'outcome': outcome, 'bytesPerSecond': speed});
+      'protocol': server.protocol, 'outcome': outcome, 'bytesPerSecond': speed,
+      'verifiedLatencyMs': verifiedLatencyMs});
     if (journal.length > 200) journal.removeAt(0);
   }
   String key(VpnServer s, String network) => sha256.convert(utf8.encode('$network|${s.protocol}|${s.profile}')).toString();

@@ -662,6 +662,8 @@ void main() {
       expect(vm.learningSamples, 1,
         reason: 'Actual HTTPS through VPN must teach the model without a speed download');
       expect(vm.learningJournal.single['outcome'], 'usable');
+      expect(vm.learningJournal.single['verifiedLatencyMs'], isNull,
+        reason: 'A TCP preflight must never be mistaken for HTTPS RTT');
       await vm.disconnect();
       expect(vm.internetVerified, isFalse);
     } finally { vm.dispose(); await engine.dispose(); }

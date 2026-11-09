@@ -281,7 +281,7 @@ class VpnViewModel extends ChangeNotifier {
       _selector.observe(server, context.type, latency, success: proved,
         context: context, reward: reward ?? (outcome == 'proxy_verified' ? .55 : .65));
     }
-    _selector.record(server, context, outcome, speed: speed);
+    _selector.record(server, context, outcome, speed: speed, verifiedLatencyMs: latency);
     try { await store.saveSelector(_selector.encode()); } catch (_) { }
   }
 
@@ -559,8 +559,10 @@ class VpnViewModel extends ChangeNotifier {
         if (experience != 0) return experience;
         final speed = _selector.recentSpeed(b, context).compareTo(_selector.recentSpeed(a, context));
         if (speed != 0) return speed;
-        final score = _selector.score(b, network, latency?[b.id]?.milliseconds, context: context)
-          .compareTo(_selector.score(a, network, latency?[a.id]?.milliseconds, context: context));
+        final rightRtt = latency?[b.id]?.protocolVerified == true ? latency?[b.id]?.milliseconds : null;
+        final leftRtt = latency?[a.id]?.protocolVerified == true ? latency?[a.id]?.milliseconds : null;
+        final score = _selector.score(b, network, rightRtt, context: context)
+          .compareTo(_selector.score(a, network, leftRtt, context: context));
         if (score != 0) return score;
         // Untested UDP is not known-bad, but avoid spending the first 20s on it.
         return (a.protocol == 'wireguard' ? 1 : 0).compareTo(b.protocol == 'wireguard' ? 1 : 0);
@@ -786,7 +788,10 @@ class VpnViewModel extends ChangeNotifier {
         _notify();
         autoAttemptReports.add('Попытка $attempt · ${server.protocol} · $attemptResult · ${server.source}\n${message ?? connectionStage ?? 'Нет подробностей'}');
         if (sameNetwork && !context.ambiguous && !duringVpn.ambiguous) {
-          await _remember(server, context, latency[server.id]?.milliseconds,
+          final verifiedRtt = serverHealth(server)?.protocolVerified == true
+              ? serverHealth(server)?.milliseconds
+              : latency[server.id]?.protocolVerified == true ? latency[server.id]?.milliseconds : null;
+          await _remember(server, context, verifiedRtt,
             success ? 'verified' : usable ? 'usable' : medianSpeed != null ? 'slow_or_unstable' : 'unconfirmed',
             speed: medianSpeed, reward: medianSpeed == null || repeatFailed ? null : .2 + .8 * utility);
         }
