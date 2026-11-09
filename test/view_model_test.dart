@@ -65,13 +65,20 @@ class ControlledEngine implements VpnEngine {
   @override Future<void> dispose() => controller.close();
 }
 
-class SearchKeepAliveEngine extends ControlledEngine implements SearchSessionHost {
+class SearchKeepAliveEngine extends ControlledEngine implements SearchSessionHost, SearchCancelHost {
   int starts = 0, stops = 0;
   bool? lastDeep;
+  final cancelRequests = StreamController<void>.broadcast();
+  @override Stream<void> get searchCancelRequests => cancelRequests.stream;
+  void cancelFromNotification() => cancelRequests.add(null);
   @override Future<void> beginSearchSession({required bool deep}) async {
     starts++; lastDeep = deep;
   }
   @override Future<void> endSearchSession() async { stops++; }
+  @override Future<void> dispose() async {
+    await cancelRequests.close();
+    await super.dispose();
+  }
 }
 class SlowFirstEngine extends ControlledEngine {
   @override Future<void> connect(VpnServer server, Credentials? credentials) async {
@@ -453,6 +460,7 @@ void main() {
       await tester.pump(const Duration(seconds: 13));
       await tester.pump();
       expect(vm.disconnectInProgress, isFalse);
+      expect(vm.busy, isFalse, reason: 'A timed-out native start must not lock the power button');
       engine.release.complete();
       await search;
     } finally {
@@ -872,6 +880,33 @@ void main() {
       expect(vm.autoSelecting,isFalse);
     } finally { vm.dispose(); await engine.dispose(); }
   });
+  test('notification Stop cancels a search while the UI is backgrounded', () async {
+    final engine = SearchKeepAliveEngine(), catalog = Completer<PublicCatalogResult>();
+    final vm = VpnViewModel(engine, EmptyProfiles(),
+      ServerMonitor(probe: (_) async => const HealthResult(Reachability.reachable, 1)),
+      catalogLoader: () => catalog.future, networkReader: () async => 'wifi',
+      baselineMonitor: IdleBaselineMonitor());
+    try {
+      await vm.initialize();
+      final search = vm.autoConnect(deep: true);
+      for (var i = 0; i < 15 && engine.starts == 0; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(engine.starts, 1);
+      vm.setForeground(false);
+      expect(vm.autoSelecting, isTrue);
+      engine.cancelFromNotification();
+      for (var i = 0; i < 15 && vm.autoStatus != 'Подбор остановлен пользователем'; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(vm.autoStatus, 'Подбор остановлен пользователем');
+      catalog.complete(const PublicCatalogResult([], false, 0));
+      await search;
+      expect(vm.autoSelecting, isFalse);
+      expect(engine.stops, 1);
+      expect(engine.connects, 0);
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   testWidgets('notification shade and screen lock preserve active AI search', (tester) async {
     final engine = AutoEngine(), catalog = Completer<PublicCatalogResult>();
     final vm = VpnViewModel(engine, MemoryProfiles(),
@@ -894,6 +929,12 @@ void main() {
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+    expect(vm.autoSelecting, isTrue);
+    expect(engine.disconnects, 0);
+    // A task removed from Recents detaches its Activity. The retained
+    // FlutterEngine must not interpret this as a user-initiated Stop.
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.detached);
     await tester.pump();
     expect(vm.autoSelecting, isTrue);
     expect(engine.disconnects, 0);

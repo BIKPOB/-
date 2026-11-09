@@ -27,6 +27,12 @@ class SearchSessionServiceTest {
                 it.id == SearchSessionService.NOTIFICATION_ID &&
                     it.notification.extras.getString("android.title")?.contains("ИИ") == true
             })
+            assertTrue(SearchSessionService.isRequested())
+            val search = notifications.activeNotifications.first {
+                it.id == SearchSessionService.NOTIFICATION_ID
+            }.notification
+            assertTrue(search.actions.any { it.title?.toString() == "Остановить" })
         } finally { controller.destroy() }
+        assertFalse(SearchSessionService.isRequested())
     }
 }
