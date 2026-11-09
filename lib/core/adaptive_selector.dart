@@ -47,6 +47,9 @@ class AdaptiveSelector {
   final history = <String, List<int>>{};
   int samples = 0;
   final journal = <Map<String, dynamic>>[];
+  /// Real system-VPN successes outlive the bounded 200-event diagnostics log.
+  /// Keys are SHA-256 profile fingerprints, values carry no raw server secrets.
+  final proven = <String, List<Map<String, dynamic>>>{};
   void record(VpnServer server, NetworkContext context, String outcome,
       {int? speed, int? verifiedLatencyMs}) {
     journal.add({'time': DateTime.now().toUtc().toIso8601String(),
@@ -54,6 +57,19 @@ class AdaptiveSelector {
       'protocol': server.protocol, 'outcome': outcome, 'bytesPerSecond': speed,
       'verifiedLatencyMs': verifiedLatencyMs});
     if (journal.length > 200) journal.removeAt(0);
+    if (outcome == 'verified' || outcome == 'usable') {
+      final id = profileId(server);
+      final contexts = proven.putIfAbsent(id, () => []);
+      contexts.removeWhere((e) => e['networkKey'] == key(server, context.environmentKey));
+      contexts.insert(0, {
+        'time': DateTime.now().toUtc().toIso8601String(),
+        'networkKey': key(server, context.environmentKey),
+        'network': context.type,
+        'verifiedLatencyMs': verifiedLatencyMs,
+      });
+      if (contexts.length > 3) contexts.removeRange(3, contexts.length);
+      if (proven.length > 500) proven.remove(proven.keys.first);
+    }
   }
   String key(VpnServer s, String network) => sha256.convert(utf8.encode('$network|${s.protocol}|${s.profile}')).toString();
 
@@ -80,6 +96,14 @@ class AdaptiveSelector {
           (row['outcome'] == 'unconfirmed' || row['outcome'] == 'slow_or_unstable') &&
           age < const Duration(minutes: 10)) { return false; }
       if (row['outcome'] == 'verified' || row['outcome'] == 'usable') { return true; }
+    }
+    // Recent TCP failures do not evict verified VPN results from long-lived
+    // memory. A fresh negative on this network was handled above.
+    for (final proof in proven[id] ?? const <Map<String, dynamic>>[]) {
+      final stamp = DateTime.tryParse(proof['time']?.toString() ?? '');
+      if (stamp == null) continue;
+      final age = clock.difference(stamp.toUtc());
+      if (!age.isNegative && age < const Duration(days: 7)) { return true; }
     }
     return false;
   }
@@ -114,6 +138,20 @@ class AdaptiveSelector {
           bad += weight * .65;
         default:
           break;
+      }
+    }
+    if (good == 0) {
+      // Diagnostics may have rolled over. Preserve a weaker memory of the
+      // latest authenticated success without double-counting journal entries.
+      for (final proof in proven[id] ?? const <Map<String, dynamic>>[]) {
+        final stamp = DateTime.tryParse(proof['time']?.toString() ?? '');
+        if (stamp == null) continue;
+        final age = clock.difference(stamp.toUtc());
+        if (age.isNegative || age >= const Duration(days: 7)) continue;
+        final exact = proof['networkKey'] == sameNetwork;
+        final weight = (exact ? 1.0 : proof['network'] == context.type ? .30 : .12) /
+            (1 + age.inHours / 24.0);
+        good += weight;
       }
     }
     return (1 + good) / (2 + good + bad);
@@ -190,7 +228,8 @@ class AdaptiveSelector {
     h[0] += success ? 1 : 0; h[1]++; samples++;
     if (history.length > 500) history.remove(history.keys.firstWhere((k) => k != id));
   }
-  String encode() => jsonEncode({'version': 2, 'journal': journal, 'hidden': hidden, 'output': output, 'history': history, 'samples': samples});
+  String encode() => jsonEncode({'version': 2, 'journal': journal, 'hidden': hidden,
+    'output': output, 'history': history, 'samples': samples, 'proven': proven});
   static AdaptiveSelector decode(String? raw) {
     final model = AdaptiveSelector();
     if (raw == null) return model;
@@ -207,6 +246,23 @@ class AdaptiveSelector {
       final entries = j['journal'];
       if (entries is List && entries.length <= 200) {
         model.journal.addAll(entries.map((e) => Map<String, dynamic>.from(e as Map)));
+      }
+      final proofs = j['proven'];
+      if (proofs is Map && proofs.length <= 500) {
+        for (final entry in proofs.entries) {
+          if (entry.key is! String || (entry.key as String).length != 64 ||
+              entry.value is! List || (entry.value as List).length > 3) continue;
+          final items = <Map<String, dynamic>>[];
+          for (final row in entry.value as List) {
+            if (row is! Map) continue;
+            final parsed = Map<String, dynamic>.from(row);
+            if (parsed['networkKey'] is! String || parsed['time'] is! String ||
+                parsed['network'] is! String ||
+                DateTime.tryParse(parsed['time'] as String) == null) continue;
+            items.add(parsed);
+          }
+          if (items.isNotEmpty) model.proven[entry.key as String] = items;
+        }
       }
       model.hidden = h; model.output = o; model.history.addAll(parsed); model.samples = j['samples'] as int;
     } catch (_) { return AdaptiveSelector(); }

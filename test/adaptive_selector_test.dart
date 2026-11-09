@@ -35,6 +35,26 @@ void main() {
     expect(saved, isNot(contains('secret-profile')));
     expect(AdaptiveSelector.decode(saved).workedBefore(server, anotherWifi, now:now), isTrue);
   });
+  test('learned verified VPN survives 200 diagnostic events and restart', () {
+    final model = AdaptiveSelector();
+    const wifi = NetworkContext(type:'wifi', session:'my-net');
+    model.record(server, wifi, 'usable', verifiedLatencyMs: 72);
+    for (var i = 0; i < 240; i++) {
+      final other = VpnServer.fromJson({...server.toJson(), 'id':'other-$i',
+        'profile':'unconfirmed-profile-$i'});
+      model.record(other, wifi, 'preflight_unreachable');
+    }
+    expect(model.journal.length, 200);
+    expect(model.journal.any((e) => e['outcome'] == 'usable'), isFalse);
+    expect(model.workedBefore(server, wifi), isTrue);
+    expect(model.experienceScore(server, wifi), greaterThan(.5));
+    final saved = model.encode();
+    expect(saved, isNot(contains('secret-profile')));
+    expect(saved, isNot(contains('example.com')));
+    final copy = AdaptiveSelector.decode(saved);
+    expect(copy.workedBefore(server, wifi), isTrue);
+    expect(copy.proven.length, 1);
+  });
   test('negative preflight only defers this network for ten minutes', () {
     final selector = AdaptiveSelector();
     const network = NetworkContext(type: 'mobile');
