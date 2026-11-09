@@ -659,6 +659,9 @@ void main() {
       expect(vm.measuredBytesPerSecond, isNull);
       expect(vm.canDisconnect, isTrue);
       expect(vm.autoStatus, contains('HTTPS подтверждён'));
+      expect(vm.learningSamples, 1,
+        reason: 'Actual HTTPS through VPN must teach the model without a speed download');
+      expect(vm.learningJournal.single['outcome'], 'usable');
       await vm.disconnect();
       expect(vm.internetVerified, isFalse);
     } finally { vm.dispose(); await engine.dispose(); }
@@ -719,6 +722,50 @@ void main() {
       expect(vm.serverHealth(server)?.protocolVerified, isFalse);
       await vm.checkServerHealth();
       expect(lab.calls, 1, reason: 'Interrupted checks have a short retry cooldown');
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+  test('server lists rank only fresh authenticated HTTPS RTT above unknown ping', () async {
+    final engine = MeasuredEngine();
+    final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(),
+      networkReader: () async => 'wifi',
+      catalogLoader: () async => const PublicCatalogResult([], false, 0));
+    final fast = VpnServer.fromJson({...server.toJson(), 'id':'fast',
+      'host':'9.9.9.9','profile':server.profile.replaceAll('8.8.8.8','9.9.9.9')});
+    final slow = VpnServer.fromJson({...server.toJson(), 'id':'slow',
+      'host':'1.1.1.1','profile':server.profile.replaceAll('8.8.8.8','1.1.1.1')});
+    final unknown = VpnServer.fromJson({...server.toJson(), 'id':'unknown',
+      'host':'4.4.4.4','profile':server.profile.replaceAll('8.8.8.8','4.4.4.4')});
+    try {
+      await vm.initialize();
+      vm.health[fast.id] = HealthResult(Reachability.reachable, 45, 'HTTPS через сервер', DateTime.now());
+      vm.health[slow.id] = HealthResult(Reachability.reachable, 210, 'HTTPS через VPN', DateTime.now());
+      vm.health[unknown.id] = const HealthResult(Reachability.reachable, 2, 'TCP');
+      expect(vm.sortedServers([unknown, slow, fast]).map((s)=>s.id),
+        ['fast','slow','unknown']);
+      vm.toggleServerSort();
+      expect(vm.sortedServers([unknown, slow, fast]).map((s)=>s.id),
+        ['unknown','slow','fast']);
+      vm.toggleServerSort();
+      vm.health[fast.id] = HealthResult(Reachability.reachable, 1, 'HTTPS через сервер',
+          DateTime.now().subtract(const Duration(minutes:16)));
+      expect(vm.sortedServers([unknown, slow, fast]).map((s)=>s.id),
+        ['slow','unknown','fast']);
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+  test('manually confirmed tunnel trains without multiple duplicate entries', () async {
+    final engine = MeasuredEngine();
+    final vm = VpnViewModel(engine, MemoryProfiles(), ServerMonitor(),
+      networkReader: () async => 'wifi',
+      catalogLoader: () async => const PublicCatalogResult([], false, 0),
+      baselineMonitor: IdleBaselineMonitor());
+    try {
+      await vm.initialize();
+      await vm.connect(null);
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.internetVerified, isTrue);
+      expect(vm.learningSamples, 1);
+      expect(vm.learningJournal.single['outcome'], 'usable');
+      await vm.disconnect();
     } finally { vm.dispose(); await engine.dispose(); }
   });
   test('quick selection keeps the first measured slow connection without reconnecting', () async {

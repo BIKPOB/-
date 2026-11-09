@@ -5,6 +5,36 @@ import 'package:quiet_vpn/core/network_context.dart';
 const server = VpnServer(id: 'test', name: 'test', country: '', countryCode: '', host: 'example.com',
   port: 443, transport: 'tcp', profile: 'secret-profile', source: 'test', protocol: 'vless');
 void main() {
+  test('seven-day proof is reused across sessions with weaker cross-network weight', () {
+    final model = AdaptiveSelector();
+    const wifi = NetworkContext(type:'wifi', session:'home');
+    const anotherWifi = NetworkContext(type:'wifi', session:'work');
+    const mobile = NetworkContext(type:'mobile', session:'lte');
+    final now = DateTime.utc(2026, 11, 9, 12);
+    model.record(server, wifi, 'usable'); // actual VPN HTTPS proof, speed unknown
+    model.journal.last['time'] = now.toIso8601String();
+    expect(model.workedBefore(server, wifi, now:now), isTrue);
+    expect(model.workedBefore(server, anotherWifi, now:now), isTrue);
+    expect(model.workedBefore(server, mobile, now:now), isTrue);
+    expect(model.experienceScore(server, wifi, now:now),
+      greaterThan(model.experienceScore(server, anotherWifi, now:now)));
+    expect(model.experienceScore(server, anotherWifi, now:now),
+      greaterThan(model.experienceScore(server, mobile, now:now)));
+    expect(model.experienceScore(server, wifi, now:now), greaterThan(.5));
+    model.record(server, wifi, 'preflight_unreachable'); // weak TCP evidence only
+    model.journal.last['time'] = now.toIso8601String();
+    expect(model.workedBefore(server, wifi, now:now), isTrue);
+    model.record(server, wifi, 'unconfirmed');
+    model.journal.last['time'] = now.toIso8601String();
+    expect(model.workedBefore(server, wifi, now:now), isFalse);
+    expect(model.workedBefore(server, wifi,
+      now:now.add(const Duration(minutes:11))), isTrue);
+    expect(model.workedBefore(server, wifi,
+      now:now.add(const Duration(days:8))), isFalse);
+    final saved = model.encode();
+    expect(saved, isNot(contains('secret-profile')));
+    expect(AdaptiveSelector.decode(saved).workedBefore(server, anotherWifi, now:now), isTrue);
+  });
   test('negative preflight only defers this network for ten minutes', () {
     final selector = AdaptiveSelector();
     const network = NetworkContext(type: 'mobile');
