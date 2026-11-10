@@ -53,25 +53,26 @@ class AdaptiveSelector {
   final proven = <String, List<Map<String, dynamic>>>{};
   SourceReliability sourceReliability = SourceReliability();
   void record(VpnServer server, NetworkContext context, String outcome,
-      {int? speed, int? verifiedLatencyMs}) {
-    journal.add({'time': DateTime.now().toUtc().toIso8601String(),
+      {int? speed, int? verifiedLatencyMs, DateTime? now}) {
+    final clock = (now ?? DateTime.now()).toUtc();
+    journal.add({'time': clock.toIso8601String(),
       'profile': key(server, context.environmentKey), 'profileId': profileId(server), 'network': context.type,
       'protocol': server.protocol, 'outcome': outcome, 'bytesPerSecond': speed,
       'verifiedLatencyMs': verifiedLatencyMs});
     if (journal.length > 200) journal.removeAt(0);
     // Proxy-only and TCP preflight results never teach the system VPN policy.
     if (outcome == 'verified' || outcome == 'usable') {
-      sourceReliability.observe(server, context, verifiedVpn:true);
+      sourceReliability.observe(server, context, verifiedVpn:true, now:clock);
     } else if (outcome == 'unconfirmed' || outcome == 'slow_or_unstable') {
       sourceReliability.observe(server, context, verifiedVpn:false,
-        attemptedButUnconfirmed:true);
+        attemptedButUnconfirmed:true, now:clock);
     }
     if (outcome == 'verified' || outcome == 'usable') {
       final id = profileId(server);
       final contexts = proven.putIfAbsent(id, () => []);
       contexts.removeWhere((e) => e['networkKey'] == key(server, context.environmentKey));
       contexts.insert(0, {
-        'time': DateTime.now().toUtc().toIso8601String(),
+        'time': clock.toIso8601String(),
         'networkKey': key(server, context.environmentKey),
         'network': context.type,
         'verifiedLatencyMs': verifiedLatencyMs,
