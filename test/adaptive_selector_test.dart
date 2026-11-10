@@ -40,8 +40,7 @@ void main() {
     const anotherWifi = NetworkContext(type:'wifi', session:'work');
     const mobile = NetworkContext(type:'mobile', session:'lte');
     final now = DateTime.utc(2026, 11, 9, 12);
-    model.record(server, wifi, 'usable'); // actual VPN HTTPS proof, speed unknown
-    model.journal.last['time'] = now.toIso8601String();
+    model.record(server, wifi, 'usable', now:now); // actual VPN HTTPS proof, speed unknown
     expect(model.workedBefore(server, wifi, now:now), isTrue);
     expect(model.workedBefore(server, anotherWifi, now:now), isTrue);
     expect(model.workedBefore(server, mobile, now:now), isTrue);
@@ -50,11 +49,9 @@ void main() {
     expect(model.experienceScore(server, anotherWifi, now:now),
       greaterThan(model.experienceScore(server, mobile, now:now)));
     expect(model.experienceScore(server, wifi, now:now), greaterThan(.5));
-    model.record(server, wifi, 'preflight_unreachable'); // weak TCP evidence only
-    model.journal.last['time'] = now.toIso8601String();
+    model.record(server, wifi, 'preflight_unreachable', now:now); // weak TCP evidence only
     expect(model.workedBefore(server, wifi, now:now), isTrue);
-    model.record(server, wifi, 'unconfirmed');
-    model.journal.last['time'] = now.toIso8601String();
+    model.record(server, wifi, 'unconfirmed', now:now);
     expect(model.workedBefore(server, wifi, now:now), isFalse);
     expect(model.workedBefore(server, wifi,
       now:now.add(const Duration(minutes:11))), isTrue);
