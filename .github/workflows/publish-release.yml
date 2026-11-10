@@ -134,6 +134,15 @@ jobs:
           '''.replace('\n          ', '\n'))
           with open(os.environ['GITHUB_ENV'], 'a') as f: f.write(f'RELEASE_TAG=v{version}\n')
           PY
+      - name: Use release notes for the verified source version
+        if: steps.builds.outputs.ready == 'true'
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          if gh api "repos/$GH_REPO/contents/docs/releases/$VERSION.md?ref=$SOURCE_SHA" --jq .content > version-notes.b64; then
+            base64 --decode version-notes.b64 > version-notes.md
+            printf '\n[Android CI](https://github.com/%s/actions/runs/%s) · [Windows CI](https://github.com/%s/actions/runs/%s)\n' "$GH_REPO" "$ANDROID_RUN" "$GH_REPO" "$WINDOWS_RUN" >> version-notes.md
+            mv version-notes.md notes.md
+          fi
       - name: Publish immutable versioned release
         if: steps.builds.outputs.ready == 'true'
         run: |

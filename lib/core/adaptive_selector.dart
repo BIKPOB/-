@@ -95,6 +95,17 @@ class AdaptiveSelector {
     final clock = (now ?? DateTime.now()).toUtc();
     final sameNetwork = key(server, context.environmentKey);
     final id = profileId(server);
+    // A newer success on another network must not hide a recent failure here.
+    // Only a subsequent confirmed VPN on this exact network clears the cooldown.
+    for (final row in journal.reversed) {
+      if (row['profile'] != sameNetwork) continue;
+      final stamp = DateTime.tryParse(row['time']?.toString() ?? '');
+      if (stamp == null) continue;
+      final age = clock.difference(stamp.toUtc());
+      if (age.isNegative || age >= const Duration(minutes: 10)) continue;
+      if (row['outcome'] == 'verified' || row['outcome'] == 'usable') break;
+      if (row['outcome'] == 'unconfirmed' || row['outcome'] == 'slow_or_unstable') return false;
+    }
     for (final row in journal.reversed) {
       if (row['profile'] != sameNetwork && row['profileId'] != id) continue;
       final stamp = DateTime.tryParse(row['time']?.toString() ?? '');
@@ -255,7 +266,19 @@ class AdaptiveSelector {
       if (parsed.values.any((r) => r.length != 2 || r[0] < 0 || r[1] < r[0])) return model;
       final entries = j['journal'];
       if (entries is List && entries.length <= 200) {
-        model.journal.addAll(entries.map((e) => Map<String, dynamic>.from(e as Map)));
+        for (final entry in entries) {
+          if (entry is! Map || entry.keys.any((key) => key is! String)) continue;
+          final row = Map<String, dynamic>.from(entry);
+          if (row['time'] is! String || DateTime.tryParse(row['time'] as String) == null ||
+              row['profile'] is! String || row['network'] is! String ||
+              row['protocol'] is! String || row['outcome'] is! String) continue;
+          var valid = true;
+          for (final field in ['bytesPerSecond', 'verifiedLatencyMs']) {
+            final value = row[field];
+            if (value != null && (value is! num || !value.isFinite || value < 0)) valid = false;
+          }
+          if (valid) model.journal.add(row);
+        }
       }
       final proofs = j['proven'];
       if (proofs is Map && proofs.length <= 500) {

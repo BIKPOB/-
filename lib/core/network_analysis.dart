@@ -71,7 +71,10 @@ class NetworkAnalyzer {
       request.followRedirects=false;
       request.headers.set('Accept-Encoding','identity');
       final response=await request.close();
-      if(response.statusCode != 200 && response.statusCode != 204) throw const HttpException('HTTP status');
+      // Connectivity endpoints have an exact contract. A 200 error/portal
+      // page must not become a green HTTPS health result; downloads need 200.
+      final expectedStatus = bytes > 0 || uri.path != '/generate_204' ? 200 : 204;
+      if(response.statusCode != expectedStatus) throw const HttpException('HTTP status');
       var received=0;
       await for(final chunk in response) {
         if(token != _epoch) throw const HttpException('Cancelled');

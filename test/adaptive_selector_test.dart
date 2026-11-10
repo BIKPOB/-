@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quiet_vpn/core/adaptive_selector.dart';
 import 'package:quiet_vpn/core/models.dart';
@@ -5,6 +6,34 @@ import 'package:quiet_vpn/core/network_context.dart';
 const server = VpnServer(id: 'test', name: 'test', country: '', countryCode: '', host: 'example.com',
   port: 443, transport: 'tcp', profile: 'secret-profile', source: 'test', protocol: 'vless');
 void main() {
+  test('cross-network success does not hide a fresh local VPN failure', () {
+    final model = AdaptiveSelector();
+    const wifi = NetworkContext(type:'wifi', session:'home');
+    const mobile = NetworkContext(type:'mobile', session:'lte');
+    model.record(server, wifi, 'unconfirmed');
+    model.record(server, mobile, 'usable', verifiedLatencyMs:50);
+    expect(model.workedBefore(server, wifi), isFalse);
+    expect(model.workedBefore(server, mobile), isTrue);
+    model.record(server, wifi, 'verified', verifiedLatencyMs:70);
+    expect(model.workedBefore(server, wifi), isTrue);
+  });
+  test('damaged journal rows cannot crash ranking or discard valid training', () {
+    final model = AdaptiveSelector()..observe(server, 'wifi', 50, success:true);
+    const wifi = NetworkContext(type:'wifi');
+    model.record(server, wifi, 'usable', speed:90000, verifiedLatencyMs:50);
+    final encoded = jsonDecode(model.encode()) as Map<String,dynamic>;
+    final valid = (encoded['journal'] as List).single as Map;
+    (encoded['journal'] as List).addAll([
+      {...valid, 'bytesPerSecond':'broken'},
+      {...valid, 'verifiedLatencyMs':-1},
+      42,
+    ]);
+    final restored = AdaptiveSelector.decode(jsonEncode(encoded));
+    expect(restored.samples, 1);
+    expect(restored.journal.length, 1);
+    expect(restored.recentSpeed(server, wifi), 90000);
+    expect(restored.score(server, 'wifi', 50), model.score(server, 'wifi', 50));
+  });
   test('seven-day proof is reused across sessions with weaker cross-network weight', () {
     final model = AdaptiveSelector();
     const wifi = NetworkContext(type:'wifi', session:'home');
