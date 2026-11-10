@@ -271,7 +271,7 @@ class AdaptiveSelector {
           final row = Map<String, dynamic>.from(entry);
           if (row['time'] is! String || DateTime.tryParse(row['time'] as String) == null ||
               row['profile'] is! String || row['network'] is! String ||
-              row['protocol'] is! String || row['outcome'] is! String) continue;
+              row['protocol'] is! String || row['outcome'] is! String) { continue; }
           var valid = true;
           for (final field in ['bytesPerSecond', 'verifiedLatencyMs']) {
             final value = row[field];
