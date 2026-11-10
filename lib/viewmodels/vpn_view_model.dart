@@ -603,11 +603,12 @@ class VpnViewModel extends ChangeNotifier {
         _labStorage['rotation'] = rotationData;
         await _saveLab();
       }
+      final rankingTime = DateTime.now();
       int priority(VpnServer server) {
         if (_healthContext?.sameConnection(context) == true && serverHealth(server)?.protocolVerified == true) return 1;
-        final speed = _selector.recentSpeed(server, context);
+        final speed = _selector.recentSpeed(server, context, now:rankingTime);
         if (_requiresSpeed && speed > 0 && speed < targetBytesPerSecond) return -1;
-        return _selector.recentPriority(server, context);
+        return _selector.recentPriority(server, context, now:rankingTime);
       }
       int rank(VpnServer a, VpnServer b, Map<String, HealthResult>? latency) {
         final recent = priority(b).compareTo(priority(a));
@@ -622,14 +623,14 @@ class VpnViewModel extends ChangeNotifier {
         if (reachable != 0) return reachable;
         if (adaptiveRankingEnabled) {
           final source = _selector.sourceReliability;
-          final sourceRank = source.estimate(b, context).optimistic
-              .compareTo(source.estimate(a, context).optimistic);
+          final sourceRank = source.estimate(b, context, now:rankingTime).optimistic
+              .compareTo(source.estimate(a, context, now:rankingTime).optimistic);
           if (sourceRank != 0) return sourceRank;
         }
-        final experience = _selector.experienceScore(b, context)
-            .compareTo(_selector.experienceScore(a, context));
+        final experience = _selector.experienceScore(b, context, now:rankingTime)
+            .compareTo(_selector.experienceScore(a, context, now:rankingTime));
         if (experience != 0) return experience;
-        final speed = _selector.recentSpeed(b, context).compareTo(_selector.recentSpeed(a, context));
+        final speed = _selector.recentSpeed(b, context, now:rankingTime).compareTo(_selector.recentSpeed(a, context, now:rankingTime));
         if (speed != 0) return speed;
         // TCP timing is a cheap tie-breaker for preflight order only.
         // It is never stored or displayed as authenticated VPN ping.
@@ -712,23 +713,23 @@ class VpnViewModel extends ChangeNotifier {
         // A bounded UCB-like source estimator ranks other source/protocol
         // pairs and one slot explores an under-observed source.
         final historical = pool.where((s) =>
-          s.protocol != 'wireguard' && _selector.workedBefore(s, context)).toList()
+          s.protocol != 'wireguard' && _selector.workedBefore(s, context, now:rankingTime)).toList()
             ..sort((a, b) {
               final order = rank(a, b, null);
-              return order != 0 ? order : _selector.experienceScore(b, context)
-                  .compareTo(_selector.experienceScore(a, context));
+              return order != 0 ? order : _selector.experienceScore(b, context, now:rankingTime)
+                  .compareTo(_selector.experienceScore(a, context, now:rankingTime));
             });
         final source = _selector.sourceReliability;
         ordered = ContextualSearchPlanner.quick(
           baseline: rotate(quickMix),
           historical: historical,
           desirability: (s) {
-            final old = _selector.experienceScore(s, context);
+            final old = _selector.experienceScore(s, context, now:rankingTime);
             final model = _selector.score(s, network, null, context:context);
-            final sourceValue = source.estimate(s, context).optimistic;
+            final sourceValue = source.estimate(s, context, now:rankingTime).optimistic;
             return .50 * old + .35 * sourceValue + .15 * model;
           },
-          sourceExposure: (s) => source.estimate(s, context).exposure,
+          sourceExposure: (s) => source.estimate(s, context, now:rankingTime).exposure,
         );
       }
       if(deep && engine is CandidateHost && !ordered.any((s) => priority(s) == 1)) {

@@ -106,9 +106,17 @@ class ContextualSearchPlanner {
     void add(VpnServer s) { if (result.length < limit && used.add(key(s))) { result.add(s); } }
     // At most two proven profiles; the remaining candidates still explore.
     for (final s in historical.take(2)) { add(s); }
+    // Read changing/decaying evidence once per profile. Re-evaluating it inside
+    // a comparator can make the same pair change order during one sort.
+    final scores = <String, double>{};
+    final exposures = <String, double>{};
+    for (final server in baseline) {
+      scores.putIfAbsent(key(server), () => desirability(server));
+      exposures.putIfAbsent(key(server), () => sourceExposure(server));
+    }
     final candidates = baseline.asMap().entries.toList();
     candidates.sort((a, b) {
-      final delta = desirability(b.value).compareTo(desirability(a.value));
+      final delta = scores[key(b.value)]!.compareTo(scores[key(a.value)]!);
       return delta != 0 ? delta : a.key.compareTo(b.key);
     });
     // Hold one position for a less-tested source if one exists.
@@ -127,7 +135,7 @@ class ContextualSearchPlanner {
     if (result.length < limit) {
       final remaining = baseline.asMap().entries.where((e) => !used.contains(key(e.value))).toList();
       remaining.sort((a, b) {
-        final c = sourceExposure(a.value).compareTo(sourceExposure(b.value));
+        final c = exposures[key(a.value)]!.compareTo(exposures[key(b.value)]!);
         return c != 0 ? c : a.key.compareTo(b.key);
       });
       if (remaining.isNotEmpty) add(remaining.first.value);

@@ -9,6 +9,24 @@ VpnServer candidate(String name, String source, {String protocol = 'vless'}) =>
     profile:'$protocol://$name.example:443', source:source, protocol:protocol);
 
 void main() {
+  test('ranking snapshots changing evidence and deduplicates repeated profiles', () {
+    final servers = [for (var i = 0; i < 8; i++) candidate('s$i', 'source-$i')];
+    final reads = <String,int>{}, exposureReads = <String,int>{};
+    final plan = ContextualSearchPlanner.quick(
+      baseline:[...servers, servers.first], historical:[],
+      desirability:(s) {
+        reads[s.id] = (reads[s.id] ?? 0) + 1;
+        if (reads[s.id]! > 1) throw StateError('Evidence changed during sort');
+        return int.parse(s.id.substring(1)) / 10;
+      },
+      sourceExposure:(s) {
+        exposureReads[s.id] = (exposureReads[s.id] ?? 0) + 1;
+        if (exposureReads[s.id]! > 1) throw StateError('Exposure changed during sort');
+        return 0;
+      },
+    );
+    expect(plan.map((s) => s.id), ['s7','s6','s5','s4','s3','s0']);
+  });
   const wifi = NetworkContext(type:'wifi', session:'home');
   const mobile = NetworkContext(type:'mobile', session:'lte');
   test('source learning uses only real VPN verification and weak failure penalties', () {
