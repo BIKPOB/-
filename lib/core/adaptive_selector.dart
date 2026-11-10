@@ -275,7 +275,9 @@ class AdaptiveSelector {
           var valid = true;
           for (final field in ['bytesPerSecond', 'verifiedLatencyMs']) {
             final value = row[field];
-            if (value != null && (value is! num || !value.isFinite || value < 0)) valid = false;
+            if (value != null && (value is! num || !value.isFinite || value < 0)) {
+              valid = false;
+            }
           }
           if (valid) model.journal.add(row);
         }
