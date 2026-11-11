@@ -155,6 +155,19 @@ class HealthLabFixture extends CandidateLab {
     return [for(final server in candidates) CandidateResult(server,42,[],null)];
   }
 }
+class CountingHealthBatch extends HealthLabFixture {
+  CountingHealthBatch(super.host,this.onBatch);
+  final void Function(int) onBatch;
+  @override Future<List<CandidateResult>> run(List<VpnServer> candidates,{required bool deep,
+    required bool metered,bool healthOnly=false,int target=131072,NetworkAnalysis? analysis,
+    SelectionPolicy policy=const SelectionPolicy(),required Future<bool> Function() routeValid,
+    required void Function(String) status,void Function(CandidateResult)? onResult,
+    Future<void> Function(List<VpnServer>)? onAttempt}) async {
+    onBatch(candidates.length);
+    return super.run(candidates,deep:deep,metered:metered,healthOnly:healthOnly,
+      routeValid:routeValid,status:status);
+  }
+}
 class EmptyHealthLabFixture extends HealthLabFixture {
   EmptyHealthLabFixture(super.host);
   @override Future<List<CandidateResult>> run(List<VpnServer> candidates,{required bool deep,
@@ -225,6 +238,13 @@ class ReserveEngine extends DesktopSpeedEngine implements ReserveCandidateHost {
   @override Future<void> startReserveCandidates(String configuration) async {}
   @override Future<void> stopCandidates() async {}
 }
+class PhysicalHealthEngine extends ReserveEngine {
+  bool foreign = false;
+  @override Future<NetworkContext> readNetwork() async => NetworkContext(
+    type:'wifi', session:'physical-home', metered:false,
+    vpnPresent:connects > disconnects || foreign, ownVpn:connects > disconnects,
+    foreignVpn:foreign);
+}
 class DelayedRecoveryEngine extends ReserveEngine {
   final recoveryStarted = Completer<void>();
   final releaseRecovery = Completer<void>();
@@ -292,6 +312,44 @@ class StalledSearchEngine extends ControlledEngine {
   @override Future<void> connect(VpnServer server, Credentials? credentials) async { connects++; }
 }
 void main() {
+  test('health sweep uses the independent physical route while own VPN stays up', () async {
+    final engine=PhysicalHealthEngine();
+    CandidateHost? usedHost;
+    final vm=VpnViewModel(engine,MemoryProfiles(),ServerMonitor(),
+      healthLabFactory:(host) { usedHost=host; return HealthLabFixture(host); },
+      baselineMonitor:IdleBaselineMonitor(),networkAnalyzer:CountingNetworkAnalyzer(),
+      catalogLoader:()async=>const PublicCatalogResult([],false,0));
+    try {
+      await vm.initialize();
+      await vm.connect(null);
+      await Future<void>.delayed(Duration.zero);
+      expect(vm.state,ConnectionState.connected);
+      await vm.checkServerHealth();
+      expect(usedHost,isA<ReserveHostAdapter>());
+      expect(engine.disconnects,0);
+      expect(vm.serverHealth(server)?.protocolVerified,isTrue);
+      engine.foreign=true;
+      usedHost=null;
+      await vm.checkServerHealth();
+      expect(usedHost,isNull);
+      expect(vm.serverHealth(server)?.protocolVerified,isNot(true));
+      expect(engine.disconnects,0);
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
+  test('health sweep schedules twelve profiles per unmetered physical batch', () async {
+    final engine=PhysicalHealthEngine();
+    var count=0;
+    final candidates=[for(var i=0;i<15;i++) VpnServer.fromJson({...server.toJson(),
+      'id':'health-$i','profile':server.profile.replaceFirst('8.8.8.8','8.8.4.${i+1}')})];
+    final vm=VpnViewModel(engine,MemoryProfiles(),ServerMonitor(),
+      healthLabFactory:(host)=>CountingHealthBatch(host,(value)=>count=value),
+      baselineMonitor:IdleBaselineMonitor(),networkAnalyzer:CountingNetworkAnalyzer(),
+      catalogLoader:()async=>PublicCatalogResult(candidates,false,0));
+    try {
+      await vm.initialize(); await vm.checkServerHealth();
+      expect(count,12);
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   test('network ownership distinguishes our VPN from a foreign VPN', () {
     expect(NetworkContext.fromMap({'vpnPresent':true, 'ownVpn':true, 'foreignVpn':false}).hasForeignVpn, isFalse);
     expect(NetworkContext.fromMap({'vpnPresent':true, 'ownVpn':true, 'foreignVpn':true}).hasForeignVpn, isTrue);

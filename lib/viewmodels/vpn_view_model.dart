@@ -359,7 +359,10 @@ class VpnViewModel extends ChangeNotifier {
     if (_stopInFlight != null) return _stopInFlight!;
     // Never trap the power button indefinitely if a native MethodChannel
     // does not finish. A timeout is NOT proof that the VPN was stopped.
-    final pending = engine.disconnect().timeout(const Duration(seconds: 12));
+    final pending = (() async {
+      await _stopHealthChecks();
+      await engine.disconnect().timeout(const Duration(seconds: 12));
+    })();
     return _stopInFlight = pending.whenComplete(() => _stopInFlight = null);
   }
 
@@ -1025,6 +1028,8 @@ class VpnViewModel extends ChangeNotifier {
     bool live() => !_disposed && reserveEnabled && _reserveAllowed && token==_reserveEpoch &&
       session==_connectionEpoch && !autoSelecting && !busy && state==ConnectionState.connected;
     try {
+      await _stopHealthChecks();
+      if (!live()) return;
       final context=await _network();
       if (!live() || context.ambiguous || context.type=='offline') return;
       if (_reserveNetwork!=null && !_reserveNetwork!.sameConnection(context)) {
@@ -1119,7 +1124,7 @@ class VpnViewModel extends ChangeNotifier {
         } finally { autoSelecting=false; _reserve=null; _reserveTime=null; }
       }
     } catch (_) { reserveStatus='Резерв не подтверждён; повтор позже, текущий VPN не переключается'; }
-    finally { _reserveBusy=false; if (!_disposed) {_notify(); _scheduleReserve();} }
+    finally { _reserveLab=null; _reserveBusy=false; if (!_disposed) {_notify(); _scheduleReserve(); _scheduleBackgroundPreflight();} }
   }
 
   String? reconnectAdvice;
@@ -1303,16 +1308,21 @@ class VpnViewModel extends ChangeNotifier {
     // Only a user-initiated AI search uses the bounded native search service
     // and CPU wake lock. Idle health sweeps remain foreground-app only.
   }
+  bool get _healthCanUsePhysicalRoute => _nativeNeedsStop &&
+      state == ConnectionState.connected && internetVerified &&
+      engine is ReserveCandidateHost && activeServer?.protocol != 'wireguard' &&
+      !_stopping;
   void _scheduleBackgroundPreflight({bool immediate = false}) {
     _backgroundTimer?.cancel();
-    if ((!_foreground && !_desktop) || _disposed || !ready || autoSelecting || busy ||
-        _nativeNeedsStop || _healthStopping != null || engine is! CandidateHost) { return; }
+    if ((!_foreground && !_desktop) || _disposed || !ready || autoSelecting || busy || _reserveBusy ||
+        (_nativeNeedsStop && !_healthCanUsePhysicalRoute) || _healthStopping != null || engine is! CandidateHost) { return; }
     if (_healthPending != null) return;
-    _backgroundTimer = Timer(Duration(seconds: immediate ? 3 : networkContext.metered == false ? 1 : 10),
+    _backgroundTimer = Timer(Duration(milliseconds: immediate ? 200 : 1000),
       () => unawaited(checkServerHealth()));
   }
   Future<void> checkServerHealth() async {
-    if (_disposed || !ready || busy || autoSelecting || _nativeNeedsStop ||
+    if (_disposed || !ready || busy || autoSelecting || _reserveBusy ||
+        (_nativeNeedsStop && !_healthCanUsePhysicalRoute) ||
         (!_foreground && !_desktop) || engine is! CandidateHost || _healthStopping != null) { return; }
     if (_healthPending != null) { await _healthPending; return; }
     _backgroundTimer?.cancel();
@@ -1320,10 +1330,15 @@ class VpnViewModel extends ChangeNotifier {
       final done = Completer<void>(); _healthPending = done.future;
       try {
         if (analyzingNetwork) return;
+        final connected = _healthCanUsePhysicalRoute;
+        final connectionEpoch = _connectionEpoch;
         final context = await _network();
-        bool live() => token == _backgroundEpoch && !_disposed && !autoSelecting && !busy && !_nativeNeedsStop && (_foreground || _desktop);
+        bool routeSafe(NetworkContext current) => !current.ambiguous && current.type != 'offline' &&
+          (connected ? current.ownVpn && !current.hasForeignVpn : !current.vpnPresent);
+        bool live() => token == _backgroundEpoch && !_disposed && !autoSelecting && !busy && !_stopping && connectionEpoch == _connectionEpoch &&
+          (connected ? _healthCanUsePhysicalRoute : !_nativeNeedsStop) && (_foreground || _desktop);
         if (!live()) return;
-        if (context.vpnPresent || context.ambiguous || context.type == 'offline') {
+        if (!routeSafe(context)) {
           _protocolHealth.clear(); _backgroundHealth.clear(); health.clear();
           backgroundStatus = 'Проверка серверов: ожидание прямого маршрута без VPN'; return;
         }
@@ -1331,7 +1346,7 @@ class VpnViewModel extends ChangeNotifier {
           _protocolHealth.clear(); _backgroundHealth.clear(); health.clear();
         }
         _healthContext = context;
-        _healthCatalog ??= (await _catalogLoader()).servers;
+        _healthCatalog ??= (await _quickCatalogLoader()).servers;
         if (!live()) return;
         final unique = <String,VpnServer>{};
         for (final server in [..._imports,..._healthCatalog!]) {
@@ -1365,19 +1380,37 @@ class VpnViewModel extends ChangeNotifier {
           if (bt == null) return 1;
           return at.compareTo(bt);
         });
-        final batch = candidates.take(context.metered == true ? 1 : 3).toList();
+        final batch = candidates.take(context.metered == false ? 12 : 6).toList();
         backgroundStatus = 'HTTPS через сервер: $backgroundChecked/$backgroundTotal · проверка ${batch.length}'; _notify();
-        final lab = _healthLabFactory?.call(engine as CandidateHost) ?? CandidateLab(engine as CandidateHost); _healthLab = lab;
+        final host = connected ? ReserveHostAdapter(engine as ReserveCandidateHost) : engine as CandidateHost;
+        final lab = _healthLabFactory?.call(host) ?? CandidateLab(host); _healthLab = lab;
+        final publications = <Future<void>>[];
+        Future<void> publish(CandidateResult result) async {
+          try {
+            final current = await _network();
+            if (!live() || !routeSafe(current) || !context.sameConnection(current)) return;
+            final success = result.error == null && result.latencyMs != null;
+            _protocolHealth[ConnectionStrategy.profileKey(result.server)] =
+              HealthResult(success ? Reachability.reachable : Reachability.unreachable,
+                result.latencyMs, success ? 'HTTPS через сервер' : result.error ?? 'HTTPS не подтверждён', DateTime.now());
+            _notify();
+          } catch (_) { /* Final route check controls the completed batch. */ }
+        }
         final results = await lab.run(batch,deep:false,metered:context.metered != false,healthOnly:true,
-          policy:const SelectionPolicy(fastCandidates:3,fastSeconds:30),
+          policy:const SelectionPolicy(fastCandidates:12,fastSeconds:30),
+          onResult:(result) { publications.add(publish(result)); },
           routeValid:() async {
             if (!live()) return false;
             final current = await _network();
-            return live() && !current.vpnPresent && !current.ambiguous && context.sameConnection(current);
+            return live() && routeSafe(current) && context.sameConnection(current);
           },status:(_) {});
+        await Future.wait(publications);
         if (!live()) return;
         final current = await _network();
-        if (!live() || current.vpnPresent || !context.sameConnection(current)) return;
+        if (!live()) return;
+        if (!routeSafe(current) || !context.sameConnection(current)) {
+          _protocolHealth.clear(); _backgroundHealth.clear(); health.clear(); return;
+        }
         for (final server in batch) {
           final matches = results.where((result)=>result.server.id==server.id);
           final result = matches.isEmpty ? null : matches.first;
@@ -1494,7 +1527,7 @@ class VpnViewModel extends ChangeNotifier {
       final failure = _pendingFailure;
       _pendingFailure = null;
       if (failure != null && (!selectedAutomatically || selectionEpoch == _autoEpoch)) await _fail(failure);
-      _notify();
+      _scheduleBackgroundPreflight(); _notify();
     }
   }
   void _onEvent(EngineEvent event) {
@@ -1517,7 +1550,7 @@ class VpnViewModel extends ChangeNotifier {
           if (internetVerified && event.latencyMs != null &&
               event.latencyMs! >= 0) { _rememberVerifiedHealth(event.latencyMs!); }
           if (!autoSelecting && internetVerified) { _learnManualConnection(); }
-          _scheduleTraffic(); _notify();
+          _scheduleTraffic(); _scheduleBackgroundPreflight(); _notify();
           // Windows already measured HTTPS through this VPN before emitting
           // connected. Reuse that proof; never run an expensive second probe.
           if (engine is DesktopCapabilities && event.latencyMs != null &&

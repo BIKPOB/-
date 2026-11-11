@@ -155,6 +155,17 @@ Future<void> rotationIntegration() async {
   }
 }
 Future<void> main() async {
+  for (final metered in [false,true]) {
+    final host=Host(), reports=<CandidateResult>[];
+    final probe=Probe(host);
+    final results=await CandidateLab(host,probe:probe).run(
+      [for(var i=1;i<=12;i++) fixture(i)],deep:false,metered:metered,healthOnly:true,
+      policy:const SelectionPolicy(fastCandidates:12,fastSeconds:30),
+      routeValid:()async=>true,status:(_){},onResult:reports.add);
+    check(results.length==12 && reports.length==12,'Health sweep lost results');
+    check(probe.maxHandshakes==(metered?6:12),'Health concurrency limit changed');
+    check(probe.rounds.isEmpty && !host.running,'Health sweep leaked or downloaded speed payloads');
+  }
   final healthHost=Host();
   // The probe observes the same isolated core as the lab.
   final actualProbe=Probe(healthHost);

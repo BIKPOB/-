@@ -24,7 +24,7 @@ class CandidateResult {
 
 class CandidateConfig {
   static Map<String,dynamic> build(List<({String profile,String endpoint,int port})> entries) {
-    if(entries.isEmpty || entries.length>3 || entries.map((e)=>e.port).toSet().length!=entries.length) throw const FormatException('Некорректная группа проверки');
+    if(entries.isEmpty || entries.length>12 || entries.map((e)=>e.port).toSet().length!=entries.length) throw const FormatException('Некорректная группа проверки');
     return {
       'log':{'loglevel':'none'},
       'inbounds':[for(var i=0;i<entries.length;i++) {'tag':'lab-$i','listen':'127.0.0.1',
@@ -48,7 +48,8 @@ class CandidateConfig {
   }
 }
 
-/// At most three proxy handshakes concurrently; speed transfers are sequential
+/// Health sweeps use up to twelve handshakes; speed comparisons keep three.
+/// Speed transfers are sequential
 /// to avoid grading each server against traffic from the other candidates.
 class CandidateLab {
   CandidateLab(this.host, {NetworkAnalyzer? probe}) : _probe=probe??NetworkAnalyzer();
@@ -94,6 +95,7 @@ class CandidateLab {
     try {
       if(!await validRoute()) throw StateError('Маршрут изменился до проверки');
       final pool=candidates.where((s)=>s.protocol!='wireguard').take(deep?policy.deepCandidates:policy.fastCandidates).toList();
+      final groupSize=healthOnly ? (metered ? 6 : 12) : 3;
       final timeout=analysis?.candidateTimeout??const Duration(seconds:6);
       final rounds=deep || analysis?.extraSpeedSample==true?3:2;
       var speedTests=0, qualified=0;
@@ -132,19 +134,25 @@ class CandidateLab {
           return;
         }
         try {
-          update('Параллельная проверка HTTPS: ${entries.length} кандидата · системный VPN выключен');
+          update('Параллельная проверка HTTPS: ${entries.length} кандидата · отдельный проверочный прокси');
           final passing=<({VpnServer server,int port,int latency})>[];
           await Future.wait(entries.map((e) async {
             try {
               // Domain request traverses HTTP CONNECT and resolves at the proxy,
               // not via the application's direct resolver.
               final latency=await _probe.https(Uri.parse('https://www.gstatic.com/generate_204'),proxyPort:e.port,timeout:timeout);
-              if(live()) passing.add((server:e.server,port:e.port,latency:latency));
+              if(live()) {
+                if (healthOnly) { record(CandidateResult(e.server,latency,[],null)); }
+                else { passing.add((server:e.server,port:e.port,latency:latency)); }
+              }
             } catch(first) {
               if(!live()) return;
               try {
                 final latency=await _probe.https(Uri.parse('https://cp.cloudflare.com/generate_204'),proxyPort:e.port,timeout:timeout);
-                if(live()) passing.add((server:e.server,port:e.port,latency:latency));
+                if(live()) {
+                  if (healthOnly) { record(CandidateResult(e.server,latency,[],null)); }
+                  else { passing.add((server:e.server,port:e.port,latency:latency)); }
+                }
               } catch(second) {if(live()) record(CandidateResult(e.server,null,[], 'HTTPS через прокси: ${first.runtimeType}/${second.runtimeType}'));}
             }
           }));
@@ -175,8 +183,8 @@ class CandidateLab {
           }
         } finally {await _stop();}
       }
-      for(var i=0;i<pool.length && live();i+=3) {
-        await group(pool.sublist(i,min(i+3,pool.length)));
+      for(var i=0;i<pool.length && live();i+=groupSize) {
+        await group(pool.sublist(i,min(i+groupSize,pool.length)));
         if(speedTests>=maxSpeedTests || remainingSamples<rounds || comparisonDone()) break;
       }
       if(token!=_epoch && clock.elapsed<budget) return [];

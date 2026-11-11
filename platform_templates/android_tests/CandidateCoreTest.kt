@@ -20,6 +20,13 @@ class CandidateCoreTest {
             catch (_: IllegalArgumentException) { }
         }
     }
+    @Test fun healthSweepAllowsTwelveButRejectsThirteen() {
+        fun config(count: Int) = """{"inbounds":[""" +
+            (1..count).joinToString(",") { """{"listen":"127.0.0.1","port":${31000 + it},"protocol":"http"}""" } + "]}"
+        QuietCandidateCore.validate(config(12))
+        try { QuietCandidateCore.validate(config(13)); fail("Unbounded health sweep") }
+        catch (_: IllegalArgumentException) { }
+    }
     @Test fun networkPseudonymsAreLocalAndDistinct() {
         val a = NetworkIdentity.hash("install-a", "wifi|3")
         assertEquals(a, NetworkIdentity.hash("install-a", "wifi|3"))

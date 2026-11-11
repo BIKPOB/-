@@ -40,7 +40,7 @@ public final class QuietCandidateCore {
         if (config.length() > 131072) throw new IllegalArgumentException("Config too large");
         JSONObject root = new JSONObject(config);
         JSONArray inbounds = root.getJSONArray("inbounds");
-        if (inbounds.length() < 1 || inbounds.length() > 3) throw new IllegalArgumentException("Inbound count");
+        if (inbounds.length() < 1 || inbounds.length() > 12) throw new IllegalArgumentException("Inbound count");
         for (int i = 0; i < inbounds.length(); i++) {
             JSONObject in = inbounds.getJSONObject(i);
             int port = in.getInt("port");
