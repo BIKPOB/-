@@ -1341,6 +1341,7 @@ class VpnViewModel extends ChangeNotifier {
           (connected ? _healthCanUsePhysicalRoute : !_nativeNeedsStop) && (_foreground || _desktop);
         if (!live()) return;
         if (!routeSafe(context)) {
+          _healthQueueIdle = true;
           _protocolHealth.clear(); _backgroundHealth.clear(); health.clear();
           backgroundStatus = 'Проверка серверов: ожидание прямого маршрута без VPN'; return;
         }
@@ -1441,7 +1442,10 @@ class VpnViewModel extends ChangeNotifier {
         backgroundChecked += batch.length;
         backgroundStatus = 'HTTPS через сервер: $backgroundChecked/$backgroundTotal · подтверждено ${_protocolHealth.values.where((v)=>v.protocolVerified).length}';
       } catch (_) {
-        if (token == _backgroundEpoch) backgroundStatus = 'Проверка серверов отложена: движок или маршрут недоступен';
+        if (token == _backgroundEpoch) {
+          _healthQueueIdle = true;
+          backgroundStatus = 'Проверка серверов отложена: движок или маршрут недоступен';
+        }
       } finally {
         _healthLab = null; _healthPending = null; done.complete();
         if (!_disposed) { _notify(); if (token == _backgroundEpoch) _scheduleBackgroundPreflight(); }
