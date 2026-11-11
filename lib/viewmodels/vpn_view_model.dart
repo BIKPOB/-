@@ -155,6 +155,7 @@ class VpnViewModel extends ChangeNotifier {
   final Map<String, HealthResult> _protocolHealth = {};
   NetworkContext? _healthContext;
   int backgroundChecked = 0, backgroundTotal = 0;
+  bool _healthQueueIdle = false;
   HealthResult? serverHealth(VpnServer server) => _protocolHealth[ConnectionStrategy.profileKey(server)] ?? health[server.id];
   void registerHealthCatalog(List<VpnServer> catalog) {
     _healthCatalog = catalog;
@@ -1317,7 +1318,7 @@ class VpnViewModel extends ChangeNotifier {
     if ((!_foreground && !_desktop) || _disposed || !ready || autoSelecting || busy || _reserveBusy ||
         (_nativeNeedsStop && !_healthCanUsePhysicalRoute) || _healthStopping != null || engine is! CandidateHost) { return; }
     if (_healthPending != null) return;
-    _backgroundTimer = Timer(Duration(milliseconds: immediate ? 200 : 1000),
+    _backgroundTimer = Timer(Duration(milliseconds: immediate ? 200 : _healthQueueIdle ? 30000 : 1000),
       () => unawaited(checkServerHealth()));
   }
   Future<void> checkServerHealth() async {
@@ -1327,6 +1328,7 @@ class VpnViewModel extends ChangeNotifier {
     if (_healthPending != null) { await _healthPending; return; }
     _backgroundTimer?.cancel();
     final token = ++_backgroundEpoch;
+      _healthQueueIdle = false;
       final done = Completer<void>(); _healthPending = done.future;
       try {
         if (analyzingNetwork) return;
@@ -1370,6 +1372,7 @@ class VpnViewModel extends ChangeNotifier {
         backgroundTotal = unique.values.where((s)=>s.protocol!='wireguard').length;
         backgroundChecked = backgroundTotal - candidates.length;
         if (candidates.isEmpty) {
+          _healthQueueIdle = true;
           backgroundStatus = 'HTTPS через сервер: проверено $backgroundChecked/$backgroundTotal · обновление через 15 минут';
           return;
         }
@@ -1385,9 +1388,15 @@ class VpnViewModel extends ChangeNotifier {
         final host = connected ? ReserveHostAdapter(engine as ReserveCandidateHost) : engine as CandidateHost;
         final lab = _healthLabFactory?.call(host) ?? CandidateLab(host); _healthLab = lab;
         final publications = <Future<void>>[];
+        Future<NetworkContext>? pendingRoute;
+        Future<NetworkContext> readRoute() {
+          // Simultaneous responses share one OS lookup (especially important
+          // for Windows, where each lookup otherwise starts PowerShell).
+          return pendingRoute ??= _network().whenComplete(() { pendingRoute = null; });
+        }
         Future<void> publish(CandidateResult result) async {
           try {
-            final current = await _network();
+            final current = await readRoute();
             if (!live() || !routeSafe(current) || !context.sameConnection(current)) return;
             final success = result.error == null && result.latencyMs != null;
             _protocolHealth[ConnectionStrategy.profileKey(result.server)] =
@@ -1401,12 +1410,12 @@ class VpnViewModel extends ChangeNotifier {
           onResult:(result) { publications.add(publish(result)); },
           routeValid:() async {
             if (!live()) return false;
-            final current = await _network();
+            final current = await readRoute();
             return live() && routeSafe(current) && context.sameConnection(current);
           },status:(_) {});
         await Future.wait(publications);
         if (!live()) return;
-        final current = await _network();
+        final current = await readRoute();
         if (!live()) return;
         if (!routeSafe(current) || !context.sameConnection(current)) {
           _protocolHealth.clear(); _backgroundHealth.clear(); health.clear(); return;
