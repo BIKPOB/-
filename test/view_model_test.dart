@@ -1,3 +1,4 @@
+import 'package:quiet_vpn/core/network_access.dart';
 import 'package:quiet_vpn/core/candidate_lab.dart';
 import 'package:quiet_vpn/core/network_analysis.dart';
 import 'package:quiet_vpn/core/selection_policy.dart';
@@ -186,6 +187,17 @@ class IdleBaselineMonitor extends BaselineMonitor {
   @override Future<NetworkBaseline?> tick(NetworkContext context,
       {Future<NetworkContext> Function()? readNetwork, bool forSelection=false}) async => null;
 }
+class CountingAccessMonitor extends NetworkAccessMonitor {
+  final contexts = <NetworkContext>[];
+  final budgets = <Duration>[];
+  @override Future<NetworkAccessSnapshot> check(NetworkContext context,
+      {Duration timeout = const Duration(seconds:3)}) async {
+    contexts.add(context); budgets.add(timeout);
+    return NetworkAccessSnapshot(context,DateTime.now(),{
+      'yandex.ru':20, 'vk.com':25, 'www.gstatic.com':null, 'cp.cloudflare.com':null,
+    });
+  }
+}
 class CountingNetworkAnalyzer extends NetworkAnalyzer {
   final contexts = <NetworkContext>[];
   @override Future<NetworkAnalysis> analyze(NetworkContext context) async {
@@ -312,6 +324,22 @@ class StalledSearchEngine extends ControlledEngine {
   @override Future<void> connect(VpnServer server, Credentials? credentials) async { connects++; }
 }
 void main() {
+  test('quick search refreshes access profile within its own short budget', () async {
+    final engine=ProxyLabEngine(), access=CountingAccessMonitor();
+    final vm=VpnViewModel(engine,EmptyProfiles(),ServerMonitor(),
+      accessMonitor:access,networkAnalyzer:CountingNetworkAnalyzer(),
+      baselineMonitor:IdleBaselineMonitor(),networkReader:()async=>'wifi',
+      catalogLoader:()async=>const PublicCatalogResult([],false,0));
+    try {
+      await vm.initialize();
+      await vm.analyzeNetwork();
+      expect(access.contexts.length,1);
+      await vm.autoConnect();
+      expect(access.contexts.length,2);
+      expect(access.budgets.last,const Duration(milliseconds:1500));
+      expect(vm.autoAttemptReports.join(),contains('Возможны ограничения сети'));
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   test('health sweep uses the independent physical route while own VPN stays up', () async {
     final engine=PhysicalHealthEngine();
     CandidateHost? usedHost;
@@ -946,10 +974,11 @@ void main() {
   });
   testWidgets('network analysis starts automatically and refreshes after network change', (tester) async {
     final engine=ProxyLabEngine(), analyzer=CountingNetworkAnalyzer();
+    final access=CountingAccessMonitor();
     var network='wifi';
     final vm=VpnViewModel(engine,EmptyProfiles(),
       ServerMonitor(probe:(_) async=>const HealthResult(Reachability.reachable,1)),
-      networkAnalyzer:analyzer,baselineMonitor:IdleBaselineMonitor(),networkReader:()async=>network,
+      accessMonitor:access,networkAnalyzer:analyzer,baselineMonitor:IdleBaselineMonitor(),networkReader:()async=>network,
       catalogLoader:()async=>const PublicCatalogResult([],false,0));
     await tester.pumpWidget(MaterialApp(home:HomePage(vm)));
     await tester.pump();
@@ -962,6 +991,8 @@ void main() {
     await tester.pump();
     expect(analyzer.contexts.map((c)=>c.type),['wifi','mobile']);
     expect(vm.networkAnalysis!.key,contains('mobile'));
+    expect(access.contexts.map((c)=>c.type),['wifi','mobile']);
+    expect(vm.networkAnalysisReport,contains('Возможны ограничения сети'));
     await tester.pumpWidget(const SizedBox.shrink());await engine.dispose();
   });
   testWidgets('automatic search with no imports never asks for a manual server', (tester) async {

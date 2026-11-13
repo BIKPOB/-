@@ -19,6 +19,7 @@ import '../core/adaptive_selector.dart';
 import '../core/contextual_search.dart';
 import '../core/connection_strategy.dart';
 import '../core/network_analysis.dart';
+import '../core/network_access.dart';
 import '../core/candidate_lab.dart';
 import '../core/selection_policy.dart';
 import '../platform/candidate_host.dart';
@@ -31,10 +32,10 @@ import '../core/site_bypass.dart';
 
 class VpnViewModel extends ChangeNotifier {
   VpnViewModel(this.engine, this.store, this.monitor, {
-    Future<PublicCatalogResult> Function()? catalogLoader, NetworkAnalyzer? networkAnalyzer, BaselineMonitor? baselineMonitor,
+    Future<PublicCatalogResult> Function()? catalogLoader, NetworkAccessMonitor? accessMonitor, NetworkAnalyzer? networkAnalyzer, BaselineMonitor? baselineMonitor,
     CandidateLab Function(CandidateHost)? healthLabFactory, CandidateLab Function(ReserveCandidateHost)? reserveLabFactory, DateTime Function()? reserveClock,
     Future<String> Function()? networkReader, ServerMonitor? autoMonitor, ServerMonitor? backgroundMonitor,
-  }) : _healthLabFactory=healthLabFactory, _baselineMonitor=baselineMonitor??BaselineMonitor(), _networkAnalyzer=networkAnalyzer??NetworkAnalyzer(), _reserveLabFactory=reserveLabFactory, _reserveNow=reserveClock??DateTime.now,
+  }) : _accessMonitor=accessMonitor??NetworkAccessMonitor(), _healthLabFactory=healthLabFactory, _baselineMonitor=baselineMonitor??BaselineMonitor(), _networkAnalyzer=networkAnalyzer??NetworkAnalyzer(), _reserveLabFactory=reserveLabFactory, _reserveNow=reserveClock??DateTime.now,
        _catalogLoader = catalogLoader ?? PublicCatalog().load,
        _quickCatalogLoader = catalogLoader ?? PublicCatalog().local,
        _networkReader = networkReader, _autoMonitor = autoMonitor ?? ServerMonitor(tcpOnly: true),
@@ -177,6 +178,26 @@ class VpnViewModel extends ChangeNotifier {
   String baselineStatus = 'Наблюдение за вашей сетью: ожидание замера без VPN';
   int? _selectionTarget;
   final NetworkAnalyzer _networkAnalyzer;
+  final NetworkAccessMonitor _accessMonitor;
+  NetworkAccessSnapshot? networkAccess, _searchAccess;
+  int _accessEpoch = 0;
+  void _cancelAccess() { _accessEpoch++; _accessMonitor.cancel(); }
+  Future<NetworkAccessSnapshot?> _checkAccess(NetworkContext context, {bool selection = false}) async {
+    if (context.vpnPresent || context.ambiguous || context.type == 'offline') return null;
+    if (!selection && networkAccess?.fresh(context, DateTime.now()) == true) return networkAccess;
+    _cancelAccess();
+    final token = _accessEpoch;
+    try {
+      final result = await _accessMonitor.check(context, timeout: selection && _quickAutoSearch
+          ? const Duration(milliseconds: 1500) : const Duration(seconds: 3));
+      final current = await _network();
+      if (_disposed || token != _accessEpoch || _nativeNeedsStop ||
+          !result.fresh(current, DateTime.now()) || (!selection && autoSelecting)) return null;
+      networkAccess = result;
+      _notify();
+      return result;
+    } catch (_) { return null; }
+  }
   CandidateLab? _candidateLab;
   NetworkAnalysis? networkAnalysis;
   bool analyzingNetwork = false;
@@ -184,14 +205,18 @@ class VpnViewModel extends ChangeNotifier {
   Map<String,dynamic> _labStorage = {};
   Future<void>? _analysisPending;
   SelectionPolicy _policy = const SelectionPolicy();
-  String get networkAnalysisReport => networkAnalysis?.fresh(networkContext,DateTime.now())==true ? networkAnalysis!.report : analysisStatus;
+  String get networkAnalysisReport => [
+    if (networkAccess?.fresh(networkContext, DateTime.now()) == true) networkAccess!.report,
+    networkAnalysis?.fresh(networkContext,DateTime.now())==true ? networkAnalysis!.report : analysisStatus,
+  ].join('\n\n');
   Future<void> _saveLab() async {
     try { await store.saveNetworkLab(jsonEncode(_labStorage)); } catch (_) { }
   }
   Future<void> analyzeNetwork({bool force=false}) async {
     if(engine is! CandidateHost || _nativeNeedsStop || _disposed || (!_foreground && !Platform.isWindows)) return;
     final context=await _network();networkContext=context;
-    await _analyzeNetwork(context,force:force);
+    await _checkAccess(context);
+    if (!_disposed && !autoSelecting && !_nativeNeedsStop) await _analyzeNetwork(context,force:force);
   }
   Future<void> _analyzeNetwork(NetworkContext context,{bool force=false}) async {
     if(_analysisPending!=null) await _analysisPending;
@@ -268,6 +293,8 @@ class VpnViewModel extends ChangeNotifier {
           if (baseline?.fresh(context,DateTime.now()) != true) baseline = null;
           if(engine is CandidateHost) {
             if (Platform.isAndroid || Platform.isWindows) unawaited(_refreshPolicy());
+            await _checkAccess(context);
+            if (_disposed || autoSelecting || _nativeNeedsStop || busy) return;
             await _analyzeNetwork(context,force:forceAnalysis);
           }
           if (_disposed || (!_desktop && !_foreground) || autoSelecting || _nativeNeedsStop || busy) return;
@@ -326,7 +353,9 @@ class VpnViewModel extends ChangeNotifier {
       _selector.observe(server, context.type, latency, success:true,
         context:context, reward:reward ?? .65);
     }
-    _selector.record(server, context, outcome, speed: speed, verifiedLatencyMs: latency);
+    // A common network failure must not condemn a subscription/server.
+    final recorded = _searchAccess?.learningOutcome(outcome, context, DateTime.now()) ?? outcome;
+    _selector.record(server, context, recorded, speed: speed, verifiedLatencyMs: latency);
     try { await store.saveSelector(_selector.encode()); } catch (_) { }
   }
 
@@ -340,7 +369,7 @@ class VpnViewModel extends ChangeNotifier {
   }
   Future<void> cancelAutoSelection({String reason = 'Подбор остановлен пользователем'}) async {
     _cancelReserve();
-    _autoEpoch++; _autoMonitor.cancel(); _networkAnalyzer.cancel();
+    _autoEpoch++; _autoMonitor.cancel(); _networkAnalyzer.cancel(); _cancelAccess();
     try { await _candidateLab?.cancel().timeout(const Duration(seconds: 3)); }
     catch (_) { /* Epoch already invalidated; never lock the Stop button. */ }
     autoStatus = reason; _notify();
@@ -420,6 +449,8 @@ class VpnViewModel extends ChangeNotifier {
     if (await _externalVpnBlocksConnection()) return;
     if (_disposed || busy || autoSelecting || _nativeNeedsStop) return;
     autoSelecting = true;
+    _cancelAccess();
+    _searchAccess = null;
     _quickAutoSearch = !deep;
     if (engine is QuickProbeSupport) {
       (engine as QuickProbeSupport).setQuickProbe(!deep);
@@ -462,7 +493,7 @@ class VpnViewModel extends ChangeNotifier {
           try {
             await work.timeout(_searchDeadline!.difference(DateTime.now()));
           } on TimeoutException {
-            _autoEpoch++; _networkAnalyzer.cancel(); _autoMonitor.cancel();
+            _autoEpoch++; _networkAnalyzer.cancel(); _cancelAccess(); _autoMonitor.cancel();
             _roundCanContinue = false;
             _connectTimeout?.cancel(); _connectTimeout = null;
             _quickDraining = true;
@@ -537,6 +568,8 @@ class VpnViewModel extends ChangeNotifier {
         await _saveLab();
       }
       _searchDeadline = null;
+      _searchAccess = null;
+      _cancelAccess();
       _searchCatalog = null;
       _searchVisited.clear();
       autoSelecting = false;
@@ -571,7 +604,7 @@ class VpnViewModel extends ChangeNotifier {
       if (cancelled()) return;
       final context = await _network();
       networkContext = context;
-      _networkAnalyzer.cancel();
+      _networkAnalyzer.cancel(); _cancelAccess();
       await _analysisPending;
       if (cancelled()) return;
       _selectionTarget = baseline?.fresh(context, DateTime.now()) == true ? baseline!.target : null;
@@ -586,6 +619,21 @@ class VpnViewModel extends ChangeNotifier {
       if(engine is CandidateHost && (context.vpnPresent || context.ambiguous)) {
         autoStatus=context.hasForeignVpn ? 'Отключите сторонний VPN перед подбором.' : context.ownVpn ? 'Системный маршрут Quiet VPN ещё отключается. Повторите подбор через несколько секунд.' : 'Подбор остановлен: базовая сеть неоднозначна';
         return;
+      }
+      if (engine is CandidateHost) {
+        if (_searchAccess?.fresh(context, DateTime.now()) != true) {
+          autoStatus = 'Уточнение доступности сети перед подбором'; _notify();
+          _searchAccess = await _checkAccess(context, selection:true);
+        }
+        if (cancelled()) return;
+        // A route change during controls invalidates the whole round.
+        final current = await _network();
+        if (!context.sameConnection(current) || context.environmentKey != current.environmentKey ||
+            current.vpnPresent || current.ambiguous || current.type == 'offline') {
+          autoStatus = 'Сеть изменилась во время проверки. Запустите подбор в текущей сети.';
+          return;
+        }
+        autoAttemptReports.add(_searchAccess?.report ?? 'Проверка доступности сети не завершена; ограничения не предполагаются.');
       }
       final catalog = _searchCatalog ??= await _quickCatalogLoader();
       if (cancelled()) return;
@@ -1286,7 +1334,7 @@ class VpnViewModel extends ChangeNotifier {
     _baselineTimer?.cancel();
     if (visible) _scheduleBaseline(immediate: true);
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
-    if (!visible && !autoSelecting) _networkAnalyzer.cancel();
+    if (!visible && !autoSelecting) _networkAnalyzer.cancel(); _cancelAccess();
     if (!visible) { unawaited(_stopHealthChecks().then((_) {
       if ((_foreground || _desktop) && !_disposed) _scheduleBackgroundPreflight(immediate:true);
     })); }
@@ -1502,7 +1550,7 @@ class VpnViewModel extends ChangeNotifier {
         final context=await _network();networkContext=context;
         _selectionTarget=baseline?.fresh(context,DateTime.now())==true?baseline!.target:null;
       }
-      _networkAnalyzer.cancel();
+      _networkAnalyzer.cancel(); _cancelAccess();
       final pendingAnalysis = _analysisPending;
       if (pendingAnalysis != null) await _prepareQuickConnection(pendingAnalysis);
       final pendingLab = _candidateLab;
@@ -1776,7 +1824,7 @@ class VpnViewModel extends ChangeNotifier {
   @override void dispose() {
     _cancelReserve();
     unawaited(_stopHealthChecks());
-    _networkAnalyzer.cancel();unawaited(_candidateLab?.cancel());
+    _networkAnalyzer.cancel(); _cancelAccess();unawaited(_candidateLab?.cancel());
     _healthTimer?.cancel();
     _baselineTimer?.cancel(); _baselineMonitor.dispose();
     _disposed = true; _autoEpoch++; _autoMonitor.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();

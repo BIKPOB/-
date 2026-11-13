@@ -6,6 +6,18 @@ import 'package:quiet_vpn/core/network_context.dart';
 const server = VpnServer(id: 'test', name: 'test', country: '', countryCode: '', host: 'example.com',
   port: 443, transport: 'tcp', profile: 'secret-profile', source: 'test', protocol: 'vless');
 void main() {
+  test('network-limited outcome preserves proven history and source estimate', () {
+    final model=AdaptiveSelector();
+    const network=NetworkContext(type:'mobile',session:'lte');
+    final now=DateTime(2026,11,14);
+    model.record(server,network,'verified',verifiedLatencyMs:50,now:now);
+    final before=model.sourceReliability.estimate(server,network,now:now).optimistic;
+    model.record(server,network,'network_limited',now:now);
+    expect(model.sourceReliability.estimate(server,network,now:now).optimistic,before);
+    expect(model.workedBefore(server,network,now:now),isTrue);
+    final restored=AdaptiveSelector.decode(model.encode());
+    expect(restored.workedBefore(server,network,now:now),isTrue);
+  });
   test('cross-network success does not hide a fresh local VPN failure', () {
     final model = AdaptiveSelector();
     const wifi = NetworkContext(type:'wifi', session:'home');
