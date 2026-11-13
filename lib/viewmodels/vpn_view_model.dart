@@ -192,7 +192,7 @@ class VpnViewModel extends ChangeNotifier {
           ? const Duration(milliseconds: 1500) : const Duration(seconds: 3));
       final current = await _network();
       if (_disposed || token != _accessEpoch || _nativeNeedsStop ||
-          !result.fresh(current, DateTime.now()) || (!selection && autoSelecting)) return null;
+          !result.fresh(current, DateTime.now()) || (!selection && autoSelecting)) { return null; }
       networkAccess = result;
       _notify();
       return result;
