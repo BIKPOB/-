@@ -15,7 +15,9 @@ import '../core/xray_failure.dart';
 import 'windows_probe.dart';
 import '../core/site_bypass.dart';
 
-class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, ReserveCandidateHost, SiteBypassHost {
+class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, ReserveCandidateHost, SiteBypassHost, QuickProbeSupport {
+  bool _quickProbe = false;
+  @override void setQuickProbe(bool value) { _quickProbe = value; }
   final _events = StreamController<EngineEvent>.broadcast();
   final _probe = WindowsProbe();
   final _root = File(Platform.resolvedExecutable).parent.path;
@@ -46,9 +48,9 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
   String get _alias => _protocol == 'wireguard' ? 'QuietVPN-AWG' : WindowsConfig.adapter;
   String _file(String name) => '$_root${Platform.pathSeparator}engines${Platform.pathSeparator}$name';
   @override Stream<EngineEvent> get events => _events.stream;
-  void _emit(ConnectionState state, String detail, {bool quality = false, int? speed, int? latencyMs}) {
+  void _emit(ConnectionState state, String detail, {bool quality = false, int? speed, int? latencyMs, bool httpsVerified = false}) {
     _detail = detail;
-    if (!_events.isClosed) _events.add(EngineEvent(state, detail, quality, speed, latencyMs));
+    if (!_events.isClosed) _events.add(EngineEvent(state, detail, quality, speed, latencyMs, httpsVerified));
   }
   Future<ProcessResult> _run(String program, List<String> args, {int seconds = 15}) async {
     final p = await Process.start(program, args, runInShell: false);
@@ -258,7 +260,7 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
       if (token != _epoch) return;
       if (info['ready'] != true) throw StateError('Интерфейс VPN не появился');
       _emit(ConnectionState.connecting, 'Windows: проверка DNS, HTTPS и скорости через VPN');
-      final result = await _probe.measure(info['address'] as String);
+      final result = await _probe.measure(info['address'] as String, quick:_quickProbe);
       if (token != _epoch) return;
       if ((result['delay'] as num? ?? -1) < 0) {
         _emit(ConnectionState.error, result['detail'] as String);
@@ -266,7 +268,7 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
       }
       _emit(ConnectionState.connected, result['detail'] as String,
         quality: result['quality'] == true, speed: result['bytesPerSecond'] as int?,
-        latencyMs: (result['latencyMs'] as num?)?.toInt());
+        latencyMs: (result['latencyMs'] as num?)?.toInt(), httpsVerified: result['httpsVerified'] == true);
     } catch (e) {
       if (token == _epoch) _emit(ConnectionState.error, 'Windows VPN: ${e is StateError ? e.message : e.runtimeType}');
     }
@@ -275,7 +277,7 @@ class WindowsEngine implements VpnEngine, TrafficSource, DesktopCapabilities, Re
     if (!_active || _stopping) return {'delay': -1, 'quality': false, 'detail': 'VPN выключен'};
     final info = await _system('tunnel');
     if (info['ready'] != true) return {'delay': -1, 'quality': false, 'detail': 'Нет интерфейса VPN'};
-    return _probe.measure(info['address'] as String);
+    return _probe.measure(info['address'] as String, quick:_quickProbe);
   }
   @override Future<void> disconnect() async {
     _stopping = true; _epoch++; _probe.cancel();

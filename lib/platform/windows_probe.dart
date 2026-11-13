@@ -8,6 +8,43 @@ import '../core/speed_policy.dart';
 /// Bind both DNS and HTTPS sockets to the actual VPN interface address.
 /// A broken tunnel cannot pass this test via the physical adapter.
 class WindowsProbe {
+  WindowsProbe({Future<Map<String,dynamic>> Function(String, String)? controlProbe})
+      : _controlProbe = controlProbe;
+  final Future<Map<String,dynamic>> Function(String, String)? _controlProbe;
+  final _children = <WindowsProbe>{};
+  final _quickPending = <Completer<Map<String,dynamic>>>{};
+  Future<Map<String,dynamic>> measure(String address, {bool quick=false}) async {
+    if (!quick) return _measureOne(address);
+    final generation = _generation;
+    final done = Completer<Map<String,dynamic>>();
+    _quickPending.add(done);
+    final children = <WindowsProbe>[];
+    final failures = <String>[];
+    for (final host in ['www.gstatic.com','cp.cloudflare.com']) {
+      final child = WindowsProbe(); children.add(child); _children.add(child);
+      unawaited(() async {
+        try {
+          final result = await (_controlProbe?.call(address,host) ??
+              child._measureOne(address,httpsOnly:true,control:host));
+          if ((result['delay'] as num? ?? -1) >= 0 && result['httpsVerified'] == true) {
+            if (!done.isCompleted && generation == _generation) done.complete(result);
+            return;
+          }
+          failures.add('$host: ${result['detail'] ?? "HTTPS не подтверждён"}');
+        } catch (error) { failures.add('$host: ${error.runtimeType}'); }
+        if (failures.length == 2 && !done.isCompleted) {
+          done.complete({'delay':-1,'quality':false,'detail':failures.join('; ')});
+        }
+      }());
+    }
+    try {
+      return await done.future.timeout(const Duration(seconds:9),onTimeout:() =>
+          {'delay':-1,'quality':false,'detail':'Лимит быстрой проверки HTTPS через Windows VPN'});
+    } finally {
+      _quickPending.remove(done);
+      for (final child in children) { child.cancel(); _children.remove(child); }
+    }
+  }
   HttpClient? _client, _doh;
   RawDatagramSocket? _dns;
   Socket? _dnsTcp;
@@ -15,7 +52,12 @@ class WindowsProbe {
   bool _usedDoh = false;
   final List<String> _dnsFailures = [];
   String _failure(Object error) => error is SocketException ? 'SocketException, код ОС ${error.osError?.errorCode ?? "нет"}' : error.runtimeType.toString();
-  void cancel() { _generation++; _client?.close(force: true); _doh?.close(force: true); _dns?.close(); _dnsTcp?.destroy(); }
+  void cancel() { _generation++;
+    for (final pending in _quickPending.toList()) {
+      if (!pending.isCompleted) pending.complete({'delay':-1,'quality':false,'detail':'Проверка отменена'});
+    }
+    for (final child in _children.toList()) { child.cancel(); }
+ _client?.close(force: true); _doh?.close(force: true); _dns?.close(); _dnsTcp?.destroy(); }
   static Uint8List query(String name, int id) => Uint8List.fromList([
     id >> 8, id & 255, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0,
     for (final label in name.split('.')) ...[label.length, ...label.codeUnits], 0, 0, 1, 0, 1,
@@ -137,7 +179,7 @@ class WindowsProbe {
       } finally { client.close(force: true); if (identical(_doh, client)) _doh = null; }
     }
   }
-  Future<Map<String, dynamic>> measure(String address) async {
+  Future<Map<String, dynamic>> _measureOne(String address, {bool httpsOnly=false, String control='www.gstatic.com'}) async {
     _usedDoh = false; _dnsFailures.clear();
     var phase = 'DNS';
     var bytes = 0;
@@ -175,12 +217,21 @@ class WindowsProbe {
     final clock = Stopwatch()..start();
     try {
       return await (() async {
-        final request = await client.getUrl(Uri.parse('https://www.gstatic.com/generate_204'));
+        final request = await client.getUrl(Uri.https(control,'/generate_204'));
         request.followRedirects = false;
         final response = await request.close();
         if (response.statusCode != 204) throw HttpException('HTTPS status ${response.statusCode}');
         await response.drain<void>();
         final latencyMs = clock.elapsedMilliseconds; // HTTPS 204 including DNS/TLS, excluding test download.
+        if (httpsOnly) {
+          if (token != _generation) throw const SocketException('Cancelled');
+          if (_usedDoh) {
+            return {'delay':-1,'quality':false,'detail':'HTTPS доступен с DoH, обычный DNS VPN не подтверждён'};
+          }
+          return {'delay':clock.elapsedMilliseconds,'latencyMs':latencyMs,
+            'httpsVerified':true,'quality':false,
+            'detail':'Windows VPN: DNS и HTTPS через $control подтверждены; скорость не измерена'};
+        }
         // Include request setup and first-byte latency so a buffered burst cannot
         // make an otherwise sluggish endpoint look fast. Bound traffic to 4 MiB.
         final download = Stopwatch()..start();

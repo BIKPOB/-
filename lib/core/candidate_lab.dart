@@ -19,7 +19,7 @@ class CandidateResult {
   int get speed => speeds.isEmpty ? 0 : speeds.reduce(min);
   double get consistency => speeds.isEmpty ? 0 : speed/max(1,speeds.reduce(max));
   String get report => '${server.protocol} · ${server.source} · '
-    '${usable ? "HTTPS подтверждён · минимум ${(speed*8/1000000).toStringAsFixed(1)} Мбит/с · ${speeds.length} замера · стабильность ${(consistency*100).round()}%" : error ?? "не проверен"}';
+    '${usable ? "HTTPS подтверждён · минимум ${(speed*8/1000000).toStringAsFixed(1)} Мбит/с · ${speeds.length} замера · стабильность ${(consistency*100).round()}%" : error ?? (latencyMs != null ? "HTTPS подтверждён · скорость не измерена" : "не проверен")}';
 }
 
 class CandidateConfig {
@@ -52,11 +52,33 @@ class CandidateConfig {
 /// Speed transfers are sequential
 /// to avoid grading each server against traffic from the other candidates.
 class CandidateLab {
-  CandidateLab(this.host, {NetworkAnalyzer? probe}) : _probe=probe??NetworkAnalyzer();
+  CandidateLab(this.host, {NetworkAnalyzer? probe, this.recovery = false}) : _probe=probe??NetworkAnalyzer();
+  final bool recovery;
   final CandidateHost host;
   final NetworkAnalyzer _probe;
   int _epoch=0;
   Future<void>? _pending;
+  Future<int> _raceHttps(int port, Duration timeout) async {
+    final result=Completer<int>();
+    var failures=0;
+    for (final address in [
+      'https://www.gstatic.com/generate_204',
+      'https://cp.cloudflare.com/generate_204',
+    ]) {
+      unawaited(() async {
+        try {
+          final latency=await _probe.https(Uri.parse(address),proxyPort:port,timeout:timeout);
+          if (!result.isCompleted) result.complete(latency);
+        } catch (_) {
+          failures++;
+          if (failures == 2 && !result.isCompleted) {
+            result.completeError(const HttpException('Neither HTTPS control passed'));
+          }
+        }
+      }());
+    }
+    return result.future.timeout(timeout);
+  }
   Future<void> _stop() => host.stopCandidates().timeout(const Duration(seconds:5));
   Future<void> cancel() async {
     _epoch++;_probe.cancel();
@@ -96,7 +118,7 @@ class CandidateLab {
       if(!await validRoute()) throw StateError('Маршрут изменился до проверки');
       final pool=candidates.where((s)=>s.protocol!='wireguard').take(deep?policy.deepCandidates:policy.fastCandidates).toList();
       final groupSize=healthOnly ? (metered ? 6 : 12) : 3;
-      final timeout=analysis?.candidateTimeout??const Duration(seconds:6);
+      final timeout=recovery ? const Duration(seconds:3) : analysis?.candidateTimeout??const Duration(seconds:6);
       final rounds=deep || analysis?.extraSpeedSample==true?3:2;
       var speedTests=0, qualified=0;
       final maxSpeedTests=deep?12:6;
@@ -115,7 +137,9 @@ class CandidateLab {
         final entries=<({VpnServer server,String endpoint,int port})>[];
         await Future.wait(servers.map((s) async {
           try {
-            final endpoint=await host.resolveCandidate(s.host).timeout(const Duration(seconds:5));
+            final literal = InternetAddress.tryParse(s.host);
+            final endpoint = literal?.address ?? await host.resolveCandidate(s.host)
+                .timeout(Duration(seconds:recovery ? 2 : 5));
             final reservation=await ServerSocket.bind(InternetAddress.loopbackIPv4,0);
             final port=reservation.port;await reservation.close();
             if(live()) entries.add((server:s,endpoint:endpoint,port:port));
@@ -140,13 +164,19 @@ class CandidateLab {
             try {
               // Domain request traverses HTTP CONNECT and resolves at the proxy,
               // not via the application's direct resolver.
-              final latency=await _probe.https(Uri.parse('https://www.gstatic.com/generate_204'),proxyPort:e.port,timeout:timeout);
+              final latency = recovery
+                  ? await _raceHttps(e.port,timeout)
+                  : await _probe.https(Uri.parse('https://www.gstatic.com/generate_204'),proxyPort:e.port,timeout:timeout);
               if(live()) {
                 if (healthOnly) { record(CandidateResult(e.server,latency,[],null)); }
                 else { passing.add((server:e.server,port:e.port,latency:latency)); }
               }
             } catch(first) {
               if(!live()) return;
+              if (recovery) {
+                record(CandidateResult(e.server,null,[], 'HTTPS через прокси: ${first.runtimeType}'));
+                return;
+              }
               try {
                 final latency=await _probe.https(Uri.parse('https://cp.cloudflare.com/generate_204'),proxyPort:e.port,timeout:timeout);
                 if(live()) {
@@ -181,11 +211,12 @@ class CandidateLab {
               if(value.usable && (deep ? SpeedPolicy.stableSamples(value.speeds,target) : value.speed>=target)) qualified++;
             }
           }
-        } finally {await _stop();}
+        } finally {if (recovery) _probe.cancel(); await _stop();}
       }
       for(var i=0;i<pool.length && live();i+=groupSize) {
         await group(pool.sublist(i,min(i+groupSize,pool.length)));
-        if(speedTests>=maxSpeedTests || remainingSamples<rounds || comparisonDone()) break;
+        if ((recovery && results.any((r) => r.error == null && r.latencyMs != null)) ||
+            speedTests>=maxSpeedTests || remainingSamples<rounds || comparisonDone()) { break; }
       }
       if(token!=_epoch && clock.elapsed<budget) return [];
       if(!await validRoute()) throw StateError('Сеть изменилась: результаты отклонены');

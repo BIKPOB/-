@@ -332,6 +332,30 @@ class StalledSearchEngine extends ControlledEngine {
   @override Future<void> connect(VpnServer server, Credentials? credentials) async { connects++; }
 }
 void main() {
+  test('deep recovery preserves first HTTPS tunnel without speed download or reconnect', () async {
+    final engine=HttpsOnlyQuickEngine(), access=CountingAccessMonitor();
+    final profiles=MemoryProfiles();
+    final vm=VpnViewModel(engine,profiles,
+      ServerMonitor(probe:(_)async=>const HealthResult(Reachability.reachable,1)),
+      accessMonitor:access,networkAnalyzer:CountingNetworkAnalyzer(),
+      baselineMonitor:IdleBaselineMonitor(),networkReader:()async=>'mobile',
+      catalogLoader:()async=>const PublicCatalogResult([],false,0));
+    try {
+      await vm.initialize();
+      await vm.autoConnect(deep:true);
+      expect(vm.internetVerified,isTrue);
+      expect(vm.connectionVerified,isFalse);
+      expect(vm.measuredBytesPerSecond,isNull);
+      expect(engine.connects,1);
+      expect(engine.disconnects,0);
+      expect(engine.flags,contains(true));
+      expect(engine.flags.last,isFalse);
+      expect(vm.autoStatus,contains('Связь восстановлена'));
+      expect(profiles.networkLab,contains('recoveryHistory'));
+      expect(vm.learningJournal.last['outcome'],'usable');
+      await vm.disconnect();
+    } finally {vm.dispose(); await engine.dispose();}
+  });
   test('screen lock keeps user-started access checks alive', () async {
     final engine=ProxyLabEngine(), access=DelayedAccessMonitor();
     final vm=VpnViewModel(engine,EmptyProfiles(),ServerMonitor(),

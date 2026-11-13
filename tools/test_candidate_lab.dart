@@ -154,7 +154,43 @@ Future<void> rotationIntegration() async {
       'Search stopped before comparing the required qualified candidates');
   }
 }
+class BlockedControlProbe extends NetworkAnalyzer {
+  BlockedControlProbe({this.allBlocked=false});
+  final bool allBlocked;
+  int calls=0;
+  @override Future<int> https(Uri uri,{int? proxyPort,int bytes=0,int maxBytes=4096,
+      Duration timeout=const Duration(seconds:6)}) async {
+    check(bytes==0,'Recovery downloaded speed payload');
+    check(timeout==const Duration(seconds:3),'Recovery handshake timeout grew');
+    calls++;
+    if (allBlocked || uri.host=='www.gstatic.com') throw const SocketException('blocked control fixture');
+    return 45;
+  }
+}
+class FailedDnsHost extends Host {
+  @override Future<String> resolveCandidate(String host) async => throw const SocketException('DNS unavailable');
+}
+Future<void> recoveryRegression() async {
+  final probe=BlockedControlProbe(),host=Host();
+  final attempted=<VpnServer>[];
+  final result=await CandidateLab(host,probe:probe,recovery:true).run(
+    [for(var i=1;i<=24;i++) fixture(i)],deep:true,metered:true,healthOnly:true,
+    routeValid:()async=>true,status:(_){},onAttempt:(batch)async{attempted.addAll(batch);});
+  check(attempted.length==6 && result.length==6,'Recovery kept probing after successful batch');
+  check(result.every((r)=>r.latencyMs==45 && r.error==null && r.speeds.isEmpty),'Blocked first control hid passing second control');
+  check(probe.calls==12,'Recovery did not race both independent controls');
+  check(!host.running,'Recovery core leaked');
+  final literal=VpnServer.fromJson({...fixture(1).toJson(),'host':'203.0.113.1',
+    'profile':fixture(1).profile.replaceAll('node1.example','203.0.113.1')});
+  final withoutDns=await CandidateLab(FailedDnsHost(),probe:BlockedControlProbe(),recovery:true).run(
+    [literal],deep:true,metered:true,healthOnly:true,routeValid:()async=>true,status:(_){});
+  check(withoutDns.single.latencyMs==45,'Literal endpoint depended on broken DNS');
+  final blocked=await CandidateLab(Host(),probe:BlockedControlProbe(allBlocked:true),recovery:true).run(
+    [fixture(1)],deep:true,metered:true,healthOnly:true,routeValid:()async=>true,status:(_){});
+  check(blocked.single.latencyMs==null && blocked.single.error!=null,'Both failed controls became fake success');
+}
 Future<void> main() async {
+  await recoveryRegression();
   for (final metered in [false,true]) {
     final host=Host(), reports=<CandidateResult>[];
     final probe=Probe(host);

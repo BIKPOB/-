@@ -20,6 +20,7 @@ import '../core/contextual_search.dart';
 import '../core/connection_strategy.dart';
 import '../core/network_analysis.dart';
 import '../core/network_access.dart';
+import '../core/recovery_search.dart';
 import '../core/candidate_lab.dart';
 import '../core/selection_policy.dart';
 import '../platform/candidate_host.dart';
@@ -180,6 +181,7 @@ class VpnViewModel extends ChangeNotifier {
   final NetworkAnalyzer _networkAnalyzer;
   final NetworkAccessMonitor _accessMonitor;
   NetworkAccessSnapshot? networkAccess, _searchAccess;
+  bool _searchRecovery = false;
   int _accessEpoch = 0;
   void _cancelAccess() { _accessEpoch++; _accessMonitor.cancel(); }
   Future<NetworkAccessSnapshot?> _checkAccess(NetworkContext context, {bool selection = false}) async {
@@ -354,7 +356,16 @@ class VpnViewModel extends ChangeNotifier {
         context:context, reward:reward ?? .65);
     }
     // A common network failure must not condemn a subscription/server.
-    final recorded = _searchAccess?.learningOutcome(outcome, context, DateTime.now()) ?? outcome;
+    final recorded = _searchRecovery && !proved &&
+        (outcome == 'unconfirmed' || outcome == 'slow_or_unstable')
+        ? 'recovery_unconfirmed'
+        : _searchAccess?.learningOutcome(outcome, context, DateTime.now()) ?? outcome;
+    if (_searchRecovery && proved) {
+      final history = RecoveryHistory(_labStorage['recoveryHistory']);
+      history.remember(server,context,DateTime.now());
+      _labStorage['recoveryHistory'] = history.entries;
+      await _saveLab();
+    }
     _selector.record(server, context, recorded, speed: speed, verifiedLatencyMs: latency);
     try { await store.saveSelector(_selector.encode()); } catch (_) { }
   }
@@ -451,6 +462,7 @@ class VpnViewModel extends ChangeNotifier {
     autoSelecting = true;
     _cancelAccess();
     _searchAccess = null;
+    _searchRecovery = false;
     _quickAutoSearch = !deep;
     if (engine is QuickProbeSupport) {
       (engine as QuickProbeSupport).setQuickProbe(!deep);
@@ -569,6 +581,7 @@ class VpnViewModel extends ChangeNotifier {
       }
       _searchDeadline = null;
       _searchAccess = null;
+      _searchRecovery = false;
       _cancelAccess();
       _searchCatalog = null;
       _searchVisited.clear();
@@ -635,6 +648,18 @@ class VpnViewModel extends ChangeNotifier {
         }
         autoAttemptReports.add(_searchAccess?.report ?? 'Проверка доступности сети не завершена; ограничения не предполагаются.');
       }
+      _searchRecovery = _searchRecovery ||
+          (_searchAccess?.fresh(context,DateTime.now()) == true &&
+              _searchAccess!.domestic > 0 && _searchAccess!.external == 0) ||
+          (deep && _searchVisited.length >= 8);
+      if (engine is QuickProbeSupport) {
+        (engine as QuickProbeSupport).setQuickProbe(_searchRecovery || !deep);
+      }
+      if (_searchRecovery) {
+        autoAttemptReports.add('Режим восстановления: разнообразные адреса и транспорты, '
+          'параллельный HTTPS без предварительных загрузок скорости; первый подтверждённый VPN сохраняется. '
+          'Причина ограничений не установлена.');
+      }
       final catalog = _searchCatalog ??= await _quickCatalogLoader();
       if (cancelled()) return;
       final pool = [..._imports, ...catalog.servers].where((s) =>
@@ -656,10 +681,12 @@ class VpnViewModel extends ChangeNotifier {
         await _saveLab();
       }
       final rankingTime = DateTime.now();
+      final recoveryHistory = RecoveryHistory(_labStorage['recoveryHistory']);
       int priority(VpnServer server) {
+        if (_searchRecovery && recoveryHistory.worked(server,context,rankingTime)) return 1;
         if (_healthContext?.sameConnection(context) == true && serverHealth(server)?.protocolVerified == true) return 1;
         final speed = _selector.recentSpeed(server, context, now:rankingTime);
-        if (_requiresSpeed && speed > 0 && speed < targetBytesPerSecond) return -1;
+        if (!_searchRecovery && _requiresSpeed && speed > 0 && speed < targetBytesPerSecond) return -1;
         return _selector.recentPriority(server, context, now:rankingTime);
       }
       int rank(VpnServer a, VpnServer b, Map<String, HealthResult>? latency) {
@@ -784,15 +811,20 @@ class VpnViewModel extends ChangeNotifier {
           sourceExposure: (s) => source.estimate(s, context, now:rankingTime).exposure,
         );
       }
-      if(deep && engine is CandidateHost && !ordered.any((s) => priority(s) == 1)) {
-        final lab=_candidateLab ??= CandidateLab(engine as CandidateHost);
+      final recoveryRanked = _searchRecovery
+          ? RecoveryPlanner.order(pool,recoveryHistory,context,rankingTime) : mixed;
+      if (_searchRecovery) ordered = recoveryRanked.take(deep ? 8 : 6).toList();
+      if(engine is CandidateHost && (_searchRecovery || (deep && !ordered.any((s) => priority(s) == 1)))) {
+        final lab=_candidateLab = CandidateLab(engine as CandidateHost,recovery:_searchRecovery);
         final proxyRanked=_transportDiversity(mixed.where((s)=>s.protocol!='wireguard').toList());
-        final limit=min(6,_policy.deepCandidates);
+        final limit=_searchRecovery ? (deep ? 24 : 6) : min(6,_policy.deepCandidates);
         final known=proxyRanked.where((s)=>_selector.recentSpeed(s,context)>=targetBytesPerSecond).toList()
           ..sort((a,b)=>_selector.recentSpeed(b,context).compareTo(_selector.recentSpeed(a,context)));
         final benchmark=known.isEmpty?null:known.first;
-        final proxyPool=[...rotate(proxyRanked.where((s)=>s!=benchmark).toList()).take(limit-(benchmark==null?0:1)),
-          if(benchmark!=null) benchmark];
+        final proxyPool = _searchRecovery
+            ? recoveryRanked.where((s)=>s.protocol!='wireguard').take(limit).toList()
+            : [...rotate(proxyRanked.where((s)=>s!=benchmark).toList()).take(limit-(benchmark==null?0:1)),
+                if(benchmark!=null) benchmark];
         autoAttemptReports.add('Ротация: сначала ещё не проверенные в этой сети; затем проверенные давно. До ${proxyPool.length} кандидатов, история до 7 дней.');
         Future<NetworkContext>? routeRead;
         NetworkContext? routeSnapshot;
@@ -808,14 +840,14 @@ class VpnViewModel extends ChangeNotifier {
           return !cancelled() && !current.vpnPresent && !current.ambiguous && context.sameConnection(current);
         }
         final analysis=networkAnalysis?.fresh(context,DateTime.now())==true?networkAnalysis:null;
-        autoAttemptReports.add('Профиль сети: таймаут HTTPS через прокси ${analysis?.candidateTimeout.inSeconds??6} с; '
+        autoAttemptReports.add('Профиль сети: таймаут HTTPS через прокси ${_searchRecovery ? 3 : analysis?.candidateTimeout.inSeconds??6} с; '
           '${analysis?.preferLiteralEndpoint==true?"IP-адреса серверов получают приоритет из-за неподтверждённого системного DNS":"имена и IP сохраняются в подборе"}; '
-          'замеров скорости ${deep || analysis?.extraSpeedSample==true?3:2}');
+          'замеров скорости ${_searchRecovery ? 0 : deep || analysis?.extraSpeedSample==true?3:2}');
         searchProgress.total = proxyPool.length; searchProgress.completed = 0;
-        final findings=await lab.run(proxyPool,deep:deep,metered:context.metered!=false,target:targetBytesPerSecond,analysis:analysis,policy:SelectionPolicy(
+        final findings=await lab.run(proxyPool,deep:deep,healthOnly:_searchRecovery,metered:context.metered!=false,target:targetBytesPerSecond,analysis:analysis,policy:SelectionPolicy(
             fastCandidates:_policy.fastCandidates,deepCandidates:_policy.deepCandidates,
-            fastSeconds:min(_policy.fastSeconds,max(1,_searchDeadline!.difference(DateTime.now()).inSeconds)),
-            deepSeconds:min(30,min(_policy.deepSeconds,max(1,_searchDeadline!.difference(DateTime.now()).inSeconds)))),
+            fastSeconds:min(_searchRecovery ? 5 : _policy.fastSeconds,max(1,_searchDeadline!.difference(DateTime.now()).inSeconds)),
+            deepSeconds:min(_searchRecovery ? 18 : 30,min(_policy.deepSeconds,max(1,_searchDeadline!.difference(DateTime.now()).inSeconds)))),
           onAttempt:attempted, routeValid:validRoute, status:(value){autoStatus=value;_notify();},
           onResult:(finding){
             searchProgress.completed++;
@@ -831,10 +863,21 @@ class VpnViewModel extends ChangeNotifier {
             await _remember(f.server,context,null,'proxy_unconfirmed');
           }
         }
-        final usable=findings.where((f)=>f.usable).toList();
+        final usable=findings.where((f)=>_searchRecovery ? f.error == null && f.latencyMs != null : f.usable).toList();
+        if (_searchRecovery) usable.sort((a,b)=>a.latencyMs!.compareTo(b.latencyMs!));
         ordered=ConnectionStrategy.tunnelQueue(
-          usable.map((f)=>f.server).toList(), mixed, deep:deep, priority:priority,
+          usable.map((f)=>f.server).toList(), _searchRecovery ? recoveryRanked : mixed, deep:deep, priority:priority,
           screened: findings.where((f)=>!f.usable).map((f)=>ConnectionStrategy.profileKey(f.server)).toSet());
+        if (_searchRecovery) {
+          final confirmed=usable.map((f)=>ConnectionStrategy.profileKey(f.server)).toSet();
+          final failed=findings.where((f)=>f.error!=null).map((f)=>ConnectionStrategy.profileKey(f.server)).toSet();
+          final seen=<String>{};
+          ordered = [
+            ...usable.map((f)=>f.server),
+            ...recoveryRanked.where((s)=>!confirmed.contains(ConnectionStrategy.profileKey(s)) && !failed.contains(ConnectionStrategy.profileKey(s))),
+            ...recoveryRanked.where((s)=>failed.contains(ConnectionStrategy.profileKey(s))),
+          ].where((s)=>seen.add(ConnectionStrategy.profileKey(s))).take(deep ? 8 : 6).toList();
+        }
         autoAttemptReports.add('Прокси: в выборке ${proxyPool.length}, результатов ${findings.length}, '
           'подтверждено ${usable.length}. Очередь VPN: ${ordered.length}/${deep ? 8 : 6}; '
           'неподтверждённые кандидаты требуют проверки туннеля.');
@@ -868,7 +911,11 @@ class VpnViewModel extends ChangeNotifier {
         autoStatus = 'ИИ-подбор: попытка $attempt/${ordered.length} · ${server.protocol} · подключение и проверка'; _notify();
         await importProfile(server.profile, server.name, 'ИИ-подбор · ${server.source}', updateFilter: false);
         if (cancelled()) return;
-        if (deep) {
+        if (deep && _searchRecovery) {
+          final available = _searchDeadline!.difference(DateTime.now());
+          if (available <= Duration.zero) break;
+          await _quickAttempt(Duration(milliseconds:min(15000,available.inMilliseconds)));
+        } else if (deep) {
           await connect(null, automatic: true);
         } else {
           final available = _searchDeadline!.difference(DateTime.now());
@@ -896,7 +943,7 @@ class VpnViewModel extends ChangeNotifier {
         final speeds = <int>[];
         if (measuredBytesPerSecond != null) speeds.add(measuredBytesPerSecond!);
         var repeatFailed = false;
-        if (deep && state == ConnectionState.connected && measuredBytesPerSecond != null && sameNetwork) {
+        if (deep && !_searchRecovery && state == ConnectionState.connected && measuredBytesPerSecond != null && sameNetwork) {
           for (var round = 0; round < 2; round++) {
             autoStatus = 'Сравнение $attempt/${ordered.length} · ${server.protocol} · замер ${round + 2}/3'; _notify();
             try {
@@ -938,6 +985,12 @@ class VpnViewModel extends ChangeNotifier {
           await _remember(server, context, verifiedRtt,
             success ? 'verified' : usable ? 'usable' : medianSpeed != null ? 'slow_or_unstable' : 'unconfirmed',
             speed: medianSpeed, reward: medianSpeed == null || repeatFailed ? null : .2 + .8 * utility);
+        }
+        if (_searchRecovery && usable && !context.ambiguous && !duringVpn.ambiguous) {
+          connectionVerified = success;
+          autoStatus = 'Связь восстановлена: HTTPS через VPN подтверждён. '
+              'Рабочий туннель сохранён; скорость ${medianSpeed == null ? "не измерена" : success ? "достигла цели" : "ниже цели"}.';
+          return;
         }
         if (usable && !context.ambiguous && (!_requiresSpeed || success || deep)) {
           finalists.add((server: server, utility: utility,
