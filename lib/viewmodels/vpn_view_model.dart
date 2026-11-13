@@ -213,7 +213,7 @@ class VpnViewModel extends ChangeNotifier {
     try { await store.saveNetworkLab(jsonEncode(_labStorage)); } catch (_) { }
   }
   Future<void> analyzeNetwork({bool force=false}) async {
-    if(engine is! CandidateHost || _nativeNeedsStop || _disposed || (!_foreground && !Platform.isWindows)) return;
+    if(engine is! CandidateHost || _nativeNeedsStop || _disposed || autoSelecting || busy || (!_foreground && !Platform.isWindows)) return;
     final context=await _network();networkContext=context;
     await _checkAccess(context);
     if (!_disposed && !autoSelecting && !_nativeNeedsStop) await _analyzeNetwork(context,force:force);
@@ -1334,7 +1334,7 @@ class VpnViewModel extends ChangeNotifier {
     _baselineTimer?.cancel();
     if (visible) _scheduleBaseline(immediate: true);
     _backgroundTimer?.cancel(); _backgroundEpoch++; _backgroundMonitor.cancel();
-    if (!visible && !autoSelecting) _networkAnalyzer.cancel(); _cancelAccess();
+    if (!visible && !autoSelecting) { _networkAnalyzer.cancel(); _cancelAccess(); }
     if (!visible) { unawaited(_stopHealthChecks().then((_) {
       if ((_foreground || _desktop) && !_disposed) _scheduleBackgroundPreflight(immediate:true);
     })); }

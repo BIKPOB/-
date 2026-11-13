@@ -198,6 +198,14 @@ class CountingAccessMonitor extends NetworkAccessMonitor {
     });
   }
 }
+class DelayedAccessMonitor extends CountingAccessMonitor {
+  final started=Completer<void>(), release=Completer<void>();
+  @override Future<NetworkAccessSnapshot> check(NetworkContext context,
+      {Duration timeout=const Duration(seconds:3)}) async {
+    started.complete(); await release.future;
+    return super.check(context,timeout:timeout);
+  }
+}
 class CountingNetworkAnalyzer extends NetworkAnalyzer {
   final contexts = <NetworkContext>[];
   @override Future<NetworkAnalysis> analyze(NetworkContext context) async {
@@ -324,6 +332,22 @@ class StalledSearchEngine extends ControlledEngine {
   @override Future<void> connect(VpnServer server, Credentials? credentials) async { connects++; }
 }
 void main() {
+  test('screen lock keeps user-started access checks alive', () async {
+    final engine=ProxyLabEngine(), access=DelayedAccessMonitor();
+    final vm=VpnViewModel(engine,EmptyProfiles(),ServerMonitor(),
+      accessMonitor:access,networkReader:()async=>'wifi',
+      baselineMonitor:IdleBaselineMonitor(),
+      catalogLoader:()async=>const PublicCatalogResult([],false,0));
+    try {
+      await vm.initialize();
+      final search=vm.autoConnect();
+      await access.started.future;
+      vm.setForeground(false);
+      access.release.complete();
+      await search;
+      expect(vm.autoAttemptReports.join(),contains('Возможны ограничения сети'));
+    } finally { vm.dispose(); await engine.dispose(); }
+  });
   test('quick search refreshes access profile within its own short budget', () async {
     final engine=ProxyLabEngine(), access=CountingAccessMonitor();
     final vm=VpnViewModel(engine,EmptyProfiles(),ServerMonitor(),
