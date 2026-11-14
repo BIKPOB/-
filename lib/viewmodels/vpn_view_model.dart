@@ -37,11 +37,21 @@ class VpnViewModel extends ChangeNotifier {
     CandidateLab Function(CandidateHost)? healthLabFactory, CandidateLab Function(ReserveCandidateHost)? reserveLabFactory, DateTime Function()? reserveClock,
     Future<String> Function()? networkReader, ServerMonitor? autoMonitor, ServerMonitor? backgroundMonitor,
   }) : _accessMonitor=accessMonitor??NetworkAccessMonitor(), _healthLabFactory=healthLabFactory, _baselineMonitor=baselineMonitor??BaselineMonitor(), _networkAnalyzer=networkAnalyzer??NetworkAnalyzer(), _reserveLabFactory=reserveLabFactory, _reserveNow=reserveClock??DateTime.now,
-       _catalogLoader = catalogLoader ?? PublicCatalog().load,
-       _quickCatalogLoader = catalogLoader ?? PublicCatalog().local,
+       _catalogLoader = catalogLoader ?? PublicCatalog.shared.load,
+       _autoRefreshCatalog = catalogLoader == null,
+       _quickCatalogLoader = catalogLoader ?? PublicCatalog.shared.local,
        _networkReader = networkReader, _autoMonitor = autoMonitor ?? ServerMonitor(tcpOnly: true),
        _backgroundMonitor = backgroundMonitor ?? ServerMonitor(tcpOnly: true);
   final Future<PublicCatalogResult> Function() _catalogLoader;
+  final bool _autoRefreshCatalog;
+  Future<void> _refreshRecoveryCatalog() async {
+    if (!_autoRefreshCatalog || _disposed || autoSelecting || busy) return;
+    try {
+      await PublicCatalog.shared.refreshRecovery();
+      if (_disposed) return;
+      _healthCatalog = (await PublicCatalog.shared.local()).servers;
+    } catch (_) { /* Validated snapshots and bundled feed remain available. */ }
+  }
   final Future<PublicCatalogResult> Function() _quickCatalogLoader;
   bool _quickDraining = false, _quickAutoSearch = false;
   StreamSubscription<void>? _searchCancelSubscription;
@@ -288,6 +298,7 @@ class VpnViewModel extends ChangeNotifier {
             _protocolHealth.clear(); _backgroundHealth.clear(); health.clear();
           }
           networkContext = context;
+          if (context.type != 'offline' && !context.ambiguous) unawaited(_refreshRecoveryCatalog());
           if (networkAnalysis?.fresh(context,DateTime.now()) != true) {
             networkAnalysis = null;
             analysisStatus = 'Автоанализ текущей сети: обновление';

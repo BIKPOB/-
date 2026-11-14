@@ -21,7 +21,7 @@ class _PublicCatalogPageState extends State<PublicCatalogPage> {
     if (loading || adding) return;
     setState(() { loading = true; error = null; });
     try {
-      final loaded = await PublicCatalog().load();
+      final loaded = await PublicCatalog.shared.load();
       widget.vm.registerHealthCatalog(loaded.servers);
       if (mounted) setState(() { result = loaded; });
     } catch (_) {

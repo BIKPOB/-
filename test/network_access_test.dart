@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:quiet_vpn/core/network_access.dart';
 import 'package:quiet_vpn/core/network_analysis.dart';
@@ -18,6 +19,14 @@ class ControlAnalyzer extends NetworkAnalyzer {
 }
 
 void main() {
+  test('diagnostics distinguish observed failures without guessing filtering', () {
+    expect(classifyAccessFailure(const SocketException('Failed host lookup: fixture')),AccessFailure.dns);
+    expect(classifyAccessFailure(const SocketException('Connection refused')),AccessFailure.socket);
+    expect(classifyAccessFailure(const HandshakeException('certificate fixture')),AccessFailure.tls);
+    expect(classifyAccessFailure(const HttpException('HTTP status')),AccessFailure.http);
+    expect(classifyAccessFailure(TimeoutException('fixture')),AccessFailure.timeout);
+    expect(classifyAccessFailure(StateError('fixture')),AccessFailure.other);
+  });
   const network = NetworkContext(type:'mobile', session:'lte-a', operator:'25002');
   final now = DateTime(2026,11,14);
   NetworkAccessSnapshot snapshot({int? external, int? domestic = 40}) =>
@@ -73,6 +82,9 @@ void main() {
     expect(result.possibleRestrictions,isTrue);
     expect(result.results['yandex.ru'],37);
     expect(result.results['www.gstatic.com'],isNull);
+    expect(result.failures['www.gstatic.com'],AccessFailure.timeout);
+    expect(result.report,contains('таймаут'));
+    expect(result.report,isNot(contains('TimeoutException')));
     monitor.cancel();
   });
 

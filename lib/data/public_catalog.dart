@@ -17,7 +17,32 @@ class PublicCatalogResult {
 }
 
 class PublicCatalog {
-  PublicCatalog({Future<PublicCatalogResult> Function()? refresh}) : _refreshOverride = refresh;
+  PublicCatalog({Future<PublicCatalogResult> Function()? refresh,
+    Future<PublicCatalogResult> Function()? recoveryRefresh})
+      : _refreshOverride = refresh, _recoveryRefreshOverride = recoveryRefresh;
+  static final shared = PublicCatalog();
+  static const recoverySource = 'igareck RU Mobile whitelist';
+  static const recoveryAsset = 'assets/public-recovery.txt';
+  static const recoveryUrl = 'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt';
+  final Future<PublicCatalogResult> Function()? _recoveryRefreshOverride;
+  Future<void>? _pendingRecovery;
+  DateTime? _recoveryAttempt;
+  /// Refresh the small recovery feed in the background, never in the search path.
+  Future<void> refreshRecovery() {
+    if (_pendingRecovery != null) return _pendingRecovery!;
+    final age = _recoveryAttempt == null ? null : DateTime.now().difference(_recoveryAttempt!);
+    if (age != null && !age.isNegative && age < const Duration(minutes:30)) return Future.value();
+    _recoveryAttempt = DateTime.now();
+    return _pendingRecovery = (() async {
+      final fresh = await (_recoveryRefreshOverride?.call() ??
+          _loadSource(recoveryUrl,recoveryAsset,recoverySource,'14.11.2026'));
+      if (fresh.servers.isEmpty) return;
+      final previous = await local();
+      _recent = PublicCatalogResult(diverse([...fresh.servers,...previous.servers]),
+        fresh.bundled || previous.bundled, fresh.skipped + previous.skipped,
+        status:'${fresh.status}\n${previous.status}');
+    })().whenComplete(() { _pendingRecovery = null; });
+  }
   final Future<PublicCatalogResult> Function()? _refreshOverride;
   static const _cache = MethodChannel('quietvpn/catalog-cache');
   static const source = 'Au1rxx/free-vpn-subscriptions';
@@ -118,7 +143,7 @@ class PublicCatalog {
   Future<PublicCatalogResult> local() async {
     if (_recent != null) return _recent!;
     final result = <VpnServer>[];
-    for (final name in ['igareck RU Mobile-150', 'igareck RU VLESS', 'igareck RU Shadowsocks',
+    for (final name in [recoverySource, 'igareck RU Mobile-150', 'igareck RU VLESS', 'igareck RU Shadowsocks',
       '0xRadikal/Free-v2ray-Configs verified', source, 'NiREvil/vless',
       ...additionalSources.keys]) {
       try {
@@ -130,14 +155,15 @@ class PublicCatalog {
         }
       } catch (_) { }
     }
-    for (final asset in ['assets/public-proxies.txt', 'assets/public-wireguard.txt']) {
-      try { result.addAll(parse(await rootBundle.loadString(asset), bundled: true, sourceName: asset).servers); }
+    for (final asset in [recoveryAsset, 'assets/public-proxies.txt', 'assets/public-wireguard.txt']) {
+      try { result.addAll(parse(await rootBundle.loadString(asset), bundled: true, sourceName: asset == recoveryAsset ? recoverySource : asset).servers); }
       catch (_) { }
     }
     return PublicCatalogResult(diverse(result), true, 0, status: 'Локальные снимки и встроенная база; без ожидания загрузки');
   }
   Future<PublicCatalogResult> _refresh() async {
     final parts = await Future.wait([
+      _loadSource(recoveryUrl,recoveryAsset,recoverySource,'14.11.2026'),
       _loadSource('https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS_mobile.txt',
         null, 'igareck RU Mobile-150', ''),
       _loadSource('https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt',

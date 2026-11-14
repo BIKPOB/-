@@ -5,6 +5,41 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:quiet_vpn/data/public_catalog.dart';
 const uuid = '12345678-1234-1234-1234-123456789abc';
 void main() {
+  test('bundled recovery feed retains only valid supported candidates, never ping proofs', () {
+    final text=File(PublicCatalog.recoveryAsset).readAsStringSync();
+    final catalog=PublicCatalog.parse(text,sourceName:PublicCatalog.recoverySource);
+    expect(catalog.servers,isNotEmpty);
+    expect(catalog.servers.every((s)=>s.protocol=='vless'),isTrue);
+    expect(catalog.servers.every((s)=>s.source==PublicCatalog.recoverySource),isTrue);
+    expect(catalog.servers.every((s)=>s.profile.contains('security=reality') || s.profile.contains('security=tls')),isTrue);
+    // ignore: avoid_print
+    print('Bundled recovery VLESS candidates: ${catalog.servers.length}');
+  });
+  test('recovery refresh merges with shared local catalog without blocking local search', () async {
+    final original=PublicCatalog.parse('vless://$uuid@old.example.com:443',sourceName:'old');
+    final fresh=PublicCatalog.parse('vless://$uuid@fresh.example.com:443',sourceName:PublicCatalog.recoverySource);
+    final gate=Completer<PublicCatalogResult>();
+    var calls=0;
+    final catalog=PublicCatalog(refresh:()async=>original,recoveryRefresh:(){calls++;return gate.future;});
+    await catalog.load();
+    final first=catalog.refreshRecovery(),second=catalog.refreshRecovery();
+    expect((await catalog.local()).servers.single.host,'old.example.com');
+    expect(calls,1);
+    gate.complete(fresh);
+    await first;await second;
+    final merged=await catalog.local();
+    expect(merged.servers.map((s)=>s.host),containsAll(['old.example.com','fresh.example.com']));
+    await catalog.refreshRecovery();
+    expect(calls,1);
+  });
+  test('failed recovery download preserves an existing local catalog', () async {
+    final original=PublicCatalog.parse('vless://$uuid@old.example.com:443');
+    final catalog=PublicCatalog(refresh:()async=>original,
+      recoveryRefresh:()async=>throw const SocketException('blocked source'));
+    await catalog.load();
+    await expectLater(catalog.refreshRecovery(),throwsA(isA<SocketException>()));
+    expect((await catalog.local()).servers.single.host,'old.example.com');
+  });
   test('additional sources are protocol-scoped, size-bounded and cacheable', () {
     final names=PublicCatalog.additionalSources.keys.toList();
     expect(names,contains('vair/VLESS alive'));
