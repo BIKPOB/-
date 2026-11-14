@@ -684,7 +684,9 @@ void main() {
       autoMonitor:ServerMonitor(probe:(_)async=>const HealthResult(Reachability.reachable,1)));
     try {
       await vm.initialize();await vm.autoConnect(deep:true);
-      expect(engine.connects,26);expect(engine.chosen.toSet().length,26);
+      // After 24 failures recovery preserves the first working tunnel.
+      expect(engine.connects,25);expect(engine.chosen.toSet().length,25);
+      expect(vm.autoStatus,contains('Связь восстановлена'));
       expect(vm.connectionVerified,true);
       expect(vm.autoAttemptReports.join('\n'),contains('Раунд 4/4'));
       await vm.disconnect();

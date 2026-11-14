@@ -12,5 +12,11 @@ Future<void> main() async {
     if ((result['delay'] as int) < 0 || (result['bytesPerSecond'] as int? ?? 0) <= 0) {
       throw StateError('Bound DNS/HTTPS/download failed');
     }
+    final quick = await probe.measure(address,quick:true);
+    stdout.writeln(quick['detail']);
+    if ((quick['delay'] as num? ?? -1) < 0 || quick['httpsVerified'] != true ||
+        quick['latencyMs'] == null || quick['bytesPerSecond'] != null || quick['quality'] != false) {
+      throw StateError('Bound quick HTTPS confirmation failed or invented speed');
+    }
   } finally { probe.cancel(); }
 }

@@ -652,8 +652,8 @@ class VpnViewModel extends ChangeNotifier {
           (_searchAccess?.fresh(context,DateTime.now()) == true &&
               _searchAccess!.domestic > 0 && _searchAccess!.external == 0) ||
           (deep && _searchVisited.length >= 8);
-      if (engine is QuickProbeSupport) {
-        (engine as QuickProbeSupport).setQuickProbe(_searchRecovery || !deep);
+      if (deep && _searchRecovery && engine is QuickProbeSupport) {
+        (engine as QuickProbeSupport).setQuickProbe(true);
       }
       if (_searchRecovery) {
         autoAttemptReports.add('Режим восстановления: разнообразные адреса и транспорты, '
