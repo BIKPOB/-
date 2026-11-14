@@ -6,7 +6,8 @@ import 'dart:io';
 class CatalogDownload {
   static List<String> addresses(String original) {
     const prefix='https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/';
-    if (!original.startsWith(prefix)) return [original];
+    final uri=Uri.tryParse(original);
+    if (!original.startsWith(prefix) || uri == null || uri.hasQuery || uri.hasFragment) return [original];
     final candidates=[original.replaceFirst('raw.githubusercontent.com','raw.githack.com'),original];
     if (original == '${prefix}Vless-Reality-White-Lists-Rus-Mobile.txt') {
       // Exact public file and publisher-documented mirror only. Never forward

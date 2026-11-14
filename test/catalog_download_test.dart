@@ -12,7 +12,7 @@ void main() {
     expect(mirror.host,'translate.yandex.ru');
     expect(mirror.queryParameters['url'],
       'https://bitbucket.org/igareck/vpn-configs-for-russia/raw/main/Vless-Reality-White-Lists-Rus-Mobile.txt');
-    expect(CatalogDownload.addresses('$url?token=private').length,2);
+    expect(CatalogDownload.addresses('$url?token=private'),['$url?token=private']);
     expect(CatalogDownload.addresses('https://private.example/sub?token=private').length,1);
   });
   const profile = 'vless://12345678-1234-1234-1234-123456789abc@8.8.8.8:443';

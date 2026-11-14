@@ -38,7 +38,10 @@ class PublicCatalog {
           _loadSource(recoveryUrl,recoveryAsset,recoverySource,'14.11.2026'));
       if (fresh.servers.isEmpty) return;
       final previous = await local();
-      _recent = PublicCatalogResult(diverse([...fresh.servers,...previous.servers]),
+      // Do not replace newer memory data with a bundled fallback after a failed cache write.
+      if (fresh.bundled && previous.servers.any((s)=>s.source==recoverySource)) return;
+      _recent = PublicCatalogResult(diverse([...fresh.servers,
+          ...previous.servers.where((s)=>s.source!=recoverySource)]),
         fresh.bundled || previous.bundled, fresh.skipped + previous.skipped,
         status:'${fresh.status}\n${previous.status}');
     })().whenComplete(() { _pendingRecovery = null; });

@@ -32,6 +32,16 @@ void main() {
     await catalog.refreshRecovery();
     expect(calls,1);
   });
+  test('valid feed updates replace retired recovery entries without removing other sources', () async {
+    final old=PublicCatalog.parse('vless://$uuid@retired.example.com:443',sourceName:PublicCatalog.recoverySource);
+    final other=PublicCatalog.parse('vless://$uuid@other.example.com:443',sourceName:'other');
+    final fresh=PublicCatalog.parse('vless://$uuid@new.example.com:443',sourceName:PublicCatalog.recoverySource);
+    final catalog=PublicCatalog(
+      refresh:()async=>PublicCatalogResult([...old.servers,...other.servers],false,0),
+      recoveryRefresh:()async=>fresh);
+    await catalog.load();await catalog.refreshRecovery();
+    expect((await catalog.local()).servers.map((s)=>s.host),['new.example.com','other.example.com']);
+  });
   test('failed recovery download preserves an existing local catalog', () async {
     final original=PublicCatalog.parse('vless://$uuid@old.example.com:443');
     final catalog=PublicCatalog(refresh:()async=>original,
