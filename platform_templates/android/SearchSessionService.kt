@@ -70,7 +70,6 @@ class SearchSessionService : Service() {
             .setSmallIcon(R.drawable.ic_stat_quiet)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Остановить", stopPending)
             .setContentTitle("Quiet VPN · ИИ-подбор")
-            .setContentText("Поиск серверов продолжается при выключенном экране")
             .setContentIntent(openApp)
             .setOngoing(true)
             .build()
