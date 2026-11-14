@@ -1,15 +1,33 @@
 /// A transient snapshot. Android's link estimates are not measured VPN speed.
 class NetworkContext {
   const NetworkContext({this.type = 'other', this.session = '', this.historyKey, this.signal, this.linkMbps,
-    this.ambiguous = false, this.vpnPresent = false, this.ownVpn = false, this.foreignVpn, this.extended = false, this.phoneGranted = false, this.wifiMhz, this.radio, this.mobileSignal, this.operator, this.downKbps, this.upKbps, this.metered, this.roaming, this.validated});
+    this.ambiguous = false, this.vpnPresent = false, this.ownVpn = false, this.foreignVpn, this.extended = false, this.phoneGranted = false, this.wifiMhz, this.radio, this.mobileSignal, this.operator, this.operatorName, this.simOperator, this.simOperatorName, this.operatorSource, this.downKbps, this.upKbps, this.metered, this.roaming, this.validated});
   final String type, session;
   final String? historyKey;
   final bool ambiguous, vpnPresent, extended, phoneGranted, ownVpn;
   final bool? foreignVpn;
   bool get hasForeignVpn => foreignVpn ?? (vpnPresent && !ownVpn);
   final int? wifiMhz, radio, mobileSignal;
-  final String? operator;
-  String get environmentKey => '$type|${operator ?? "?"}|${radio ?? 0}|${wifiBand ?? 0}${(historyKey ?? session).isEmpty ? '' : '|${historyKey ?? session}'}';
+  final String? operator, operatorName, simOperator, simOperatorName, operatorSource;
+  String? get mobileOperator => type == 'mobile' && !ambiguous &&
+      operator != null && RegExp(r'^[0-9]{5,6}$').hasMatch(operator!) ? operator : null;
+  // The registered network and SIM provider can differ (roaming / MVNO).
+  // Never pool unknown operators across unrelated sessions.
+  String get mobileLearningScope => mobileOperator == null
+      ? 'mobile|unknown|${historyKey ?? session}'
+      : 'mobile|$mobileOperator|${simOperator ?? "?"}|${roaming == true ? "roaming" : roaming == false ? "home" : "?"}';
+  static String _carrierName(String? name, String fallback) {
+    final value = name?.replaceAll(RegExp(r'[\x00-\x1f\x7f]'), '').trim() ?? '';
+    final normalized = value.toLowerCase().replaceAll(RegExp(r'[\s_-]'), '');
+    if (['beeline', 'билайн'].contains(normalized)) return 'Билайн';
+    if (['mts', 'мтс', 'mtsrus', 'мтсrus'].contains(normalized)) return 'МТС';
+    if (['megafon', 'мегафон'].contains(normalized)) return 'МегаФон';
+    if (['t2', 'т2', 'tele2', 'теле2'].contains(normalized)) return 'T2';
+    return value.isEmpty ? fallback : value.substring(0, value.length > 64 ? 64 : value.length);
+  }
+  String get carrierLabel => mobileOperator == null ? 'оператор не определён'
+      : _carrierName(operatorName, mobileOperator!);
+  String get environmentKey => '$type|${type == "mobile" ? mobileOperator ?? "?" : "?"}${type == "mobile" && simOperator != null ? "/$simOperator" : ""}|${radio ?? 0}|${wifiBand ?? 0}${(historyKey ?? session).isEmpty ? '' : '|${historyKey ?? session}'}';
   int? get wifiBand => wifiMhz == null ? null : wifiMhz! >= 5925 ? 6 : wifiMhz! >= 4900 ? 5 : 2;
   String get radioLabel => radio == 20 ? '5G NR' : radio == 13 ? 'LTE' :
     [3, 5, 6, 8, 9, 10, 12, 14, 15].contains(radio) ? '3G' :
@@ -19,6 +37,8 @@ class NetworkContext {
   factory NetworkContext.fromMap(Map<dynamic, dynamic> m) => NetworkContext(
     historyKey: m['historyKey'] as String?, extended: m['extended'] == true, phoneGranted: m['phoneGranted'] == true,
     wifiMhz: m['wifiMhz'] as int?, radio: m['radio'] as int?, mobileSignal: m['mobileSignal'] as int?, operator: m['operator'] as String?,
+    operatorName: m['operatorName'] as String?, simOperator: m['simOperator'] as String?,
+    simOperatorName: m['simOperatorName'] as String?, operatorSource: m['operatorSource'] as String?,
     linkMbps: (m['linkMbps'] as num?)?.toInt(),
     vpnPresent: m['vpnPresent'] == true, ownVpn: m['ownVpn'] == true, foreignVpn: m['foreignVpn'] as bool?, ambiguous: m['ambiguous'] == true, type: m['type'] as String? ?? 'other', session: m['session'] as String? ?? '',
     signal: m['signal'] as int?, downKbps: m['downKbps'] as int?, upKbps: m['upKbps'] as int?,
@@ -34,8 +54,11 @@ class NetworkContext {
     radio == 20 ? 1 : radio == 13 ? .7 : radio == null ? 0 : .3,
     mobileSignal == null ? 0 : (mobileSignal! / 4).clamp(0, 1).toDouble()];
   String get label => ambiguous ? 'Базовая сеть VPN не определена однозначно' : '${type == 'wifi' ? 'Wi-Fi' : type == 'mobile' ? 'Мобильная сеть' : type == 'offline' ? 'Нет сети' : type == 'ethernet' ? 'Ethernet' : 'Другая сеть'}'
+    '${type == 'mobile' ? ' · $carrierLabel' : ''}'
+    '${type == 'mobile' && simOperator != null && simOperator != mobileOperator ? ' · SIM ${_carrierName(simOperatorName, simOperator!)}' : ''}'
     '${type == 'ethernet' && linkMbps != null ? ' · линк $linkMbps Мбит/с (не скорость интернета)' : ''}'
     '${type == 'wifi' && extended ? ' · ${wifiBand == null ? 'диапазон недоступен' : '${wifiBand == 2 ? '2,4' : wifiBand} ГГц'}' : ''}'
     '${type == 'mobile' && extended ? ' · $radioLabel${phoneGranted ? '' : ' (нет разрешения)'}' : ''}'
     '${signal == null ? '' : ' · сигнал $signal'}${metered == true ? ' · лимитный трафик' : ''}${roaming == true ? ' · роуминг' : ''}';
 }
+

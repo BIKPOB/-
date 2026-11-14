@@ -49,6 +49,7 @@ object NetworkBaselineStore {
         val network = cm.activeNetwork ?: return
         val caps = cm.getNetworkCapabilities(network) ?: return
         if (!caps.hasCapability(NC.NET_CAPABILITY_VALIDATED) || caps.hasTransport(NC.TRANSPORT_VPN)) return
+        val session = NetworkSnapshot.session(c, network)
         val limited = !caps.hasCapability(NC.NET_CAPABILITY_NOT_METERED)
         if (android.os.Build.VERSION.SDK_INT >= 28 && !caps.hasCapability(NC.NET_CAPABILITY_NOT_ROAMING)) return
         val p = prefs(c)
@@ -85,12 +86,12 @@ object NetworkBaselineStore {
                 }
             }
             val elapsed = SystemClock.elapsedRealtime() - transfer
-            check(bytes == size && elapsed >= 20 && token == epoch && cm.activeNetwork == network)
+            check(bytes == size && elapsed >= 20 && token == epoch && cm.activeNetwork == network && session == NetworkSnapshot.session(c, network))
             val type = when { caps.hasTransport(NC.TRANSPORT_WIFI) -> "wifi"
                 caps.hasTransport(NC.TRANSPORT_CELLULAR) -> "mobile"
                 caps.hasTransport(NC.TRANSPORT_ETHERNET) -> "ethernet"
                 else -> "other" }
-            val result = JSONObject().put("session", NetworkSnapshot.session(c, network)).put("type", type)
+            val result = JSONObject().put("session", session).put("type", type)
                 .put("time", now).put("bytesPerSecond", bytes * 1000L / elapsed).put("latencyMs", latency)
             p.edit().putString("sample", result.toString())
                 .putInt("sampleBoot", android.provider.Settings.Global.getInt(c.contentResolver, android.provider.Settings.Global.BOOT_COUNT, -1)).commit()
@@ -109,3 +110,4 @@ class NetworkBaselineJob : JobService() {
     }
     override fun onStopJob(params: JobParameters): Boolean { stopped.set(true); NetworkBaselineStore.cancel(); return true }
 }
+

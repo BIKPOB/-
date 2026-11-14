@@ -1368,7 +1368,9 @@ class VpnViewModel extends ChangeNotifier {
           if (autoSelecting) unawaited(cancelAutoSelection());
         });
       }
-      await engine.initialize(); ready = true;
+      await engine.initialize();
+      try { networkContext = await _network(); } catch (_) { /* Metadata is optional. */ }
+      ready = true;
     } catch (_) { message = 'Не удалось инициализировать VPN или защищённое хранилище. На Windows проверьте установку и запуск от администратора.'; state = ConnectionState.error; }
     if (servers.isNotEmpty) selectedId = servers.first.id;
     _scheduleProbe(immediate: true); _scheduleBackgroundPreflight(immediate: true); _scheduleBaseline(immediate: true); _scheduleHealthStatus(); _notify();

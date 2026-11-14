@@ -23,7 +23,7 @@ class SourceReliability {
         break;
       }
     }
-    final scope = network.type == 'mobile' ? 'mobile'
+    final scope = network.type == 'mobile' ? network.mobileLearningScope
         : network.type == 'wifi' ? 'wifi'
         : network.type == 'ethernet' ? 'ethernet' : 'other';
     return sha256.convert(utf8.encode(
@@ -148,3 +148,4 @@ class ContextualSearchPlanner {
     return result;
   }
 }
+
