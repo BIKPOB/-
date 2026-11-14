@@ -4,10 +4,20 @@ import 'dart:io';
 
 /// Race only publisher-listed mirrors; an HTTP 200 is not enough to win.
 class CatalogDownload {
-  static List<String> addresses(String original) => original.startsWith(
-    'https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/')
-      ? [original.replaceFirst('raw.githubusercontent.com', 'raw.githack.com'), original]
-      : [original];
+  static List<String> addresses(String original) {
+    const prefix='https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/';
+    if (!original.startsWith(prefix)) return [original];
+    final candidates=[original.replaceFirst('raw.githubusercontent.com','raw.githack.com'),original];
+    if (original == '${prefix}Vless-Reality-White-Lists-Rus-Mobile.txt') {
+      // Exact public file and publisher-documented mirror only. Never forward
+      // imported subscription URLs, private tokens, or arbitrary destinations.
+      candidates.add(Uri.https('translate.yandex.ru','/translate',{
+        'url':'https://bitbucket.org/igareck/vpn-configs-for-russia/raw/main/Vless-Reality-White-Lists-Rus-Mobile.txt',
+        'lang':'de-de',
+      }).toString());
+    }
+    return candidates;
+  }
 
   static Future<({String text, String address})> firstValid(List<String> addresses,
       void Function(String) validate, {required Future<String> Function(String) fetch}) {

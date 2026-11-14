@@ -4,6 +4,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:quiet_vpn/data/catalog_download.dart';
 import 'package:quiet_vpn/data/public_catalog.dart';
 void main() {
+  test('recovery mirror is constrained to the exact public publisher file', () {
+    const url='https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/Vless-Reality-White-Lists-Rus-Mobile.txt';
+    final addresses=CatalogDownload.addresses(url);
+    expect(addresses.length,3);
+    final mirror=Uri.parse(addresses.last);
+    expect(mirror.host,'translate.yandex.ru');
+    expect(mirror.queryParameters['url'],
+      'https://bitbucket.org/igareck/vpn-configs-for-russia/raw/main/Vless-Reality-White-Lists-Rus-Mobile.txt');
+    expect(CatalogDownload.addresses('$url?token=private').length,2);
+    expect(CatalogDownload.addresses('https://private.example/sub?token=private').length,1);
+  });
   const profile = 'vless://12345678-1234-1234-1234-123456789abc@8.8.8.8:443';
   void validate(String text) { PublicCatalog.parse(text); }
   test('blocked GitHub does not prevent publisher mirror from loading', () async {
