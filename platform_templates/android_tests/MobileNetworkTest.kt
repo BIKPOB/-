@@ -1,8 +1,6 @@
 package app.quietvpn.quiet_vpn
 
 import android.Manifest
-import android.app.Application
-import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities as NC
 import android.net.NetworkInfo
@@ -33,7 +31,7 @@ class MobileNetworkTest {
         assertEquals(1, MobileNetwork.chooseSubscription(null, -1, 1, false))
     }
     @Test fun basicSnapshotReadsActiveCarrierWithoutExtendedModeOrPhonePermission() {
-        val app = RuntimeEnvironment.getApplication<Application>()
+        val app = RuntimeEnvironment.getApplication()
         shadowOf(app).denyPermissions(Manifest.permission.READ_PHONE_STATE)
         val tm = app.getSystemService(TelephonyManager::class.java)
         ShadowSubscriptionManager.setDefaultDataSubscriptionId(1)
