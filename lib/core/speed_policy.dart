@@ -38,8 +38,8 @@ class SpeedPolicy {
     }
     final sorted = [...samples]..sort();
     // Restricted networks can fluctuate heavily; a burst followed by near-zero
-    // traffic still fails the minimum 5% consistency check.
-    return sorted.last > 0 && sorted.first / sorted.last >= .05;
+    // traffic still fails the minimum 0.1% consistency check.
+    return sorted.last > 0 && sorted.first / sorted.last >= .001;
   }
 
   static bool sampleComplete(int bytes, int elapsedMs) =>
