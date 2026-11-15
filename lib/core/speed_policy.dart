@@ -1,3 +1,5 @@
+import 'dart:math';
+
 /// Product threshold for desktop auto-selection, not a video-service guarantee.
 class SpeedPolicy {
   static const maximumTarget = 1000000;
