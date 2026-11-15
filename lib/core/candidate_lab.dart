@@ -208,7 +208,7 @@ class CandidateLab {
             if(live()) {
               final value=CandidateResult(e.server,e.latency,speeds,error);
               record(value);
-              if(value.usable && (deep ? SpeedPolicy.stableSamples(value.speeds,target) : value.speed>=target)) qualified++;
+              if(value.usable && (deep ? SpeedPolicy.deepProgressiveSamples(value.speeds,target) : value.speed>=target)) qualified++;
             }
           }
         } finally {if (recovery) _probe.cancel(); await _stop();}
